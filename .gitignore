@@ -1,0 +1,5 @@
+node_modules/
+.env
+eleva.db-wal
+eleva.db-shm
+*.log
