@@ -54,6 +54,8 @@ git push -u origin main
 
 Migrasi ke Postgres (atau database managed lain) baru dibutuhkan kalau produk ini nanti multi-user. Untuk single-user seperti sekarang, SQLite + persistent disk di salah satu hosting di atas sudah cukup.
 
+Shared/Business/Cloud hosting (mis. Hostinger) juga bisa dipakai selama support Node.js App dan disk-nya persisten — lihat `DEPLOY_HOSTINGER.md` untuk contoh konkret deploy ke subdomain di Hostinger, termasuk cara verifikasi bahwa `eleva.db` benar-benar selamat lintas redeploy sebelum dipakai serius.
+
 ## Belum ada (sengaja, biar essential)
 
 - Auth / multi-user
