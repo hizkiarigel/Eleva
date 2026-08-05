@@ -3,6 +3,7 @@ const express = require("express");
 const path = require("path");
 const db = require("./db");
 const ai = require("./claude");
+const safety = require("./safety");
 
 const app = express();
 app.use(express.json());
@@ -100,17 +101,37 @@ app.post("/api/reflection", async (req, res) => {
     const day = db.getDay(tk);
     if (!state || !day) return res.status(400).json({ error: "Belum ada quest hari ini." });
 
-    const eligible = (status === "done" || status === "partial") && wordCount(text) >= 12;
-    const ctx = {
-      profile: { name: state.profile.name, situation: state.profile.situation },
-      quest: day.quest,
-      status,
-      reflectionText: (text || "").trim(),
-      stats: state.stats,
-      growthSessions: state.growthSessions,
-    };
-    const result = await ai.processReflection(ctx);
-    const deltas = eligible ? (result.statDeltas || {}) : {};
+    const trimmedText = (text || "").trim();
+    const inCrisis = safety.detectCrisis(trimmedText);
+
+    let deltas = {};
+    let mentorReply;
+    let chapterAdvance = false;
+    let newChapterTitle = null;
+
+    if (inCrisis) {
+      // Defense in depth: skip the AI mentor entirely and reply with a fixed
+      // message. Independent of the crisis instruction in MENTOR_SYSTEM
+      // (server/claude.js) — that stays in place too, this doesn't replace it.
+      mentorReply = safety.CRISIS_RESOURCE_MESSAGE;
+    } else {
+      const eligible = (status === "done" || status === "partial") && wordCount(text) >= 12;
+      const ctx = {
+        profile: { name: state.profile.name, situation: state.profile.situation },
+        quest: day.quest,
+        status,
+        reflectionText: trimmedText,
+        stats: state.stats,
+        growthSessions: state.growthSessions,
+      };
+      const result = await ai.processReflection(ctx);
+      deltas = eligible ? (result.statDeltas || {}) : {};
+      mentorReply = eligible
+        ? result.mentorReply
+        : "Coba ceritain lebih banyak apa yang sebenarnya terjadi — segelintir kata belum cukup buat pertumbuhan kelihatan nyata (dan itu memang sengaja begitu).";
+      chapterAdvance = result.chapterAdvance;
+      newChapterTitle = result.newChapterTitle;
+    }
 
     const newStats = { ...state.stats };
     Object.entries(deltas).forEach(([k, v]) => {
@@ -118,23 +139,21 @@ app.post("/api/reflection", async (req, res) => {
         newStats[k] = Math.max(0, Math.min(100, newStats[k] + Math.max(0, Math.min(5, Math.round(v)))));
       }
     });
-    const newGrowthSessions = state.growthSessions + (eligible && Object.keys(deltas).length > 0 ? 1 : 0);
-    const allowAdvance = result.chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0;
+    const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+    const allowAdvance = chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0;
 
     const reflection = {
       status,
-      text: (text || "").trim(),
+      text: trimmedText,
       deltas,
-      mentorReply: eligible
-        ? result.mentorReply
-        : "Coba ceritain lebih banyak apa yang sebenarnya terjadi — segelintir kata belum cukup buat pertumbuhan kelihatan nyata (dan itu memang sengaja begitu).",
+      mentorReply,
       timestamp: new Date().toISOString(),
     };
     db.upsertDay(tk, { quest: day.quest, insight: day.insight, reflection });
     db.updateState({
       stats: newStats,
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
-      chapterTitle: allowAdvance && result.newChapterTitle ? result.newChapterTitle : state.chapterTitle,
+      chapterTitle: allowAdvance && newChapterTitle ? newChapterTitle : state.chapterTitle,
       growthSessions: newGrowthSessions,
     });
 
