@@ -8,7 +8,7 @@ AI Character Growth System — AI berperan sebagai mentor yang memberi satu ques
 
 **Perubahan penting dari versi PRD sebelumnya:** produk ini sebelumnya single-user (cuma founder). Sekarang rencananya membuka **beta gratis untuk ~100 member dalam 6 bulan**, monetisasi baru dimulai SETELAH periode beta ini selesai (jadi payment/billing BUKAN scope sesi ini — lihat bagian 7). Tapi begitu ada member selain founder, ini bukan lagi proyek personal — ada orang asing yang akan cerita hal personal (patah hati, ketakutan, dsb) ke AI ini. Tanggung jawabnya beda kelas dari sekadar "aplikasi dipakai sendiri".
 
-First principles yang mengikat semua keputusan teknis (versi lengkap ada di `ELEVA_Constitution_Product_Bible_v1.0.docx` kalau file itu ikut di-attach):
+First principles yang mengikat semua keputusan teknis (versi lengkap ada di `ELEVA_Constitution_Product_Bible_v1.3.docx` kalau file itu ikut di-attach):
 
 - Quest harus personal, bukan checklist generik.
 - **Growth butuh substansi nyata, bukan aktivitas kosong** (Goodhart's Law). Non-negotiable.
@@ -40,8 +40,11 @@ Yang sudah bekerja dan JANGAN diubah logikanya (boleh dipindah lokasinya kalau p
 3. Task 2: Auth + multi-tenant data model + beta gate
 4. Task 3: Crisis safety hardening
 5. Task 4: Privacy notice minimal
+6. Task 5: Pathway di onboarding — **QUEUED, mulai HANYA setelah Task 2 & 3 terverifikasi oleh founder** (bukan cuma "kode sudah ditulis")
 
 **Gate keras: JANGAN buka pendaftaran ke member sungguhan sampai Task 2 dan Task 3 selesai DAN terverifikasi** — bukan cuma "sudah ditulis kodenya", tapi dites nyata: bikin 2 akun berbeda, pastikan data mereka benar-benar terpisah (user A tidak bisa lihat quest/refleksi/stats user B lewat cara apa pun, termasuk lewat manipulasi request langsung ke API).
+
+**Gate kedua, khusus Task 5: JANGAN mulai Task 5 sebelum founder eksplisit bilang Task 2 & 3 sudah diverifikasi.** Kalau status itu belum jelas dari percakapan sejauh ini, tanyakan ke founder dulu sebelum menyentuh kode Task 5 — jangan asumsikan boleh jalan cuma karena PRD-nya sudah ada.
 
 ## 4. Task 0 — Push ke GitHub
 
@@ -108,7 +111,44 @@ Beta member akan cerita hal personal ke AI. Sebelum signup selesai, tampilkan (b
 
 Ini bukan kebijakan privasi hukum yang lengkap — cukup untuk beta terkontrol berbasis kepercayaan. Kebijakan privasi formal jadi task terpisah kalau nanti masuk fase monetisasi.
 
-## 9. Eksplisit DI LUAR scope sesi ini
+## 9. Task 5 — Pathway di onboarding (QUEUED — lihat gate kedua di bagian 3)
+
+**Konteks:** Ada draft PRD alternatif ("Adaptive Onboarding PRD") yang beredar dan sempat dipertimbangkan. Sebagian isinya DITOLAK secara sadar — dicatat di sini supaya tidak salah ke-adopt kalau file itu ikut nyasar ke sesi ini:
+
+- **DITOLAK:** "Identity is discovered, not chosen" — Pathway via AI hypothesis + resonance scoring + auto-activate primary pathway setelah 14 hari observasi diam-diam. Ini menghapus agency pengguna untuk secara sadar memilih identitas yang mau dilatih (termasuk yang berlawanan dari kecenderungan alaminya) — bertentangan langsung dengan FP1 dan dengan keputusan desain di `ELEVA_Constitution_Product_Bible_v1.3.docx` Bab 13.
+- **DITOLAK:** Secondary Trait (dua pathway aktif sekaligus), 14-hari trial wajib sebelum pathway apa pun ditampilkan ke pengguna, Adaptive Questions bercabang berdasarkan Growth Focus. Semua ini terlalu berat untuk scope "essential", dan membuang percuma flow onboarding yang sudah divalidasi manual oleh founder di prototype.
+- **DIADOPSI:** "Private Promise" — satu kalimat reassurance privasi, ditempatkan SEBELUM pertanyaan vulnerable (Situasi/Values/Fear). Ini BUKAN pengganti Task 4 (privacy notice legal/data-handling) — dua-duanya tetap ada, beda fungsi: Private Promise itu emosional/reassurance di awal, Task 4 itu informasi data-handling sebelum signup selesai.
+- **DIADOPSI (sudah tercatat di Bible, bukan tugas baru di sini):** framing "Pathway itu uji coba, bukan komitmen mati" untuk sesi-sesi awal setelah Pathway dipilih.
+
+**Urutan onboarding final (SUDAH divalidasi manual oleh founder di `Eleva_Prototype.jsx` — jangan ubah urutannya tanpa alasan kuat):**
+1. Nama
+2. **BARU:** Private Promise — satu layar singkat: *"Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva."*
+3. Situasi hidup sekarang
+4. Values
+5. Fear
+6. Stats (8 slider, 1-10)
+7. **BARU:** Pathway — pilih satu dari: Builder, Guardian, Explorer, Connector, Seeker, atau Specialist (dengan input teks bebas untuk spesialisasinya). Framing di layar ini: "Sekarang, pilih jalanmu — dari yang barusan kamu ceritain, ini enam arah yang bisa kamu latih sengaja."
+
+**Perubahan schema Postgres** (di atas schema Task 2 yang sudah ada): `character_state` nambah dua kolom — `pathway text`, `pathway_noun text`.
+
+**Perubahan `server/claude.js`:**
+- Prompt AI (system prompt DAN context onboarding/harian) sertakan `pathway` dan `pathwayNoun`.
+- Response JSON `generateQuest` nambah field: `pathwayNoun` (diturunkan SEKALI saat onboarding dari teks Pathway, dipertahankan sama persis setiap hari setelahnya — JANGAN diganti-ganti tiap generate), dan `quest.mode`: `"quest"` atau `"acting"` — AI yang memilih framing mana yang relevan hari itu berdasarkan Pathway + chapter, bukan dua instruksi sekaligus dalam satu hari.
+- **Implementasi lengkap (prompt final, response shape, fallback behavior) sudah ada dan SUDAH DITES di `Eleva_Prototype.jsx` fungsi `generateQuest`/`MENTOR_SYSTEM` — port logic itu apa adanya, jangan re-derive prompt dari nol.**
+
+**Perubahan Dashboard:** tampilkan badge kecil di bawah judul chapter: `{tier} {pathwayNoun}` (contoh: "Practicing Closer"). Tier dihitung dari `growthSessions` yang sudah ada: `["Emerging","Practicing","Reliable","System","Master"][min(4, floor(growthSessions/3))]` — sengaja pakai pembagi 3 (beda dari kenaikan chapter yang pembagi 5), supaya tier kerasa lebih responsif daripada chapter.
+
+**Kartu quest harian:** label berubah jadi "QUEST HARI INI" atau "ACTING METHOD HARI INI" tergantung `quest.mode` dari respons AI.
+
+**Definition of done khusus Task 5:**
+- [ ] Private Promise tampil sebagai layar tersendiri sebelum Situasi/Values/Fear
+- [ ] Pathway step di akhir onboarding (step 7), 6 opsi, Specialist punya input teks bebas
+- [ ] `pathwayNoun` konsisten (tidak berubah-ubah tiap hari) setelah pertama kali di-generate
+- [ ] Dashboard menampilkan tier + pathwayNoun
+- [ ] Kartu quest harian menampilkan mode yang benar sesuai respons AI
+- [ ] Growth-gate 12-kata dan chapter-advance-tiap-5-sesi TIDAK berubah/regresi akibat perubahan ini
+
+## 10. Eksplisit DI LUAR scope sesi ini
 
 - **Payment/billing** (Midtrans/Xendit dsb) — beta ini gratis, monetisasi baru dipikirkan setelah periode beta selesai. Jangan mulai kerjakan ini sekarang.
 - Magic link / OAuth login — email+password dulu cukup.
@@ -119,7 +159,7 @@ Ini bukan kebijakan privasi hukum yang lengkap — cukup untuk beta terkontrol b
 
 Kalau merasa salah satu di atas "sekalian aja dikerjakan", tahan dulu — tanyakan ke pengguna dulu.
 
-## 10. Definition of done untuk sesi ini
+## 11. Definition of done untuk sesi ini (Task 0-4; Task 5 punya DoD sendiri di atas dan statusnya terpisah)
 
 - [ ] Repo ke-push ke `github.com/hizkiarigel/Eleva`, branch `main`
 - [ ] Backup SQLite lama tersimpan aman di luar Railway sebelum migrasi

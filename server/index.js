@@ -85,6 +85,8 @@ app.get("/api/state", requireAuth, async (req, res) => {
     if (!today) {
       const ctx = {
         profile: state.profile,
+        pathway: state.pathway,
+        pathwayNoun: state.pathwayNoun,
         stats: state.stats,
         chapterNumber: state.chapterNumber,
         chapterTitle: state.chapterTitle,
@@ -92,14 +94,13 @@ app.get("/api/state", requireAuth, async (req, res) => {
         today: tk,
       };
       const result = await ai.generateQuest(ctx);
-      if (result.chapterNumber || result.chapterTitle) {
-        await db.updateState(req.userId, {
-          stats: state.stats,
-          chapterNumber: result.chapterNumber || state.chapterNumber,
-          chapterTitle: result.chapterTitle || state.chapterTitle,
-          growthSessions: state.growthSessions,
-        });
-      }
+      await db.updateState(req.userId, {
+        stats: state.stats,
+        chapterNumber: result.chapterNumber || state.chapterNumber,
+        chapterTitle: result.chapterTitle || state.chapterTitle,
+        growthSessions: state.growthSessions,
+        pathwayNoun: state.pathwayNoun || result.pathwayNoun || null,
+      });
       await db.upsertDay(req.userId, tk, { quest: result.quest, insight: result.insight, reflection: null });
       today = await db.getDay(req.userId, tk);
     }
@@ -111,6 +112,7 @@ app.get("/api/state", requireAuth, async (req, res) => {
       chapterNumber: fresh.chapterNumber,
       chapterTitle: fresh.chapterTitle,
       growthSessions: fresh.growthSessions,
+      pathwayNoun: fresh.pathwayNoun,
       today: { date: tk, ...today },
       history: (await db.allHistory(req.userId, tk)).slice(0, 8),
       aiActive: ai.hasKey(),
@@ -124,15 +126,17 @@ app.get("/api/state", requireAuth, async (req, res) => {
 // Create profile + first quest
 app.post("/api/profile", requireAuth, async (req, res) => {
   try {
-    const { name, situation, values, fear, stats: rawStats } = req.body;
+    const { name, situation, values, fear, stats: rawStats, pathway: rawPathway, pathwayCustom } = req.body;
     if (!name || !situation) return res.status(400).json({ error: "Nama dan situasi wajib diisi." });
+
+    const pathway = rawPathway === "Specialist" ? ((pathwayCustom || "").trim() || "Specialist") : rawPathway || null;
 
     const initialStats = {};
     Object.entries(rawStats || {}).forEach(([k, v]) => {
       initialStats[k] = Math.round(Number(v) * 10);
     });
     const profile = { name, situation, values, fear, createdAt: new Date().toISOString() };
-    const ctx = { profile, stats: initialStats, chapterNumber: null, chapterTitle: null, recentDays: [], today: todayKey() };
+    const ctx = { profile, pathway, pathwayNoun: null, stats: initialStats, chapterNumber: null, chapterTitle: null, recentDays: [], today: todayKey() };
     const result = await ai.generateQuest(ctx);
 
     await db.createState(req.userId, {
@@ -140,6 +144,8 @@ app.post("/api/profile", requireAuth, async (req, res) => {
       stats: initialStats,
       chapterNumber: result.chapterNumber || 1,
       chapterTitle: result.chapterTitle || "Mencari Arah",
+      pathway,
+      pathwayNoun: result.pathwayNoun || pathway || null,
     });
     await db.upsertDay(req.userId, todayKey(), { quest: result.quest, insight: result.insight, reflection: null });
 
@@ -213,6 +219,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
       chapterTitle: allowAdvance && newChapterTitle ? newChapterTitle : state.chapterTitle,
       growthSessions: newGrowthSessions,
+      pathwayNoun: state.pathwayNoun,
     });
 
     res.json({ ok: true });

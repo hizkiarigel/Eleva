@@ -64,6 +64,13 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .chapter-header h1 { font-size: 34px; font-weight: 600; margin: 0 0 10px; }
 .chapter-header .rule { width: 46px; height: 2px; background: var(--accent); margin-bottom: 14px; }
 .chapter-header .insight { font-style: italic; color: var(--muted); font-size: 15px; line-height: 1.6; margin: 0; }
+.pathway-badge { font-size: 12px; color: var(--growth); letter-spacing: .5px; margin-bottom: 12px; }
+
+.pathway-option { text-align: left; width: 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
+.pathway-option.active { border-color: var(--accent); background: #e8a33d18; }
+.pathway-option .name { font-weight: 600; font-size: 15px; }
+.pathway-option.active .name { color: var(--accent); }
+.pathway-option .desc { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 
 .quest-card { background: var(--surface2); border: 1px solid var(--hair); border-radius: 12px; padding: 22px; margin-bottom: 28px; position: relative; }
 .quest-card .dot { position: absolute; top: 20px; right: 20px; width: 10px; height: 10px; border-radius: 50%; }

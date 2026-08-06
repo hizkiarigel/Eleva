@@ -43,6 +43,9 @@ async function init() {
       reflection JSONB,
       PRIMARY KEY (user_id, date)
     );
+
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS pathway TEXT;
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS pathway_noun TEXT;
   `);
 }
 
@@ -78,25 +81,31 @@ async function getState(userId) {
     chapterNumber: row.chapter_number,
     chapterTitle: row.chapter_title,
     growthSessions: row.growth_sessions,
+    pathway: row.pathway,
+    pathwayNoun: row.pathway_noun,
   };
 }
 
-async function createState(userId, { profile, stats, chapterNumber, chapterTitle }) {
+async function createState(userId, { profile, stats, chapterNumber, chapterTitle, pathway, pathwayNoun }) {
   await pool.query(
-    `INSERT INTO character_state (user_id, profile, stats, chapter_number, chapter_title, growth_sessions)
-     VALUES ($1, $2, $3, $4, $5, 0)
+    `INSERT INTO character_state (user_id, profile, stats, chapter_number, chapter_title, growth_sessions, pathway, pathway_noun)
+     VALUES ($1, $2, $3, $4, $5, 0, $6, $7)
      ON CONFLICT (user_id) DO UPDATE SET
        profile = EXCLUDED.profile, stats = EXCLUDED.stats,
-       chapter_number = EXCLUDED.chapter_number, chapter_title = EXCLUDED.chapter_title, growth_sessions = 0`,
-    [userId, profile, stats, chapterNumber, chapterTitle]
+       chapter_number = EXCLUDED.chapter_number, chapter_title = EXCLUDED.chapter_title, growth_sessions = 0,
+       pathway = EXCLUDED.pathway, pathway_noun = EXCLUDED.pathway_noun`,
+    [userId, profile, stats, chapterNumber, chapterTitle, pathway || null, pathwayNoun || null]
   );
 }
 
-async function updateState(userId, { stats, chapterNumber, chapterTitle, growthSessions }) {
+// Every field here is written unconditionally, including pathwayNoun - callers
+// must pass the existing value through (e.g. state.pathwayNoun) if unchanged,
+// or it gets cleared.
+async function updateState(userId, { stats, chapterNumber, chapterTitle, growthSessions, pathwayNoun }) {
   await pool.query(
-    `UPDATE character_state SET stats = $2, chapter_number = $3, chapter_title = $4, growth_sessions = $5
+    `UPDATE character_state SET stats = $2, chapter_number = $3, chapter_title = $4, growth_sessions = $5, pathway_noun = $6
      WHERE user_id = $1`,
-    [userId, stats, chapterNumber, chapterTitle, growthSessions]
+    [userId, stats, chapterNumber, chapterTitle, growthSessions, pathwayNoun || null]
   );
 }
 

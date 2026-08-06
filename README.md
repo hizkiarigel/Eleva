@@ -32,6 +32,8 @@ server/
   safety.js   → deteksi frasa krisis, independen dari AI (lihat bagian Prinsip di bawah)
 public/
   index.html, styles.css, app.js  → frontend vanilla JS, termasuk layar auth + privacy notice
+reference/
+  Eleva_Prototype.jsx  → prototype React yang jadi acuan fitur Pathway (bukan bagian dari app produksi)
 ```
 
 ## Auth & multi-tenant
@@ -46,6 +48,12 @@ public/
 - **Growth butuh substansi** (`server/index.js`, `wordCount` gate): refleksi di bawah ~12 kata tidak pernah menaikkan stat, walau quest ditandai selesai. Lihat `ELEVA_Constitution_Product_Bible_v1.0.docx` bab 11 (Goodhart's Law).
 - **Chapter tidak naik karena waktu/EXP**: hanya naik tiap kelipatan 5 sesi growth yang valid, dan hanya kalau AI menilai ada pergeseran pola nyata.
 - **AI mentor, bukan terapis** (`server/claude.js`, system prompt + `server/safety.js`, deteksi server-side): dua lapis. Prompt AI diinstruksikan mengarahkan ke bantuan profesional kalau refleksi menunjukkan tanda krisis. Di atas itu, `POST /api/reflection` juga mengecek `text` terhadap daftar frasa risiko tinggi secara independen dari AI — kalau cocok, AI mentor tidak dipanggil sama sekali dan `mentorReply` diganti kontak Layanan Sejiwa/Healing119 (119 ext. 8 / www.healing119.id), tanpa growth untuk sesi itu. Lihat bab 12 di dokumen bible untuk kenapa ini penting sekarang sudah ada user lain selain founder.
+
+## Pathway (onboarding)
+
+Step terakhir onboarding: pilih 1 dari 6 arah pertumbuhan (Builder, Guardian, Explorer, Connector, Seeker, atau Specialist dengan spesialisasi bebas). AI menurunkan `pathwayNoun` (satu kata benda peran, mis. "Closer" untuk pathway "Sales") sekali di hari pertama dan mempertahankannya persis sama setiap hari setelahnya — ditampilkan sebagai badge `{tier} {pathwayNoun}` di dashboard (`tier` dari `growthSessions`, pembagi 3 — beda dari kenaikan chapter yang pembagi 5). AI juga memilih tiap hari apakah instruksinya berbentuk "Quest" (aksi konkret) atau "Acting Method" (praktik cara bersikap) berdasarkan Pathway & chapter — dua framing ini tidak pernah muncul bersamaan.
+
+Akun yang sudah ada sebelum fitur ini (dibuat sebelum kolom `pathway`/`pathway_noun` ditambahkan) tidak retroaktif diminta pilih Pathway — badge-nya otomatis tidak tampil, instruksinya selalu mode "Quest". Bukan bug, sengaja tidak dikerjakan (di luar scope tanpa diminta).
 
 ## Deployment
 

@@ -3,10 +3,24 @@ const STAT_ORDER = [
   ["emotional", "Emotional Stability"], ["explorer", "Explorer"], ["social", "Social"], ["purpose", "Purpose"],
 ];
 
+const PATHWAY_PRESETS = [
+  { key: "Builder", desc: "Membangun sesuatu dari nol, butuh konsistensi untuk menyelesaikannya." },
+  { key: "Guardian", desc: "Belajar stabil secara emosi, jadi sandaran diri sendiri dulu." },
+  { key: "Explorer", desc: "Keluar dari rutinitas lama, mencoba arah yang belum pernah dijalani." },
+  { key: "Connector", desc: "Membangun ulang relasi/koneksi sosial yang sempat renggang." },
+  { key: "Seeker", desc: "Belum tahu arah pastinya, dan sedang aktif mencari." },
+  { key: "Specialist", desc: "Nggak cocok ke lima di atas — tulis sendiri spesialisasimu." },
+];
+
+const MATURITY_TIERS = ["Emerging", "Practicing", "Reliable", "System", "Master"];
+function maturityTier(growthSessions) {
+  return MATURITY_TIERS[Math.min(MATURITY_TIERS.length - 1, Math.floor((growthSessions || 0) / 3))];
+}
+
 const root = document.getElementById("root");
 
 const onboardForm = {
-  name: "", situation: "", values: "", fear: "",
+  name: "", situation: "", values: "", fear: "", pathway: null, pathwayCustom: "",
   stats: { body: 5, mind: 5, career: 5, finance: 5, emotional: 5, explorer: 5, social: 5, purpose: 5 },
 };
 let onboardStep = 0;
@@ -131,15 +145,20 @@ function renderAuth() {
 
 const ONBOARD_STEPS = [
   { key: "name", q: "Siapa namamu?", type: "text", placeholder: "Nama panggilan" },
+  { type: "promise", q: "Sebelum lanjut...", promiseText: "Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva." },
   { key: "situation", q: "Lagi di fase hidup yang gimana sekarang?", sub: "Nggak perlu rapi. Tulis aja apa adanya.", type: "textarea", placeholder: "Ceritakan singkat kondisimu sekarang..." },
   { key: "values", q: "Apa yang paling kamu pegang teguh sekarang?", sub: "Nilai, prinsip, atau hal yang penting buat kamu.", type: "textarea", placeholder: "Misalnya: kejujuran, keluarga, kebebasan..." },
   { key: "fear", q: "Apa yang paling kamu hindari atau takutkan sekarang?", type: "textarea", placeholder: "Boleh jujur, ini cuma buat kamu dan mentor AI-mu." },
   { key: "stats", q: "Nilai dirimu sekarang, jujur aja", sub: "1 = jauh dari yang kamu mau, 10 = sudah sesuai.", type: "stats" },
+  { key: "pathway", q: "Sekarang, pilih jalanmu", sub: "Dari yang barusan kamu ceritain — ini enam arah yang bisa kamu latih sengaja, mulai sekarang. Bisa diganti kapan aja nanti.", type: "pathway" },
 ];
 
 function isStepValid(step) {
   const s = ONBOARD_STEPS[step];
-  if (s.type === "stats") return true;
+  if (s.type === "stats" || s.type === "promise") return true;
+  if (s.type === "pathway") {
+    return Boolean(onboardForm.pathway) && (onboardForm.pathway !== "Specialist" || onboardForm.pathwayCustom.trim().length > 1);
+  }
   return (onboardForm[s.key] || "").trim().length > (s.key === "name" ? 0 : 2);
 }
 
@@ -158,6 +177,22 @@ function renderOnboarding() {
         <div class="row-top"><span class="label">${label}</span><span class="val" id="val-${k}">${onboardForm.stats[k]}</span></div>
         <input type="range" min="1" max="10" value="${onboardForm.stats[k]}" data-stat="${k}" />
       </div>`).join("");
+  } else if (step.type === "promise") {
+    bodyHTML = `<p class="fr" style="font-size:17px;line-height:1.6;font-style:italic">${esc(step.promiseText)}</p>`;
+  } else if (step.type === "pathway") {
+    bodyHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${PATHWAY_PRESETS.map((pw) => `
+          <button class="pathway-option ${onboardForm.pathway === pw.key ? "active" : ""}" data-pathway="${pw.key}">
+            <div class="fr name">${pw.key}</div>
+            <div class="desc">${esc(pw.desc)}</div>
+          </button>`).join("")}
+      </div>
+      ${onboardForm.pathway === "Specialist" ? `
+        <div class="field" style="margin-top:12px">
+          <input type="text" id="pathwayCustom" value="${esc(onboardForm.pathwayCustom)}" placeholder="Spesialisasi kamu apa? (mis. Sales, Public Speaking...)" autofocus />
+        </div>` : ""}
+    `;
   }
 
   root.innerHTML = `
@@ -186,6 +221,13 @@ function renderOnboarding() {
       document.getElementById(`val-${k}`).textContent = e.target.value;
     });
   });
+  document.querySelectorAll(".pathway-option").forEach((b) => {
+    b.addEventListener("click", () => { onboardForm.pathway = b.dataset.pathway; renderOnboarding(); });
+  });
+  document.getElementById("pathwayCustom")?.addEventListener("input", (e) => {
+    onboardForm.pathwayCustom = e.target.value;
+    document.getElementById("next").disabled = !isStepValid(onboardStep);
+  });
   document.getElementById("back")?.addEventListener("click", () => { onboardStep = Math.max(0, onboardStep - 1); renderOnboarding(); });
   document.getElementById("next").addEventListener("click", async () => {
     if (!isStepValid(onboardStep)) return;
@@ -207,7 +249,7 @@ function renderDashboard() {
   const hasReflection = Boolean(today?.reflection);
 
   const questInner = !today ? spinnerHTML("AI sedang menyusun quest hari ini...") : `
-    <div class="qlabel mono">QUEST HARI INI</div>
+    <div class="qlabel mono">${today.quest.mode === "acting" ? "ACTING METHOD HARI INI" : "QUEST HARI INI"}</div>
     <h2 class="fr">${esc(today.quest.title)}</h2>
     <p class="desc">${esc(today.quest.description)}</p>
     <p class="why">${esc(today.quest.why)}</p>
@@ -252,6 +294,7 @@ function renderDashboard() {
         <div class="bab mono">BAB ${s.chapterNumber}</div>
         <h1 class="fr">${esc(s.chapterTitle)}</h1>
         <div class="rule"></div>
+        ${s.pathwayNoun ? `<div class="pathway-badge mono">${esc(maturityTier(s.growthSessions))} ${esc(s.pathwayNoun)}</div>` : ""}
         ${today?.insight ? `<p class="insight fr">${esc(today.insight)}</p>` : ""}
       </div>
       <div class="quest-card">
