@@ -1,5 +1,7 @@
 # Deploy Eleva ke Railway
 
+> **Catatan:** Section 1-6 di bawah ini riwayat deploy pertama (single-user, SQLite + Volume) — sudah selesai dan situsnya sudah live. Kalau kamu baru mulai deploy dari nol dengan kode yang sekarang (Postgres + auth), langsung ke **Section 7** setelah Section 1 (bikin project dari GitHub repo) — lewati Section 2-6, gantinya pakai Postgres bukan Volume+`DB_PATH`.
+
 Cara tercepat buat dapat link publik Eleva. Railway platform khusus buat app kayak gini (Node.js + butuh disk yang nyantol terus antar-deploy) — tinggal connect ke GitHub, dapat link publik dalam hitungan menit, tanpa wizard rumit kayak di shared hosting.
 
 ## 0. Sebelum mulai
@@ -54,6 +56,30 @@ Kalau ternyata hilang, cek lagi apakah Volume di langkah 2 benar-benar ter-mount
 
 Kalau nanti mau pakai subdomain sendiri (misalnya `eleva.hkgroup.id`) daripada URL `*.up.railway.app`: tab **Settings** → **Networking** → **Custom Domain**, lalu tambahkan CNAME record yang diminta di DNS domain kamu. Belum perlu sekarang — tujuan awal cuma supaya UI/UX Eleva bisa diakses lewat satu link dulu.
 
+## 7. Upgrade ke Postgres + Auth + Beta Gate
+
+PRD berubah dari single-user jadi beta ~100 member — kode terbaru butuh Postgres (bukan lagi Volume + `eleva.db`) dan ada layar login/daftar. Situs yang sekarang live masih pakai kode lama sampai langkah ini selesai **dan** kode baru di-push ke `main`.
+
+**Kerjakan urutan ini supaya tidak ada downtime** (kode baru butuh `DATABASE_URL` — kalau di-push sebelum Postgres siap, app akan crash karena tidak bisa connect ke database):
+
+1. Di project Railway yang sama (bukan project baru): klik **New** → **Database** → **Add PostgreSQL**.
+2. Railway biasanya otomatis mengaitkan `DATABASE_URL` ke service Eleva (variable reference antar-service). Cek di tab **Variables** service Eleva — kalau `DATABASE_URL` belum muncul, tambahkan manual dengan reference `${{ Postgres.DATABASE_URL }}` (pilih dari dropdown "Add Reference" di form variable).
+3. Masih di tab **Variables** service Eleva, tambahkan 3 ini:
+
+   | Key | Value |
+   |---|---|
+   | `BETA_CODE` | kode yang akan kamu bagikan ke calon beta member (bebas, contoh: `eleva-beta-agustus`) |
+   | `SESSION_SECRET` | string acak panjang, generate misalnya via `openssl rand -hex 32` |
+   | `NODE_ENV` | `production` |
+
+4. Volume + `DB_PATH` yang lama boleh dibiarkan saja — sudah tidak dipakai kode baru, tapi tidak mengganggu apa-apa kalau tidak dihapus.
+5. **Baru setelah 3 variable di atas siap**, kode baru di-push ke `main` (memicu redeploy otomatis).
+
+**Setelah redeploy sukses:**
+- Cek Deploy Logs — pastikan tidak ada error koneksi Postgres saat startup.
+- Buka domain publiknya — sekarang harus muncul layar **Masuk**/**Daftar**, bukan langsung onboarding.
+- **Wajib sebelum kode beta dibagikan ke siapa pun** (bukan opsional — ini gate keras dari PRD): daftar 2 akun test dengan email berbeda, isi onboarding berbeda di masing-masing, pastikan datanya sama sekali tidak ketuker antar akun.
+
 ## Catatan keamanan
 
-Sama seperti di `DEPLOY_HOSTINGER.md`: Eleva belum ada login/auth (sengaja, sesuai desain single-user saat ini). Siapa pun yang tahu link Railway-nya bisa buka, isi, atau reset datanya. URL default Railway cukup acak/susah ditebak untuk sementara, tapi tetap jangan disebar ke tempat publik dulu.
+Sekarang sudah ada login/auth (email + password + kode beta) — bukan lagi open-access seperti sebelumnya. Tetap jangan bagikan `BETA_CODE` di tempat publik (medsos, dsb) — hanya ke calon member yang memang diundang, supaya kecepatan pertumbuhan dan biaya API Claude tetap terkendali.
