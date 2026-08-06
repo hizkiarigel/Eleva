@@ -111,42 +111,47 @@ Beta member akan cerita hal personal ke AI. Sebelum signup selesai, tampilkan (b
 
 Ini bukan kebijakan privasi hukum yang lengkap — cukup untuk beta terkontrol berbasis kepercayaan. Kebijakan privasi formal jadi task terpisah kalau nanti masuk fase monetisasi.
 
-## 9. Task 5 — Pathway di onboarding (QUEUED — lihat gate kedua di bagian 3)
+## 9. Task 5 — Adaptive Pathway Onboarding (v2, SELESAI — menggantikan total desain v1 di bawah)
 
-**Konteks:** Ada draft PRD alternatif ("Adaptive Onboarding PRD") yang beredar dan sempat dipertimbangkan. Sebagian isinya DITOLAK secara sadar — dicatat di sini supaya tidak salah ke-adopt kalau file itu ikut nyasar ke sesi ini:
+**Riwayat (kenapa desain ini berubah dua kali — detail lengkap di riwayat versi Bible Bab 15):**
 
-- **DITOLAK:** "Identity is discovered, not chosen" — Pathway via AI hypothesis + resonance scoring + auto-activate primary pathway setelah 14 hari observasi diam-diam. Ini menghapus agency pengguna untuk secara sadar memilih identitas yang mau dilatih (termasuk yang berlawanan dari kecenderungan alaminya) — bertentangan langsung dengan FP1 dan dengan keputusan desain di `ELEVA_Constitution_Product_Bible_v1.3.docx` Bab 13.
-- **DITOLAK:** Secondary Trait (dua pathway aktif sekaligus), 14-hari trial wajib sebelum pathway apa pun ditampilkan ke pengguna, Adaptive Questions bercabang berdasarkan Growth Focus. Semua ini terlalu berat untuk scope "essential", dan membuang percuma flow onboarding yang sudah divalidasi manual oleh founder di prototype.
-- **DIADOPSI:** "Private Promise" — satu kalimat reassurance privasi, ditempatkan SEBELUM pertanyaan vulnerable (Situasi/Values/Fear). Ini BUKAN pengganti Task 4 (privacy notice legal/data-handling) — dua-duanya tetap ada, beda fungsi: Private Promise itu emosional/reassurance di awal, Task 4 itu informasi data-handling sebelum signup selesai.
-- **DIADOPSI (sudah tercatat di Bible, bukan tugas baru di sini):** framing "Pathway itu uji coba, bukan komitmen mati" untuk sesi-sesi awal setelah Pathway dipilih.
+- **v1 (implementasi pertama, sudah di-supersede total):** Pathway dipilih manual dari 6 kartu statis di akhir onboarding. Saat itu, draft PRD alternatif yang mengusulkan "identity is discovered, not chosen" (Pathway via AI hypothesis + resonance scoring + auto-activate diam-diam setelah 14 hari observasi) DITOLAK sadar — dianggap menghapus agency pengguna, bertentangan dengan FP1 dan `ELEVA_Constitution_Product_Bible_v1.3.docx` Bab 13.
+- **v2 (implementasi sesi ini, MENGGANTIKAN v1 total — sumber: `Eleva_PRD.pdf` + `ELEVA_Constitution_Product_Bible_v1.4.docx` Bab 13):** Bible v1.4 mengklarifikasi bahwa contoh yang memicu penolakan di v1 ("jiwa analis melatih diri jadi sales") sebenarnya soal kebutuhan Acting Method, bukan soal mekanisme pemilihan Pathway. Begitu dipisah, tidak ada kontradiksi dengan FP1 — Pathway sekarang **direkomendasikan AI dari hipotesis**, TAPI jalur keluar manual (override bebas teks) tetap wajib ada, dan Pathway baru berstatus **"trial"** (bukan langsung permanen/diam-diam) sampai terbukti resonan dari data refleksi nyata. Agency pengguna tetap non-negotiable; yang berubah cuma mekanisme default-nya.
 
-**Urutan onboarding final (SUDAH divalidasi manual oleh founder di `Eleva_Prototype.jsx` — jangan ubah urutannya tanpa alasan kuat):**
+**Urutan onboarding final v2 (MENGGANTIKAN urutan v1):**
 1. Nama
-2. **BARU:** Private Promise — satu layar singkat: *"Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva."*
-3. Situasi hidup sekarang
-4. Values
-5. Fear
-6. Stats (8 slider, 1-10)
-7. **BARU:** Pathway — pilih satu dari: Builder, Guardian, Explorer, Connector, Seeker, atau Specialist (dengan input teks bebas untuk spesialisasinya). Framing di layar ini: "Sekarang, pilih jalanmu — dari yang barusan kamu ceritain, ini enam arah yang bisa kamu latih sengaja."
+2. Private Promise (layar statis, sama seperti v1: *"Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva."*)
+3. Situasi hidup sekarang (Story) — **TETAP ADA, tidak digantikan Adaptive Questions.** Ini tahap awal AI membangun konteks (Story → Core Values → Core Fear); Adaptive Questions di bawah adalah lapisan ekspansi, bukan pengganti.
+4. Values (Core Values)
+5. Fear (Core Fear)
+6. **BARU, ganti dari 8 slider 1-10:** Stats sebagai polygon interaktif 8 sisi (SVG, drag titik sudut, bukan isi angka). Menarik satu titik naik mengecilkan 7 titik lain secara proporsional (floor kecil, bukan ke nol) — total kira-kira konstan, memodelkan bahwa manusia (semua orang) punya waktu & energi terbatas.
+7. **BARU:** Growth Focus — multi-select 1-3 dari 10 preset (Career, Purpose, Relationship, Leadership, Confidence, Communication, Wealth, Health, Adventure, Contribution). Ini kompas yang dipakai TERUS-MENERUS untuk Quest/Acting Method/reflection prompt seterusnya — bukan data onboarding sekali pakai lalu dilupakan.
+8-10. **BARU, gantikan step "Pathway 6 kartu" v1:** 3x Adaptive Question, digenerate AI berurutan sebagai percakapan bercabang (bukan daftar statis) — Q1 gali lebih dalam dari Growth Focus + cerita awal, Q2 mengarah ke obstacle/fear yang menghalangi, Q3 mengarah ke values/non-negotiables (framing tidak langsung).
+11. AI Thinking (loading singkat: "Aku sedang mencoba memahami ceritamu...")
+12. **BARU:** Chapter Analysis — insight naratif AI (rangkuman 2-4 kalimat) + Pathway Recommendation (1 dari 6 nama yang sama seperti v1: Builder/Guardian/Explorer/Connector/Seeker/Specialist) + Secondary Trait opsional (informasional saja — TIDAK dapat Identity Maturity ladder atau Quest/Acting Method sendiri, supaya tidak jadi dua proyek transformasi identitas paralel).
+13. Konfirmasi — WAJIB dua jalur: tombol utama "Mulai First Trial (14 hari)" (terima rekomendasi AI) ATAU link sekunder "Bukan ini — aku tahu persis mau melatih apa" (override manual via teks bebas, BUKAN balik ke kartu pilihan). Override tetap masuk First Trial 14 hari yang sama, bukan langsung permanen.
 
-**Perubahan schema Postgres** (di atas schema Task 2 yang sudah ada): `character_state` nambah dua kolom — `pathway text`, `pathway_noun text`.
+**First Trial (14 hari):** Pathway baru (dari rekomendasi AI ATAU override manual — dua-duanya sama) mulai `pathway_status='trial'`. Growth-gate 12-kata tetap berlaku penuh selama trial, tidak berubah. Resonance-check dievaluasi lazy setiap `GET /api/state` dipanggil: kalau `now() - pathway_trial_started_at >= 14 hari` DAN `growthSessions >= 5` (unit sama yang dipakai chapter-advance) → `pathway_status` otomatis jadi `'active'` (masuk Identity Maturity ladder permanen). Belum cukup data → tetap `'trial'` (diperpanjang, bukan dipaksa/di-skip). Traceable ke data refleksi nyata, bukan skor AI tersembunyi.
 
-**Perubahan `server/claude.js`:**
-- Prompt AI (system prompt DAN context onboarding/harian) sertakan `pathway` dan `pathwayNoun`.
-- Response JSON `generateQuest` nambah field: `pathwayNoun` (diturunkan SEKALI saat onboarding dari teks Pathway, dipertahankan sama persis setiap hari setelahnya — JANGAN diganti-ganti tiap generate), dan `quest.mode`: `"quest"` atau `"acting"` — AI yang memilih framing mana yang relevan hari itu berdasarkan Pathway + chapter, bukan dua instruksi sekaligus dalam satu hari.
-- **Implementasi lengkap (prompt final, response shape, fallback behavior) sudah ada dan SUDAH DITES di `Eleva_Prototype.jsx` fungsi `generateQuest`/`MENTOR_SYSTEM` — port logic itu apa adanya, jangan re-derive prompt dari nol.**
+**Perubahan schema Postgres** (di atas kolom `pathway`/`pathway_noun` dari v1 yang tetap dipakai apa adanya untuk quest generation harian): `character_state` nambah `growth_focus jsonb`, `pathway_status text DEFAULT 'trial'`, `pathway_trial_started_at timestamptz`, `secondary_trait text`.
 
-**Perubahan Dashboard:** tampilkan badge kecil di bawah judul chapter: `{tier} {pathwayNoun}` (contoh: "Practicing Closer"). Tier dihitung dari `growthSessions` yang sudah ada: `["Emerging","Practicing","Reliable","System","Master"][min(4, floor(growthSessions/3))]` — sengaja pakai pembagi 3 (beda dari kenaikan chapter yang pembagi 5), supaya tier kerasa lebih responsif daripada chapter.
+**Route baru:** `POST /api/onboarding/adaptive-question`, `POST /api/onboarding/chapter-analysis` — di belakang `requireAuth`, tapi stateless (dipanggil berkali-kali SELAMA onboarding sebelum `character_state` ada). `POST /api/profile` tetap satu-satunya titik commit ke DB, dipanggil sekali di akhir step 13.
 
-**Kartu quest harian:** label berubah jadi "QUEST HARI INI" atau "ACTING METHOD HARI INI" tergantung `quest.mode` dari respons AI.
+**`server/claude.js`:** dua fungsi baru — `generateAdaptiveQuestion(ctx)`, `generateChapterAnalysis(ctx)` — reuse nada/pola prompt & fallback dari `MENTOR_SYSTEM`/`generateQuest` yang sudah ada. Fallback deterministik untuk kedua fungsi (pertanyaan generik per-tahap, analisis berbasis pola Growth Focus→Pathway sederhana) supaya onboarding tetap bisa diselesaikan tanpa `ANTHROPIC_API_KEY`, konsisten prinsip yang sudah ada di `generateQuest`/`processReflection`.
 
-**Definition of done khusus Task 5:**
-- [ ] Private Promise tampil sebagai layar tersendiri sebelum Situasi/Values/Fear
-- [ ] Pathway step di akhir onboarding (step 7), 6 opsi, Specialist punya input teks bebas
-- [ ] `pathwayNoun` konsisten (tidak berubah-ubah tiap hari) setelah pertama kali di-generate
-- [ ] Dashboard menampilkan tier + pathwayNoun
-- [ ] Kartu quest harian menampilkan mode yang benar sesuai respons AI
-- [ ] Growth-gate 12-kata dan chapter-advance-tiap-5-sesi TIDAK berubah/regresi akibat perubahan ini
+**Dashboard:** badge tier+pathwayNoun (mekanisme tidak berubah dari v1: `{tier} {pathwayNoun}`, tier dari `growthSessions` pembagi 3) + indikator kecil "(hipotesis — First Trial)" ditambahkan selama `pathway_status === 'trial'`.
+
+**Definition of done Task 5 v2 (menggantikan DoD v1):**
+- [x] Situasi/Values/Fear tetap ada sebagai step terpisah, tidak digantikan Adaptive Questions
+- [x] Stats sebagai polygon drag interaktif, redistribusi proporsional non-zero saat satu titik ditarik naik
+- [x] Growth Focus multi-select (1-3 dari 10), tersimpan & dipakai sebagai context Quest harian seterusnya
+- [x] 3 Adaptive Question berurutan, tiap pertanyaan pakai jawaban sebelumnya sebagai context
+- [x] Chapter Analysis tampilkan insight + Pathway rec + Secondary Trait opsional
+- [x] Dua jalur konfirmasi (terima rekomendasi AI / override manual teks bebas), keduanya masuk First Trial 14 hari yang sama
+- [x] `pathway_status` mulai `'trial'`, otomatis `'active'` setelah ≥14 hari DAN ≥5 growth session (resonance-check lazy, diverifikasi lewat simulasi tanggal di Postgres)
+- [x] Dashboard menampilkan indikator trial selama belum `'active'`
+- [x] Growth-gate 12-kata, crisis-detection, isolasi 2-akun tidak regresi (dites ulang eksplisit setelah perubahan ini)
+- [ ] Resonance-check 14-hari HANYA diverifikasi lewat simulasi tanggal (`pathway_trial_started_at` dimundurkan manual di Postgres) — belum diverifikasi dengan pengguna asli menunggu 14 hari kalender sungguhan. Dicatat jujur sebagai keterbatasan, bukan "selesai penuh".
 
 ## 10. Eksplisit DI LUAR scope sesi ini
 

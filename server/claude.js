@@ -2,7 +2,7 @@ const MENTOR_SYSTEM = `Kamu adalah mentor AI di dalam produk bernama Eleva — s
 
 Prinsip yang WAJIB kamu pegang:
 - Kamu mentor, bukan mesin jawaban. Kamu mengarahkan, bukan menggurui.
-- Quest/Acting yang kamu buat harus personal untuk situasi hidup pengguna saat ini, BUKAN checklist generik ("minum air", "bangun jam 5"). Ambil dari cerita, values, ketakutan, DAN Pathway yang mereka pilih.
+- Quest/Acting yang kamu buat harus personal untuk situasi hidup pengguna saat ini, BUKAN checklist generik ("minum air", "bangun jam 5"). Ambil dari cerita, values, ketakutan, Pathway, DAN Growth Focus mereka (ctx.growthFocus) — Growth Focus itu kompas yang mengarahkan Quest/Acting/reflection sepanjang perjalanan, bukan data onboarding yang dilupakan setelah dipakai sekali.
 - Satu instruksi utama per hari — bentuknya bisa "Quest" (aksi konkret yang dikerjakan, cocok untuk progress yang terlihat) atau "Acting Method" (praktik cara bersikap sepanjang hari, cocok untuk melatih identitas Pathway yang dipilih, mis. pathway "Sales": "sebelum menjawab, ajukan tiga pertanyaan dulu"). Kamu yang memilih framing mana yang lebih relevan hari itu berdasarkan Pathway dan chapter pengguna — jangan berikan dua-duanya sekaligus.
 - Acting Method HARUS berbasis perilaku ("tahan dulu, tanya dulu"), BUKAN berbasis target hasil ("closing 3 deal") — itu akan menggeser Eleva jadi productivity app, bukan character growth app.
 - Nada bicara: hangat, jujur, tidak menghakimi, tidak sok tahu, seperti teman yang paham tapi tetap jujur ("Bukan malas. Kamu kehilangan tujuan.") — bukan motivator generik.
@@ -90,4 +90,77 @@ function fallbackReflection() {
   };
 }
 
-module.exports = { generateQuest, processReflection, hasKey };
+// --- Adaptive onboarding (Task 5) ---
+
+const ADAPTIVE_FALLBACK_QUESTIONS = [
+  (growthFocus) => `Kenapa ${(growthFocus || []).join(", ") || "ini"} yang paling kerasa penting buat kamu sekarang?`,
+  () => "Apa yang paling sering bikin kamu belum berani melangkah ke arah itu?",
+  () => "Kalau harus memilih, hal apa yang nggak ingin kamu korbankan dalam prosesnya?",
+];
+
+async function generateAdaptiveQuestion(ctx) {
+  if (!hasKey()) {
+    const idx = Math.min(3, Math.max(1, ctx.questionIndex || 1)) - 1;
+    return { question: ADAPTIVE_FALLBACK_QUESTIONS[idx](ctx.growthFocus) };
+  }
+  try {
+    const stageInstruction =
+      ctx.questionIndex === 1
+        ? 'Ini pertanyaan pertama dari 3. Gali lebih dalam dari Growth Focus yang mereka pilih (ctx.growthFocus) dan cerita awal mereka (situasi/values/fear) — buat mereka merasa "mulai dimengerti", bukan sekadar mengisi field berikutnya.'
+        : ctx.questionIndex === 2
+        ? "Ini pertanyaan kedua dari 3, mengarah ke obstacle/fear yang menghalangi Growth Focus mereka — berdasarkan jawaban pertama mereka (ctx.previousAnswers[0])."
+        : 'Ini pertanyaan ketiga dari 3, mengarah ke values/non-negotiables mereka — framing TIDAK LANGSUNG (mis. "Saat harus memilih... hal apa yang tidak ingin kamu korbankan?", BUKAN "apa nilai hidupmu?"), berdasarkan jawaban-jawaban sebelumnya.';
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan SATU pertanyaan lanjutan untuk pengguna ini, sebagai bagian dari onboarding adaptif Eleva (percakapan bercabang, bukan daftar pertanyaan statis).\n\n${stageInstruction}\n\nBalas JSON dengan bentuk persis:\n{"question": string}\n\nAturan: pertanyaan singkat (1-2 kalimat), personal ke konteks mereka, nada hangat dan jujur seperti mentor — bukan form generik.`;
+    const result = await callClaude(user);
+    if (!result?.question) throw new Error("bad shape");
+    return result;
+  } catch (e) {
+    console.error("generateAdaptiveQuestion failed, using fallback:", e.message);
+    const idx = Math.min(3, Math.max(1, ctx.questionIndex || 1)) - 1;
+    return { question: ADAPTIVE_FALLBACK_QUESTIONS[idx](ctx.growthFocus) };
+  }
+}
+
+const PATHWAY_NAMES = ["Builder", "Guardian", "Explorer", "Connector", "Seeker", "Specialist"];
+const GROWTH_FOCUS_TO_PATHWAY = {
+  Career: "Builder", Leadership: "Builder", Wealth: "Builder",
+  Confidence: "Guardian", Health: "Guardian",
+  Adventure: "Explorer",
+  Relationship: "Connector", Communication: "Connector", Contribution: "Connector",
+  Purpose: "Seeker",
+};
+
+async function generateChapterAnalysis(ctx) {
+  if (!hasKey()) return fallbackChapterAnalysis(ctx);
+  try {
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. Rangkum semua yang sudah mereka ceritakan (situasi/values/fear + growth focus + jawaban-jawaban adaptive) jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Builder"|"Guardian"|"Explorer"|"Connector"|"Seeker"|"Specialist", "pathwayNoun": string, "secondaryTrait": string|null}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik. "pathway" satu rekomendasi dari 6 nama itu berdasarkan pola dari SELURUH konteks, bukan cuma growthFocus. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Builder → "Builder"). "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
+    const result = await callClaude(user);
+    if (!result?.pathway || !PATHWAY_NAMES.includes(result.pathway)) throw new Error("bad shape");
+    return result;
+  } catch (e) {
+    console.error("generateChapterAnalysis failed, using fallback:", e.message);
+    return fallbackChapterAnalysis(ctx);
+  }
+}
+
+function fallbackChapterAnalysis(ctx) {
+  const counts = {};
+  (ctx.growthFocus || []).forEach((f) => {
+    const p = GROWTH_FOCUS_TO_PATHWAY[f];
+    if (p) counts[p] = (counts[p] || 0) + 1;
+  });
+  const pathway = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || "Seeker";
+  return {
+    insight: hasKey()
+      ? "Koneksi ke mentor lagi tersendat — tapi dari yang kamu ceritakan, ini arah yang tetap relevan buat dicoba."
+      : "Mode tanpa API key: analisis di bawah ini masih berbasis pola sederhana dari Growth Focus-mu, belum benar-benar membaca ceritamu. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.",
+    pathway,
+    pathwayNoun: pathway,
+    secondaryTrait: null,
+  };
+}
+
+module.exports = {
+  generateQuest, processReflection, hasKey,
+  generateAdaptiveQuestion, generateChapterAnalysis,
+};

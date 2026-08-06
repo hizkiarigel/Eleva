@@ -65,6 +65,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .chapter-header .rule { width: 46px; height: 2px; background: var(--accent); margin-bottom: 14px; }
 .chapter-header .insight { font-style: italic; color: var(--muted); font-size: 15px; line-height: 1.6; margin: 0; }
 .pathway-badge { font-size: 12px; color: var(--growth); letter-spacing: .5px; margin-bottom: 12px; }
+.trial-tag { color: var(--accent); opacity: .85; }
 
 .pathway-option { text-align: left; width: 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
 .pathway-option.active { border-color: var(--accent); background: #e8a33d18; }
@@ -108,3 +109,16 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .footer-bar { border-top: 1px solid var(--hair); padding-top: 16px; text-align: center; margin-top: 8px; }
 
 .banner-warn { background: #3a2e1a; border: 1px solid #e8a33d55; color: #e8a33d; font-size: 12.5px; padding: 10px 14px; border-radius: 8px; margin-bottom: 20px; }
+
+.poly-wrap { display: flex; justify-content: center; padding: 8px 0 4px; }
+.poly-svg { width: 100%; max-width: 320px; height: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+.poly-ring { fill: none; stroke: var(--hair); stroke-width: 1; }
+.poly-axis { stroke: var(--hair); stroke-width: 1; }
+.poly-shape { fill: #e8a33d2e; stroke: var(--accent); stroke-width: 1.5; }
+.poly-label { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 9.5px; }
+.poly-handle { fill: var(--accent); stroke: var(--bg); stroke-width: 2; cursor: grab; touch-action: none; }
+.poly-handle:active { cursor: grabbing; }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 9px 16px; border-radius: 20px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); font-size: 13.5px; }
+.chip.active { border-color: var(--accent); background: #e8a33d22; color: var(--accent); }

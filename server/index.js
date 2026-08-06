@@ -72,6 +72,30 @@ app.post("/api/logout", (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Adaptive onboarding (stateless AI proxies; no character_state yet) ---
+
+app.post("/api/onboarding/adaptive-question", requireAuth, async (req, res) => {
+  try {
+    const { profile, growthFocus, questionIndex, previousAnswers } = req.body;
+    const result = await ai.generateAdaptiveQuestion({ profile, growthFocus, questionIndex, previousAnswers });
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal membuat pertanyaan." });
+  }
+});
+
+app.post("/api/onboarding/chapter-analysis", requireAuth, async (req, res) => {
+  try {
+    const { profile, growthFocus, answers } = req.body;
+    const result = await ai.generateChapterAnalysis({ profile, growthFocus, answers });
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal membuat Chapter Analysis." });
+  }
+});
+
 // --- App routes (all require auth, all scoped by req.userId from session) ---
 
 // Full app state for the frontend: profile, stats, chapter, today's day, aiActive flag
@@ -80,6 +104,17 @@ app.get("/api/state", requireAuth, async (req, res) => {
     const state = await db.getState(req.userId);
     if (!state || !state.profile) return res.json({ profile: null });
 
+    // Resonance check: after 14 days, a trial Pathway with enough real growth
+    // sessions (same unit chapter-advance already uses) activates for good.
+    // Traceable to real reflection data, not a hidden score - see PRD Task 5.
+    if (state.pathway && state.pathwayStatus === "trial" && state.pathwayTrialStartedAt) {
+      const daysSinceTrial = (Date.now() - new Date(state.pathwayTrialStartedAt).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceTrial >= 14 && state.growthSessions >= 5) {
+        await db.activatePathway(req.userId);
+        state.pathwayStatus = "active";
+      }
+    }
+
     const tk = todayKey();
     let today = await db.getDay(req.userId, tk);
     if (!today) {
@@ -87,6 +122,7 @@ app.get("/api/state", requireAuth, async (req, res) => {
         profile: state.profile,
         pathway: state.pathway,
         pathwayNoun: state.pathwayNoun,
+        growthFocus: state.growthFocus,
         stats: state.stats,
         chapterNumber: state.chapterNumber,
         chapterTitle: state.chapterTitle,
@@ -113,6 +149,7 @@ app.get("/api/state", requireAuth, async (req, res) => {
       chapterTitle: fresh.chapterTitle,
       growthSessions: fresh.growthSessions,
       pathwayNoun: fresh.pathwayNoun,
+      pathwayStatus: fresh.pathwayStatus,
       today: { date: tk, ...today },
       history: (await db.allHistory(req.userId, tk)).slice(0, 8),
       aiActive: ai.hasKey(),
@@ -123,20 +160,30 @@ app.get("/api/state", requireAuth, async (req, res) => {
   }
 });
 
-// Create profile + first quest
+// Create profile + first quest (single commit point at the end of adaptive onboarding)
 app.post("/api/profile", requireAuth, async (req, res) => {
   try {
-    const { name, situation, values, fear, stats: rawStats, pathway: rawPathway, pathwayCustom } = req.body;
+    const {
+      name, situation, values, fear, stats: rawStats,
+      growthFocus, pathway: rawPathway, pathwayNoun: rawPathwayNoun, secondaryTrait,
+    } = req.body;
     if (!name || !situation) return res.status(400).json({ error: "Nama dan situasi wajib diisi." });
 
-    const pathway = rawPathway === "Specialist" ? ((pathwayCustom || "").trim() || "Specialist") : rawPathway || null;
-
+    // Stats come pre-computed 0-100 from the client-side polygon (conservation-
+    // of-total redistribution already applied there) - just clamp defensively.
     const initialStats = {};
     Object.entries(rawStats || {}).forEach(([k, v]) => {
-      initialStats[k] = Math.round(Number(v) * 10);
+      initialStats[k] = Math.max(0, Math.min(100, Math.round(Number(v))));
     });
+
+    const pathway = (rawPathway || "").trim() || null;
+    const pathwayNoun = (rawPathwayNoun || "").trim() || pathway;
+
     const profile = { name, situation, values, fear, createdAt: new Date().toISOString() };
-    const ctx = { profile, pathway, pathwayNoun: null, stats: initialStats, chapterNumber: null, chapterTitle: null, recentDays: [], today: todayKey() };
+    const ctx = {
+      profile, pathway, pathwayNoun, growthFocus,
+      stats: initialStats, chapterNumber: null, chapterTitle: null, recentDays: [], today: todayKey(),
+    };
     const result = await ai.generateQuest(ctx);
 
     await db.createState(req.userId, {
@@ -145,7 +192,9 @@ app.post("/api/profile", requireAuth, async (req, res) => {
       chapterNumber: result.chapterNumber || 1,
       chapterTitle: result.chapterTitle || "Mencari Arah",
       pathway,
-      pathwayNoun: result.pathwayNoun || pathway || null,
+      pathwayNoun: result.pathwayNoun || pathwayNoun,
+      growthFocus,
+      secondaryTrait: secondaryTrait || null,
     });
     await db.upsertDay(req.userId, todayKey(), { quest: result.quest, insight: result.insight, reflection: null });
 

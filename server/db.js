@@ -46,6 +46,10 @@ async function init() {
 
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS pathway TEXT;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS pathway_noun TEXT;
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS growth_focus JSONB;
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS pathway_status TEXT DEFAULT 'trial';
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS pathway_trial_started_at TIMESTAMPTZ;
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS secondary_trait TEXT;
   `);
 }
 
@@ -83,18 +87,29 @@ async function getState(userId) {
     growthSessions: row.growth_sessions,
     pathway: row.pathway,
     pathwayNoun: row.pathway_noun,
+    growthFocus: row.growth_focus,
+    pathwayStatus: row.pathway_status,
+    pathwayTrialStartedAt: row.pathway_trial_started_at,
+    secondaryTrait: row.secondary_trait,
   };
 }
 
-async function createState(userId, { profile, stats, chapterNumber, chapterTitle, pathway, pathwayNoun }) {
+async function createState(userId, {
+  profile, stats, chapterNumber, chapterTitle, pathway, pathwayNoun,
+  growthFocus, secondaryTrait,
+}) {
   await pool.query(
-    `INSERT INTO character_state (user_id, profile, stats, chapter_number, chapter_title, growth_sessions, pathway, pathway_noun)
-     VALUES ($1, $2, $3, $4, $5, 0, $6, $7)
+    `INSERT INTO character_state
+       (user_id, profile, stats, chapter_number, chapter_title, growth_sessions,
+        pathway, pathway_noun, growth_focus, pathway_status, pathway_trial_started_at, secondary_trait)
+     VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, 'trial', now(), $9)
      ON CONFLICT (user_id) DO UPDATE SET
        profile = EXCLUDED.profile, stats = EXCLUDED.stats,
        chapter_number = EXCLUDED.chapter_number, chapter_title = EXCLUDED.chapter_title, growth_sessions = 0,
-       pathway = EXCLUDED.pathway, pathway_noun = EXCLUDED.pathway_noun`,
-    [userId, profile, stats, chapterNumber, chapterTitle, pathway || null, pathwayNoun || null]
+       pathway = EXCLUDED.pathway, pathway_noun = EXCLUDED.pathway_noun,
+       growth_focus = EXCLUDED.growth_focus, pathway_status = 'trial', pathway_trial_started_at = now(),
+       secondary_trait = EXCLUDED.secondary_trait`,
+    [userId, profile, stats, chapterNumber, chapterTitle, pathway || null, pathwayNoun || null, growthFocus ? JSON.stringify(growthFocus) : null, secondaryTrait || null]
   );
 }
 
@@ -107,6 +122,10 @@ async function updateState(userId, { stats, chapterNumber, chapterTitle, growthS
      WHERE user_id = $1`,
     [userId, stats, chapterNumber, chapterTitle, growthSessions, pathwayNoun || null]
   );
+}
+
+async function activatePathway(userId) {
+  await pool.query(`UPDATE character_state SET pathway_status = 'active' WHERE user_id = $1`, [userId]);
 }
 
 async function resetUser(userId) {
@@ -161,6 +180,6 @@ async function allHistory(userId, excludeDate) {
 module.exports = {
   DEFAULT_STATS, init,
   createUser, getUserByEmail, getUserById,
-  getState, createState, updateState, resetUser,
+  getState, createState, updateState, activatePathway, resetUser,
   getDay, upsertDay, recentDays, allHistory,
 };
