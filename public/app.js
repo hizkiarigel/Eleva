@@ -16,6 +16,10 @@ let reflectOpen = false;
 let reflectStatus = "done";
 let reflectText = "";
 let resetArmed = false;
+let authMode = "login";
+let authForm = { email: "", password: "", betaCode: "" };
+let privacyChecked = false;
+let authError = "";
 
 function wordCount(t) { return (t || "").trim().split(/\s+/).filter(Boolean).length; }
 function esc(s) { return (s ?? "").toString().replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -30,7 +34,11 @@ async function api(path, opts) {
     body: opts?.body ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Request gagal");
+  if (!res.ok) {
+    const err = new Error(data.error || "Request gagal");
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
@@ -40,6 +48,11 @@ async function boot() {
   try {
     appState = await api("/api/state");
   } catch (e) {
+    if (e.status === 401) {
+      ui = { view: "auth" };
+      render();
+      return;
+    }
     ui = { view: "error", message: e.message };
     render();
     return;
@@ -53,6 +66,67 @@ function spinnerHTML(label) {
     <div class="spin mono" style="font-size:22px">◐</div>
     <div class="mono" style="margin-top:14px;font-size:13px;letter-spacing:.5px">${esc(label)}</div>
   </div></div>`;
+}
+
+function renderAuth() {
+  const isSignup = authMode === "signup";
+  root.innerHTML = `
+    <div class="shell">
+      <div class="eyebrow mono">ELEVA</div>
+      <h1 class="fr" style="font-size:28px;font-weight:600;margin:0 0 20px">${isSignup ? "Daftar beta" : "Masuk"}</h1>
+      ${authError ? `<p style="color:var(--rust);font-size:13.5px;margin:0 0 16px">${esc(authError)}</p>` : ""}
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="authEmail" value="${esc(authForm.email)}" placeholder="kamu@email.com" autocomplete="email" />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="authPassword" value="" placeholder="minimal 8 karakter" autocomplete="${isSignup ? "new-password" : "current-password"}" />
+      </div>
+      ${isSignup ? `
+      <div class="field">
+        <label>Kode beta</label>
+        <input type="text" id="authBetaCode" value="${esc(authForm.betaCode)}" placeholder="dari founder Eleva" />
+      </div>
+      <div class="field" style="display:flex;gap:10px;align-items:flex-start">
+        <input type="checkbox" id="authPrivacy" ${privacyChecked ? "checked" : ""} style="margin-top:3px" />
+        <label for="authPrivacy" style="margin:0;font-size:12.5px;line-height:1.5;color:var(--muted)">
+          Saya mengerti: refleksi saya diproses AI (Claude/Anthropic) untuk membuat quest & analisis, disimpan di
+          database yang bisa diakses founder selama masa beta, dan ini bukan pengganti layanan kesehatan mental
+          profesional.
+        </label>
+      </div>` : ""}
+      <button class="btn-primary full" id="authSubmit" ${isSignup && !privacyChecked ? "disabled" : ""}>${isSignup ? "Daftar" : "Masuk"}</button>
+      <div style="text-align:center;margin-top:16px">
+        <button class="btn-ghost" id="authToggle">${isSignup ? "Sudah punya akun? Masuk" : "Belum punya akun? Daftar (butuh kode beta)"}</button>
+      </div>
+    </div>`;
+
+  document.getElementById("authEmail").addEventListener("input", (e) => { authForm.email = e.target.value; });
+  document.getElementById("authPassword").addEventListener("input", (e) => { authForm.password = e.target.value; });
+  document.getElementById("authBetaCode")?.addEventListener("input", (e) => { authForm.betaCode = e.target.value; });
+  document.getElementById("authPrivacy")?.addEventListener("change", (e) => {
+    privacyChecked = e.target.checked;
+    document.getElementById("authSubmit").disabled = isSignup && !privacyChecked;
+  });
+  document.getElementById("authToggle").addEventListener("click", () => {
+    authMode = isSignup ? "login" : "signup";
+    authError = "";
+    renderAuth();
+  });
+  document.getElementById("authSubmit").addEventListener("click", async () => {
+    authError = "";
+    root.innerHTML = spinnerHTML(isSignup ? "Mendaftar..." : "Masuk...");
+    try {
+      await api(isSignup ? "/api/signup" : "/api/login", { method: "POST", body: authForm });
+      authForm = { email: "", password: "", betaCode: "" };
+      privacyChecked = false;
+      await boot();
+    } catch (e) {
+      authError = e.message;
+      renderAuth();
+    }
+  });
 }
 
 const ONBOARD_STEPS = [
@@ -207,6 +281,7 @@ function renderDashboard() {
         ${resetArmed
           ? `<button class="btn-ghost rust" id="doReset">Yakin? Tap sekali lagi buat reset semua data</button>`
           : `<button class="btn-ghost" id="armReset">↺ Reset data</button>`}
+        <button class="btn-ghost" id="doLogout">Keluar</button>
       </div>
     </div>`;
 
@@ -235,6 +310,11 @@ function renderDashboard() {
     resetArmed = false; onboardStep = 0;
     await boot();
   });
+  document.getElementById("doLogout")?.addEventListener("click", async () => {
+    await api("/api/logout", { method: "POST" });
+    onboardStep = 0;
+    await boot();
+  });
 }
 
 function render() {
@@ -247,6 +327,7 @@ function render() {
     document.getElementById("retry").addEventListener("click", boot);
     return;
   }
+  if (ui.view === "auth") return renderAuth();
   if (ui.view === "onboarding") return renderOnboarding();
   if (ui.view === "dashboard") return renderDashboard();
 }

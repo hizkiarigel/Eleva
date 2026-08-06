@@ -1,19 +1,23 @@
-# Eleva — Essential Web MVP
+# Eleva — Web MVP (Beta)
 
-AI Character Growth System. Versi web esensial: Onboarding → AI Analysis → Daily Quest → Reflection → Dashboard.
+AI Character Growth System. Alur: Daftar (kode beta) → Onboarding → AI Analysis → Daily Quest → Reflection → Dashboard.
 
-Single-user (kamu, sebagai first user), SQLite lokal, Express backend, vanilla JS frontend. Tanpa build step.
+Beta gratis, terbatas lewat kode undangan (`BETA_CODE`) — bukan pendaftaran terbuka. Postgres (multi-user), Express backend, vanilla JS frontend. Tanpa build step.
+
+**Belum ada pembayaran/billing** — beta ini gratis sampai periode betanya selesai. Jangan diasumsikan ada monetisasi aktif.
 
 ## Jalanin di lokal
+
+Butuh Postgres lokal (`createdb eleva_dev` atau setara).
 
 ```bash
 npm install
 cp .env.example .env
-# isi ANTHROPIC_API_KEY di .env (dari console.anthropic.com)
+# isi ANTHROPIC_API_KEY, DATABASE_URL, BETA_CODE, SESSION_SECRET di .env — lihat komentar di .env.example
 npm start
 ```
 
-Buka `http://localhost:3000`.
+Buka `http://localhost:3000`. Tanpa akun, kamu akan diarahkan ke layar daftar/masuk — daftar butuh `BETA_CODE` yang cocok dengan env var-nya.
 
 Tanpa `ANTHROPIC_API_KEY`, aplikasi tetap jalan — quest jadi generik (fallback), dan refleksi tidak menaikkan stat. Ini disengaja: tidak ada AI mentor sungguhan, tidak ada growth palsu.
 
@@ -21,44 +25,40 @@ Tanpa `ANTHROPIC_API_KEY`, aplikasi tetap jalan — quest jadi generik (fallback
 
 ```
 server/
-  index.js    → Express app + routes (/api/state, /api/profile, /api/reflection, /api/reset)
-  db.js       → SQLite (better-sqlite3), schema: state (singleton) + days
+  index.js    → Express app + routes, semua route app di belakang auth middleware
+  auth.js     → signup/login (bcrypt + BETA_CODE), dipanggil dari index.js
+  db.js       → Postgres (pg), semua query di-scope per user_id
   claude.js   → panggilan ke Claude API + fallback kalau key belum ada / gagal
+  safety.js   → deteksi frasa krisis, independen dari AI (lihat bagian Prinsip di bawah)
 public/
-  index.html, styles.css, app.js  → frontend vanilla JS, tanpa framework/build step
-eleva.db      → database SQLite (dibuat otomatis saat pertama jalan)
+  index.html, styles.css, app.js  → frontend vanilla JS, termasuk layar auth + privacy notice
 ```
+
+## Auth & multi-tenant
+
+- Email + password (di-hash pakai bcrypt), session lewat cookie httpOnly yang di-sign (`cookie-session`, secret dari `SESSION_SECRET`). Tidak ada magic link/OAuth, tidak ada flow lupa password — sengaja sederhana untuk beta terkontrol.
+- Signup wajib isi `BETA_CODE` yang cocok dengan env var — cara paling sederhana buat batasi kecepatan pertumbuhan (dan biaya API) selama beta.
+- Semua route data (`/api/state`, `/api/profile`, `/api/reflection`, `/api/reset`) ada di belakang middleware auth dan **selalu discope dari `req.userId` (session), bukan dari body/param request** — supaya user tidak bisa akses/ubah data user lain walau coba manipulasi request API langsung.
+- Privacy notice singkat (bukan kebijakan privasi hukum formal) ditampilkan di layar daftar, wajib dicentang sebelum tombol daftar aktif.
 
 ## Prinsip desain yang tertanam di kode (bukan cuma di dokumen)
 
 - **Growth butuh substansi** (`server/index.js`, `wordCount` gate): refleksi di bawah ~12 kata tidak pernah menaikkan stat, walau quest ditandai selesai. Lihat `ELEVA_Constitution_Product_Bible_v1.0.docx` bab 11 (Goodhart's Law).
 - **Chapter tidak naik karena waktu/EXP**: hanya naik tiap kelipatan 5 sesi growth yang valid, dan hanya kalau AI menilai ada pergeseran pola nyata.
-- **AI mentor, bukan terapis** (`server/claude.js`, system prompt + `server/safety.js`, deteksi server-side): dua lapis. Prompt AI diinstruksikan mengarahkan ke bantuan profesional kalau refleksi menunjukkan tanda krisis. Di atas itu, `POST /api/reflection` juga mengecek `text` terhadap daftar frasa risiko tinggi secara independen dari AI — kalau cocok, AI mentor tidak dipanggil sama sekali dan `mentorReply` diganti kontak Layanan Sejiwa/Healing119 (119 ext. 8 / www.healing119.id), tanpa growth untuk sesi itu. Lihat bab 12 di dokumen bible untuk kenapa ini penting sebelum ada user lain selain kamu.
-
-## Push ke GitHub
-
-```bash
-git remote add origin <url-repo-kamu>
-git branch -M main
-git push -u origin main
-```
-
-`eleva.db` ikut ke-commit sesuai rencana (personal MVP, single file, gampang dibawa). Kalau nanti multi-user, ini yang paling duluan perlu diganti ke database beneran (Postgres dkk) — SQLite-in-git nggak akan scale, tapi untuk sekarang ini pilihan yang benar.
+- **AI mentor, bukan terapis** (`server/claude.js`, system prompt + `server/safety.js`, deteksi server-side): dua lapis. Prompt AI diinstruksikan mengarahkan ke bantuan profesional kalau refleksi menunjukkan tanda krisis. Di atas itu, `POST /api/reflection` juga mengecek `text` terhadap daftar frasa risiko tinggi secara independen dari AI — kalau cocok, AI mentor tidak dipanggil sama sekali dan `mentorReply` diganti kontak Layanan Sejiwa/Healing119 (119 ext. 8 / www.healing119.id), tanpa growth untuk sesi itu. Lihat bab 12 di dokumen bible untuk kenapa ini penting sekarang sudah ada user lain selain founder.
 
 ## Deployment
 
-`eleva.db` (SQLite) butuh filesystem yang persisten antar-deploy, jadi pilihan hosting-nya terbatas:
+Butuh Postgres (bukan lagi SQLite) + proses Node.js yang hidup terus. Panduan konkret:
 
-- **Cocok**: Railway, Render, atau Fly.io — semuanya punya persistent volume/disk yang bertahan lintas deploy.
-- **Tidak cocok**: Vercel atau Netlify (serverless) — filesystem-nya ephemeral, `eleva.db` akan hilang setiap kali deploy ulang.
+- `DEPLOY_RAILWAY.md` — deploy dari GitHub repo, tambah Postgres service di project yang sama (`DATABASE_URL` otomatis ter-link).
+- `DEPLOY_HOSTINGER.md` — kalau mau tetap di domain sendiri (subdomain di Hostinger Business/Cloud).
 
-Migrasi ke Postgres (atau database managed lain) baru dibutuhkan kalau produk ini nanti multi-user. Untuk single-user seperti sekarang, SQLite + persistent disk di salah satu hosting di atas sudah cukup.
-
-Panduan konkret yang sudah ditulis:
-- `DEPLOY_RAILWAY.md` — paling cepat buat dapat link publik, deploy dari GitHub repo, tinggal tambah Volume + `DB_PATH`.
-- `DEPLOY_HOSTINGER.md` — kalau mau tetap di domain sendiri (mis. subdomain di Hostinger Business/Cloud), termasuk cara verifikasi bahwa `eleva.db` benar-benar selamat lintas redeploy sebelum dipakai serius.
+Sebelum benar-benar membagikan kode beta ke siapa pun: verifikasi 2 akun test terpisah, pastikan datanya tidak bocor lintas user sama sekali (termasuk lewat manipulasi request API langsung, bukan cuma lewat UI).
 
 ## Belum ada (sengaja, biar essential)
 
-- Auth / multi-user
+- Payment/billing (baru dipikirkan setelah periode beta selesai)
+- Magic link/OAuth login, flow lupa password
 - Side/Social/Career/Exploration quest (baru Main Quest)
+- Kebijakan privasi hukum formal (baru notice minimal di layar daftar)

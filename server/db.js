@@ -1,107 +1,157 @@
-const Database = require("better-sqlite3");
-const path = require("path");
+const { Pool } = require("pg");
 
-const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "eleva.db");
-const db = new Database(dbPath);
-db.pragma("journal_mode = WAL");
+const connectionString = process.env.DATABASE_URL;
+const isLocal = !connectionString || /localhost|127\.0\.0\.1/.test(connectionString);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS state (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    profile_json TEXT,
-    stats_json TEXT,
-    chapter_number INTEGER DEFAULT 1,
-    chapter_title TEXT DEFAULT 'Mencari Arah',
-    growth_sessions INTEGER DEFAULT 0
-  );
+const pool = new Pool({
+  connectionString,
+  ssl: isLocal ? false : { rejectUnauthorized: false },
+});
 
-  CREATE TABLE IF NOT EXISTS days (
-    date TEXT PRIMARY KEY,
-    quest_json TEXT,
-    insight TEXT,
-    reflection_json TEXT
-  );
-`);
+pool.on("error", (err) => {
+  console.error("Unexpected Postgres pool error:", err);
+});
 
 const DEFAULT_STATS = {
   body: 20, mind: 20, career: 20, finance: 20,
   emotional: 20, explorer: 20, social: 20, purpose: 20,
 };
 
-function getState() {
-  const row = db.prepare("SELECT * FROM state WHERE id = 1").get();
+async function init() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS character_state (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      profile JSONB,
+      stats JSONB,
+      chapter_number INTEGER NOT NULL DEFAULT 1,
+      chapter_title TEXT NOT NULL DEFAULT 'Mencari Arah',
+      growth_sessions INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS days (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      quest JSONB,
+      insight TEXT,
+      reflection JSONB,
+      PRIMARY KEY (user_id, date)
+    );
+  `);
+}
+
+// --- users ---
+
+async function createUser({ email, passwordHash }) {
+  const { rows } = await pool.query(
+    `INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at`,
+    [email, passwordHash]
+  );
+  return rows[0];
+}
+
+async function getUserByEmail(email) {
+  const { rows } = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
+  return rows[0] || null;
+}
+
+async function getUserById(id) {
+  const { rows } = await pool.query(`SELECT id, email, created_at FROM users WHERE id = $1`, [id]);
+  return rows[0] || null;
+}
+
+// --- character state (per user) ---
+
+async function getState(userId) {
+  const { rows } = await pool.query(`SELECT * FROM character_state WHERE user_id = $1`, [userId]);
+  const row = rows[0];
   if (!row) return null;
   return {
-    profile: row.profile_json ? JSON.parse(row.profile_json) : null,
-    stats: row.stats_json ? JSON.parse(row.stats_json) : DEFAULT_STATS,
+    profile: row.profile,
+    stats: row.stats || DEFAULT_STATS,
     chapterNumber: row.chapter_number,
     chapterTitle: row.chapter_title,
     growthSessions: row.growth_sessions,
   };
 }
 
-function createState({ profile, stats, chapterNumber, chapterTitle }) {
-  db.prepare(
-    `INSERT INTO state (id, profile_json, stats_json, chapter_number, chapter_title, growth_sessions)
-     VALUES (1, ?, ?, ?, ?, 0)
-     ON CONFLICT(id) DO UPDATE SET
-       profile_json=excluded.profile_json, stats_json=excluded.stats_json,
-       chapter_number=excluded.chapter_number, chapter_title=excluded.chapter_title, growth_sessions=0`
-  ).run(JSON.stringify(profile), JSON.stringify(stats), chapterNumber, chapterTitle);
+async function createState(userId, { profile, stats, chapterNumber, chapterTitle }) {
+  await pool.query(
+    `INSERT INTO character_state (user_id, profile, stats, chapter_number, chapter_title, growth_sessions)
+     VALUES ($1, $2, $3, $4, $5, 0)
+     ON CONFLICT (user_id) DO UPDATE SET
+       profile = EXCLUDED.profile, stats = EXCLUDED.stats,
+       chapter_number = EXCLUDED.chapter_number, chapter_title = EXCLUDED.chapter_title, growth_sessions = 0`,
+    [userId, profile, stats, chapterNumber, chapterTitle]
+  );
 }
 
-function updateState({ stats, chapterNumber, chapterTitle, growthSessions }) {
-  db.prepare(
-    `UPDATE state SET stats_json = ?, chapter_number = ?, chapter_title = ?, growth_sessions = ? WHERE id = 1`
-  ).run(JSON.stringify(stats), chapterNumber, chapterTitle, growthSessions);
+async function updateState(userId, { stats, chapterNumber, chapterTitle, growthSessions }) {
+  await pool.query(
+    `UPDATE character_state SET stats = $2, chapter_number = $3, chapter_title = $4, growth_sessions = $5
+     WHERE user_id = $1`,
+    [userId, stats, chapterNumber, chapterTitle, growthSessions]
+  );
 }
 
-function resetAll() {
-  db.prepare("DELETE FROM state").run();
-  db.prepare("DELETE FROM days").run();
+async function resetUser(userId) {
+  await pool.query(`DELETE FROM character_state WHERE user_id = $1`, [userId]);
+  await pool.query(`DELETE FROM days WHERE user_id = $1`, [userId]);
 }
 
-function getDay(date) {
-  const row = db.prepare("SELECT * FROM days WHERE date = ?").get(date);
+// --- days (per user) ---
+
+async function getDay(userId, date) {
+  const { rows } = await pool.query(`SELECT * FROM days WHERE user_id = $1 AND date = $2`, [userId, date]);
+  const row = rows[0];
   if (!row) return null;
-  return {
-    quest: JSON.parse(row.quest_json),
-    insight: row.insight,
-    reflection: row.reflection_json ? JSON.parse(row.reflection_json) : null,
-  };
+  return { quest: row.quest, insight: row.insight, reflection: row.reflection };
 }
 
-function upsertDay(date, { quest, insight, reflection }) {
-  const existing = db.prepare("SELECT date FROM days WHERE date = ?").get(date);
-  if (existing) {
-    db.prepare("UPDATE days SET quest_json = ?, insight = ?, reflection_json = ? WHERE date = ?")
-      .run(JSON.stringify(quest), insight, reflection ? JSON.stringify(reflection) : null, date);
-  } else {
-    db.prepare("INSERT INTO days (date, quest_json, insight, reflection_json) VALUES (?, ?, ?, ?)")
-      .run(date, JSON.stringify(quest), insight, reflection ? JSON.stringify(reflection) : null);
-  }
+async function upsertDay(userId, date, { quest, insight, reflection }) {
+  await pool.query(
+    `INSERT INTO days (user_id, date, quest, insight, reflection)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id, date) DO UPDATE SET
+       quest = EXCLUDED.quest, insight = EXCLUDED.insight, reflection = EXCLUDED.reflection`,
+    [userId, date, quest, insight, reflection || null]
+  );
 }
 
-function recentDays(excludeDate, limit = 3) {
-  const rows = db.prepare("SELECT * FROM days WHERE date != ? ORDER BY date DESC LIMIT ?").all(excludeDate, limit);
+async function recentDays(userId, excludeDate, limit = 3) {
+  const { rows } = await pool.query(
+    `SELECT * FROM days WHERE user_id = $1 AND date != $2 ORDER BY date DESC LIMIT $3`,
+    [userId, excludeDate, limit]
+  );
   return rows.map((r) => ({
     date: r.date,
-    quest: JSON.parse(r.quest_json)?.title,
-    reflection: r.reflection_json ? JSON.parse(r.reflection_json) : null,
+    quest: r.quest?.title,
+    reflection: r.reflection,
   }));
 }
 
-function allHistory(excludeDate) {
-  const rows = db.prepare("SELECT * FROM days WHERE date != ? ORDER BY date DESC").all(excludeDate);
+async function allHistory(userId, excludeDate) {
+  const { rows } = await pool.query(
+    `SELECT * FROM days WHERE user_id = $1 AND date != $2 ORDER BY date DESC`,
+    [userId, excludeDate]
+  );
   return rows.map((r) => ({
     date: r.date,
-    quest: JSON.parse(r.quest_json),
+    quest: r.quest,
     insight: r.insight,
-    reflection: r.reflection_json ? JSON.parse(r.reflection_json) : null,
+    reflection: r.reflection,
   }));
 }
 
 module.exports = {
-  DEFAULT_STATS, getState, createState, updateState, resetAll,
+  DEFAULT_STATS, init,
+  createUser, getUserByEmail, getUserById,
+  getState, createState, updateState, resetUser,
   getDay, upsertDay, recentDays, allHistory,
 };

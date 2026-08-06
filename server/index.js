@@ -1,12 +1,27 @@
 require("dotenv").config();
 const express = require("express");
 const path = require("path");
+const cookieSession = require("cookie-session");
 const db = require("./db");
+const auth = require("./auth");
 const ai = require("./claude");
 const safety = require("./safety");
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json());
+
+app.use(
+  cookieSession({
+    name: "eleva.sid",
+    secret: process.env.SESSION_SECRET,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+  })
+);
+
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 function todayKey() {
@@ -16,37 +31,80 @@ function wordCount(text) {
   return (text || "").trim().split(/\s+/).filter(Boolean).length;
 }
 
-// Full app state for the frontend: profile, stats, chapter, today's day, aiActive flag
-app.get("/api/state", async (req, res) => {
+function requireAuth(req, res, next) {
+  if (!req.session || !req.session.userId) {
+    return res.status(401).json({ error: "Belum login." });
+  }
+  req.userId = req.session.userId;
+  next();
+}
+
+// --- Auth routes ---
+
+app.post("/api/signup", async (req, res) => {
   try {
-    const state = db.getState();
+    const { email, password, betaCode } = req.body;
+    const user = await auth.signup({ email, password, betaCode });
+    req.session.userId = user.id;
+    res.json({ ok: true });
+  } catch (e) {
+    if (e instanceof auth.AuthError) return res.status(400).json({ error: e.message });
+    console.error(e);
+    res.status(500).json({ error: "Gagal mendaftar." });
+  }
+});
+
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await auth.login({ email, password });
+    req.session.userId = user.id;
+    res.json({ ok: true });
+  } catch (e) {
+    if (e instanceof auth.AuthError) return res.status(400).json({ error: e.message });
+    console.error(e);
+    res.status(500).json({ error: "Gagal login." });
+  }
+});
+
+app.post("/api/logout", (req, res) => {
+  req.session = null;
+  res.json({ ok: true });
+});
+
+// --- App routes (all require auth, all scoped by req.userId from session) ---
+
+// Full app state for the frontend: profile, stats, chapter, today's day, aiActive flag
+app.get("/api/state", requireAuth, async (req, res) => {
+  try {
+    const state = await db.getState(req.userId);
     if (!state || !state.profile) return res.json({ profile: null });
 
     const tk = todayKey();
-    let today = db.getDay(tk);
+    let today = await db.getDay(req.userId, tk);
     if (!today) {
       const ctx = {
         profile: state.profile,
         stats: state.stats,
         chapterNumber: state.chapterNumber,
         chapterTitle: state.chapterTitle,
-        recentDays: db.recentDays(tk, 3),
+        recentDays: await db.recentDays(req.userId, tk, 3),
         today: tk,
       };
       const result = await ai.generateQuest(ctx);
       if (result.chapterNumber || result.chapterTitle) {
-        db.updateState({
+        await db.updateState(req.userId, {
           stats: state.stats,
           chapterNumber: result.chapterNumber || state.chapterNumber,
           chapterTitle: result.chapterTitle || state.chapterTitle,
           growthSessions: state.growthSessions,
         });
       }
-      db.upsertDay(tk, { quest: result.quest, insight: result.insight, reflection: null });
-      today = db.getDay(tk);
+      await db.upsertDay(req.userId, tk, { quest: result.quest, insight: result.insight, reflection: null });
+      today = await db.getDay(req.userId, tk);
     }
 
-    const fresh = db.getState();
+    const fresh = await db.getState(req.userId);
     res.json({
       profile: fresh.profile,
       stats: fresh.stats,
@@ -54,7 +112,7 @@ app.get("/api/state", async (req, res) => {
       chapterTitle: fresh.chapterTitle,
       growthSessions: fresh.growthSessions,
       today: { date: tk, ...today },
-      history: db.allHistory(tk).slice(0, 8),
+      history: (await db.allHistory(req.userId, tk)).slice(0, 8),
       aiActive: ai.hasKey(),
     });
   } catch (e) {
@@ -64,7 +122,7 @@ app.get("/api/state", async (req, res) => {
 });
 
 // Create profile + first quest
-app.post("/api/profile", async (req, res) => {
+app.post("/api/profile", requireAuth, async (req, res) => {
   try {
     const { name, situation, values, fear, stats: rawStats } = req.body;
     if (!name || !situation) return res.status(400).json({ error: "Nama dan situasi wajib diisi." });
@@ -77,13 +135,13 @@ app.post("/api/profile", async (req, res) => {
     const ctx = { profile, stats: initialStats, chapterNumber: null, chapterTitle: null, recentDays: [], today: todayKey() };
     const result = await ai.generateQuest(ctx);
 
-    db.createState({
+    await db.createState(req.userId, {
       profile,
       stats: initialStats,
       chapterNumber: result.chapterNumber || 1,
       chapterTitle: result.chapterTitle || "Mencari Arah",
     });
-    db.upsertDay(todayKey(), { quest: result.quest, insight: result.insight, reflection: null });
+    await db.upsertDay(req.userId, todayKey(), { quest: result.quest, insight: result.insight, reflection: null });
 
     res.json({ ok: true });
   } catch (e) {
@@ -93,12 +151,12 @@ app.post("/api/profile", async (req, res) => {
 });
 
 // Submit today's reflection
-app.post("/api/reflection", async (req, res) => {
+app.post("/api/reflection", requireAuth, async (req, res) => {
   try {
     const { status, text } = req.body;
     const tk = todayKey();
-    const state = db.getState();
-    const day = db.getDay(tk);
+    const state = await db.getState(req.userId);
+    const day = await db.getDay(req.userId, tk);
     if (!state || !day) return res.status(400).json({ error: "Belum ada quest hari ini." });
 
     const trimmedText = (text || "").trim();
@@ -149,8 +207,8 @@ app.post("/api/reflection", async (req, res) => {
       mentorReply,
       timestamp: new Date().toISOString(),
     };
-    db.upsertDay(tk, { quest: day.quest, insight: day.insight, reflection });
-    db.updateState({
+    await db.upsertDay(req.userId, tk, { quest: day.quest, insight: day.insight, reflection });
+    await db.updateState(req.userId, {
       stats: newStats,
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
       chapterTitle: allowAdvance && newChapterTitle ? newChapterTitle : state.chapterTitle,
@@ -164,10 +222,17 @@ app.post("/api/reflection", async (req, res) => {
   }
 });
 
-app.post("/api/reset", (req, res) => {
-  db.resetAll();
+app.post("/api/reset", requireAuth, async (req, res) => {
+  await db.resetUser(req.userId);
   res.json({ ok: true });
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Eleva jalan di http://localhost:${PORT}`));
+db.init()
+  .then(() => {
+    app.listen(PORT, () => console.log(`Eleva jalan di http://localhost:${PORT}`));
+  })
+  .catch((e) => {
+    console.error("Gagal inisialisasi database:", e);
+    process.exit(1);
+  });
