@@ -2,7 +2,7 @@
 
 AI Character Growth System. Alur: Daftar (kode beta) → Onboarding → AI Analysis → Daily Quest → Reflection → Dashboard.
 
-Beta gratis, terbatas lewat kode undangan (`BETA_CODE`) — bukan pendaftaran terbuka. Postgres (multi-user), Express backend, vanilla JS frontend. Tanpa build step.
+Beta gratis, pilot tertutup 10 orang terundang selama 14 hari lewat kode undangan (`BETA_CODE`) — bukan pendaftaran terbuka. Postgres (multi-user), Express backend, vanilla JS frontend. Tanpa build step. Model AI: Claude Sonnet (bukan Haiku — kualitas "mentor voice" adalah validasi utama pilot ini, biayanya jauh di bawah budget di skala 10 orang).
 
 **Belum ada pembayaran/billing** — beta ini gratis sampai periode betanya selesai. Jangan diasumsikan ada monetisasi aktif.
 
@@ -49,15 +49,21 @@ reference/
 - **Chapter tidak naik karena waktu/EXP**: hanya naik tiap kelipatan 5 sesi growth yang valid, dan hanya kalau AI menilai ada pergeseran pola nyata.
 - **AI mentor, bukan terapis** (`server/claude.js`, system prompt + `server/safety.js`, deteksi server-side): dua lapis. Prompt AI diinstruksikan mengarahkan ke bantuan profesional kalau refleksi menunjukkan tanda krisis. Di atas itu, `POST /api/reflection` juga mengecek `text` terhadap daftar frasa risiko tinggi secara independen dari AI — kalau cocok, AI mentor tidak dipanggil sama sekali dan `mentorReply` diganti kontak Layanan Sejiwa/Healing119 (119 ext. 8 / www.healing119.id), tanpa growth untuk sesi itu. Lihat bab 12 di dokumen bible untuk kenapa ini penting sekarang sudah ada user lain selain founder.
 
-## Onboarding & Pathway (adaptive, v2)
+## Onboarding & Pathway (adaptif, v3)
 
-Onboarding: Nama → Private Promise → Situasi → Values → Fear → **Stats** (polygon 8-sisi interaktif, drag titik sudut — menarik satu titik naik mengecilkan 7 titik lain secara proporsional, bukan ke nol, karena manusia punya waktu/energi terbatas) → **Growth Focus** (multi-select 1-3 dari 10 preset, jadi kompas yang dipakai terus untuk Quest/Acting Method harian, bukan cuma sekali di onboarding) → 3x **Adaptive Question** (digenerate AI berurutan, tiap pertanyaan pakai jawaban sebelumnya sebagai context) → **Chapter Analysis** (insight naratif AI + rekomendasi Pathway dari 6 arah: Builder, Guardian, Explorer, Connector, Seeker, Specialist — plus Secondary Trait opsional, informasional saja) → konfirmasi: terima rekomendasi AI ("Mulai First Trial") ATAU override manual lewat teks bebas ("Bukan ini — aku tahu persis mau melatih apa").
+Onboarding: **Nama + Privacy Promise** (satu layar, checkbox konfirmasi) → **Radar self-assessment** (8 sumbu — Body, Mind, Career, Finance, Emotional Stability, Explorer, Social, Purpose — drag titik sudut, skala 1-10, default 5, total SELALU tepat 40, zero-sum: menaikkan satu sumbu menurunkan sumbu lain secara terdistribusi, integer-exact bukan mendekati) → **Adaptive Questions** (4-10 pertanyaan, AI generate satu per satu dari jawaban sebelumnya + pola radar chart, berhenti sendiri begitu cukup yakin — menggantikan pertanyaan statis Situasi/Values/Fear yang dulu ada) → **Chapter Analysis** (insight naratif AI + rekomendasi Pathway dari 6 arah: Builder, Guardian, Explorer, Connector, Seeker, Specialist — plus Secondary Trait opsional, informasional saja) → konfirmasi: terima rekomendasi AI ("Mulai First Trial") ATAU override manual lewat teks bebas ("Bukan ini — aku tahu persis mau melatih apa").
+
+Radar chart menggantikan dua mekanisme terpisah dari desain sebelumnya (Stats polygon + Growth Focus multi-select) — bentuknya sendiri (sumbu mana yang menonjol/ditekan) jadi sinyal minat pengguna, sekaligus nilai awal untuk `stats` (dikonversi ×10 ke skala 0-100 yang di-grow refleksi harian).
 
 Pathway baru (dari jalur mana pun) mulai berstatus **trial** (`pathway_status`), bukan langsung permanen. Growth-gate 12-kata tetap berlaku penuh selama trial. Setelah ≥14 hari **dan** ≥5 growth session asli, resonance-check (dievaluasi lazy tiap `GET /api/state`) otomatis mengaktifkannya permanen; kalau belum cukup data, trial diperpanjang — tidak ada skor AI tersembunyi, semuanya traceable ke data refleksi nyata. AI menurunkan `pathwayNoun` (satu kata benda peran, mis. "Closer" untuk pathway "Sales") sekali dan mempertahankannya persis sama setiap hari setelahnya — ditampilkan sebagai badge `{tier} {pathwayNoun}` di dashboard (`tier` dari `growthSessions` pembagi 3, beda dari kenaikan chapter yang pembagi 5), dengan penanda tambahan `(hipotesis — First Trial)` selama masih trial. AI juga memilih tiap hari apakah instruksinya berbentuk "Quest" (aksi konkret) atau "Acting Method" (praktik cara bersikap) berdasarkan Pathway & chapter — dua framing ini tidak pernah muncul bersamaan.
 
-Akun yang sudah ada sebelum fitur ini (dibuat sebelum kolom `pathway`/`pathway_noun` ditambahkan) tidak retroaktif diminta pilih Pathway — badge-nya otomatis tidak tampil, instruksinya selalu mode "Quest". Bukan bug, sengaja tidak dikerjakan (di luar scope tanpa diminta).
+Akun yang onboarding sebelum radar chart ada (masih punya `growth_focus` + Situasi/Values/Fear di data lama mereka, belum punya `radar_snapshot`) tetap dapat quest harian yang personal — context AI jatuh balik ke field lama mereka kalau field baru belum ada, jadi tidak ada yang mendadak kehilangan "kompas"-nya gara-gara redesign ini.
 
 Keterbatasan yang jujur dicatat: resonance-check 14-hari cuma diverifikasi lewat simulasi tanggal (`pathway_trial_started_at` dimundurkan manual di Postgres saat testing), belum lewat pengguna asli yang benar-benar menunggu 14 hari kalender.
+
+## Prompt caching
+
+`server/claude.js`'s system prompt (`MENTOR_SYSTEM`, sama persis di setiap panggilan onboarding maupun harian) pakai `cache_control` Anthropic supaya panggilan berulang dalam window cache lebih murah. Catatan jujur: system prompt saat ini diperkirakan masih di bawah ambang minimum 1024 token yang dibutuhkan model (`claude-sonnet-4-6`) supaya benar-benar ke-cache — kodenya sudah terpasang (tidak ada biaya tambahan kalau belum ke-cache), tapi cache hit belum terverifikasi jalan nyata. Cek `cache_read_input_tokens` di log (`[claude usage] ...`) begitu jalan di production dengan API key aktif.
 
 ## Deployment
 

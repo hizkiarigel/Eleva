@@ -2,7 +2,7 @@ const MENTOR_SYSTEM = `Kamu adalah mentor AI di dalam produk bernama Eleva — s
 
 Prinsip yang WAJIB kamu pegang:
 - Kamu mentor, bukan mesin jawaban. Kamu mengarahkan, bukan menggurui.
-- Quest/Acting yang kamu buat harus personal untuk situasi hidup pengguna saat ini, BUKAN checklist generik ("minum air", "bangun jam 5"). Ambil dari cerita, values, ketakutan, Pathway, DAN Growth Focus mereka (ctx.growthFocus) — Growth Focus itu kompas yang mengarahkan Quest/Acting/reflection sepanjang perjalanan, bukan data onboarding yang dilupakan setelah dipakai sekali.
+- Quest/Acting yang kamu buat harus personal untuk situasi hidup pengguna saat ini, BUKAN checklist generik ("minum air", "bangun jam 5"). Ambil dari ctx.profile.originStory (ringkasan naratif tentang siapa mereka, hasil sintesis dari onboarding — cerita, values, dan ketakutan mereka semua tercermin di situ, bukan field terpisah), Pathway, dan sinyal minat/fokus mereka: ctx.radarSnapshot (bentuk radar 8-sumbu self-assessment mereka — sumbu yang menonjol menandakan area yang sedang paling mereka pedulikan) dan/atau ctx.growthFocus (kategori pilihan eksplisit, cuma ada di akun yang onboarding sebelum radar chart diperkenalkan — pakai kalau ada, radarSnapshot kalau tidak). Ini semua kompas yang mengarahkan Quest/Acting/reflection sepanjang perjalanan, bukan data onboarding yang dilupakan setelah dipakai sekali.
 - Satu instruksi utama per hari — bentuknya bisa "Quest" (aksi konkret yang dikerjakan, cocok untuk progress yang terlihat) atau "Acting Method" (praktik cara bersikap sepanjang hari, cocok untuk melatih identitas Pathway yang dipilih, mis. pathway "Sales": "sebelum menjawab, ajukan tiga pertanyaan dulu"). Kamu yang memilih framing mana yang lebih relevan hari itu berdasarkan Pathway dan chapter pengguna — jangan berikan dua-duanya sekaligus.
 - Acting Method HARUS berbasis perilaku ("tahan dulu, tanya dulu"), BUKAN berbasis target hasil ("closing 3 deal") — itu akan menggeser Eleva jadi productivity app, bukan character growth app.
 - Nada bicara: hangat, jujur, tidak menghakimi, tidak sok tahu, seperti teman yang paham tapi tetap jujur ("Bukan malas. Kamu kehilangan tujuan.") — bukan motivator generik.
@@ -30,7 +30,13 @@ async function callClaude(userContent) {
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 1000,
-      system: MENTOR_SYSTEM,
+      // MENTOR_SYSTEM is identical on every call (onboarding and daily alike) -
+      // cache_control lets repeated calls within the cache window pay ~10% for
+      // this portion instead of full price. Below the model's minimum cacheable
+      // prefix length this silently just never hits (no error) - see Task 6
+      // verification notes, don't assume a hit is happening without checking
+      // the logged usage below.
+      system: [{ type: "text", text: MENTOR_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userContent }],
     }),
   });
@@ -39,6 +45,12 @@ async function callClaude(userContent) {
     throw new Error(`Anthropic API error ${response.status}: ${errText.slice(0, 300)}`);
   }
   const data = await response.json();
+  if (data.usage) {
+    console.log(
+      `[claude usage] input=${data.usage.input_tokens} output=${data.usage.output_tokens} ` +
+      `cache_write=${data.usage.cache_creation_input_tokens || 0} cache_read=${data.usage.cache_read_input_tokens || 0}`
+    );
+  }
   const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const clean = text.replace(/```json/gi, "").replace(/```/g, "").trim();
   return JSON.parse(clean);
@@ -90,50 +102,98 @@ function fallbackReflection() {
   };
 }
 
-// --- Adaptive onboarding (Task 5) ---
+// --- Adaptive onboarding (Task 5 v3 — radar self-assessment + open-ended Q&A) ---
 
+const RADAR_AXIS_LABELS = {
+  body: "Body", mind: "Mind", career: "Career", finance: "Finance",
+  emotional: "Emotional Stability", explorer: "Explorer", social: "Social", purpose: "Purpose",
+};
+
+function highestRadarAxis(radarSnapshot) {
+  const entries = Object.entries(radarSnapshot || {});
+  if (!entries.length) return null;
+  return entries.sort((a, b) => b[1] - a[1])[0][0];
+}
+
+// Fallback-mode questions (no API key). These stand in for the static
+// Situasi/Values/Fear steps that v3 removed in favor of the AI-driven
+// conversation - since fallback mode has no real conversation, it covers
+// the same rough ground (life context, values, fear/obstacle, non-negotiable)
+// across exactly the 4-question minimum, same spirit as fallbackQuest/
+// fallbackReflection: honest and deterministic, not a fake-intelligence attempt.
 const ADAPTIVE_FALLBACK_QUESTIONS = [
-  (growthFocus) => `Kenapa ${(growthFocus || []).join(", ") || "ini"} yang paling kerasa penting buat kamu sekarang?`,
+  (radarSnapshot) => {
+    const axis = highestRadarAxis(radarSnapshot);
+    return axis
+      ? `Dari radar yang kamu gambar, ${RADAR_AXIS_LABELS[axis] || axis} kelihatan paling menonjol — lagi di fase hidup yang gimana sekarang sampai itu jadi paling kerasa?`
+      : "Lagi di fase hidup yang gimana sekarang?";
+  },
+  () => "Apa yang paling kamu pegang teguh sekarang, walau situasinya nggak gampang?",
   () => "Apa yang paling sering bikin kamu belum berani melangkah ke arah itu?",
   () => "Kalau harus memilih, hal apa yang nggak ingin kamu korbankan dalam prosesnya?",
 ];
+const ADAPTIVE_MIN_QUESTIONS = 4;
+const ADAPTIVE_MAX_QUESTIONS = 10;
 
+// ctx: {profile: {name}, radarSnapshot: {body,mind,...}, previousAnswers: [{question,answer}]}
+// Returns {question: string|null, confident: boolean}. When confident is true,
+// question may be null - the caller should stop and move to Chapter Analysis.
+// The 4-minimum/10-maximum bound is enforced here in code, not trusted purely
+// from the model's own "confident" self-report - same defense-in-depth
+// principle as the crisis-detection phrase list and the 12-word growth-gate
+// elsewhere in this codebase (AI instructions are real, but never the only
+// thing standing between a rule and its enforcement).
 async function generateAdaptiveQuestion(ctx) {
+  const answeredCount = (ctx.previousAnswers || []).length;
+  if (answeredCount >= ADAPTIVE_MAX_QUESTIONS) return { question: null, confident: true };
+
   if (!hasKey()) {
-    const idx = Math.min(3, Math.max(1, ctx.questionIndex || 1)) - 1;
-    return { question: ADAPTIVE_FALLBACK_QUESTIONS[idx](ctx.growthFocus) };
+    if (answeredCount >= ADAPTIVE_FALLBACK_QUESTIONS.length) return { question: null, confident: true };
+    return { question: ADAPTIVE_FALLBACK_QUESTIONS[answeredCount](ctx.radarSnapshot), confident: false };
   }
   try {
-    const stageInstruction =
-      ctx.questionIndex === 1
-        ? 'Ini pertanyaan pertama dari 3. Gali lebih dalam dari Growth Focus yang mereka pilih (ctx.growthFocus) dan cerita awal mereka (situasi/values/fear) — buat mereka merasa "mulai dimengerti", bukan sekadar mengisi field berikutnya.'
-        : ctx.questionIndex === 2
-        ? "Ini pertanyaan kedua dari 3, mengarah ke obstacle/fear yang menghalangi Growth Focus mereka — berdasarkan jawaban pertama mereka (ctx.previousAnswers[0])."
-        : 'Ini pertanyaan ketiga dari 3, mengarah ke values/non-negotiables mereka — framing TIDAK LANGSUNG (mis. "Saat harus memilih... hal apa yang tidak ingin kamu korbankan?", BUKAN "apa nilai hidupmu?"), berdasarkan jawaban-jawaban sebelumnya.';
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan SATU pertanyaan lanjutan untuk pengguna ini, sebagai bagian dari onboarding adaptif Eleva (percakapan bercabang, bukan daftar pertanyaan statis).\n\n${stageInstruction}\n\nBalas JSON dengan bentuk persis:\n{"question": string}\n\nAturan: pertanyaan singkat (1-2 kalimat), personal ke konteks mereka, nada hangat dan jujur seperti mentor — bukan form generik.`;
+    const stageGuidance =
+      answeredCount === 0
+        ? 'Ini pertanyaan PERTAMA, belum ada jawaban sebelumnya. Gali dari ctx.radarSnapshot (sumbu mana yang paling menonjol/paling rendah) untuk memahami apa yang sedang jadi perhatian besar mereka sekarang — semacam menanyakan "lagi di fase hidup yang gimana", tapi dipicu dari pola radar mereka, bukan generik.'
+        : answeredCount < 3
+        ? "Masih tahap awal membangun konteks - lanjut gali cerita/situasi hidup mereka lebih dalam dari jawaban sebelumnya, sebelum masuk ke obstacle/values."
+        : 'Sudah cukup dalam - mulai arahkan ke obstacle/fear yang menghalangi (kalau belum tergali) atau values/non-negotiables mereka, framing TIDAK LANGSUNG (mis. "Kalau harus memilih... hal apa yang nggak ingin kamu korbankan?", BUKAN "apa nilai hidupmu?").';
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini bagian dari onboarding adaptif Eleva - percakapan bercabang, bukan daftar pertanyaan statis, yang menggantikan pertanyaan Situasi/Values/Fear yang dulu statis. Sudah ada ${answeredCount} jawaban terkumpul (minimal ${ADAPTIVE_MIN_QUESTIONS}, maksimal ${ADAPTIVE_MAX_QUESTIONS} sebelum wajib berhenti).\n\n${stageGuidance}\n\nBalas JSON dengan bentuk persis:\n{"question": string|null, "confident": boolean}\n\nAturan: set "confident":true HANYA kalau kamu sudah punya pemahaman cukup kaya soal cerita hidup, values, DAN hambatan utama mereka untuk bisa membuat Chapter Analysis yang benar-benar personal - kalau true, "question" boleh null (sistem yang menjaga batas minimal/maksimal, kamu tidak perlu menghitung sendiri). Kalau belum confident, isi "question" dengan SATU pertanyaan lanjutan singkat (1-2 kalimat), personal ke konteks mereka, nada hangat dan jujur seperti mentor - bukan form generik.`;
     const result = await callClaude(user);
-    if (!result?.question) throw new Error("bad shape");
+    if (typeof result?.confident !== "boolean") throw new Error("bad shape");
+    if (!result.confident && !result.question) throw new Error("bad shape");
+    // Minimum enforced here, not trusted from the model's own self-report -
+    // same defense-in-depth principle as crisis-detection and the growth-gate
+    // elsewhere in this file/codebase. A too-early confident:true is treated
+    // as a policy violation and falls through to the deterministic fallback
+    // question below, rather than retried (costs another API call for no
+    // real benefit - the fallback question is a perfectly fine substitute).
+    if (result.confident && answeredCount < ADAPTIVE_MIN_QUESTIONS) throw new Error("confident too early");
     return result;
   } catch (e) {
     console.error("generateAdaptiveQuestion failed, using fallback:", e.message);
-    const idx = Math.min(3, Math.max(1, ctx.questionIndex || 1)) - 1;
-    return { question: ADAPTIVE_FALLBACK_QUESTIONS[idx](ctx.growthFocus) };
+    if (answeredCount >= ADAPTIVE_FALLBACK_QUESTIONS.length) return { question: null, confident: true };
+    return { question: ADAPTIVE_FALLBACK_QUESTIONS[answeredCount](ctx.radarSnapshot), confident: false };
   }
 }
 
 const PATHWAY_NAMES = ["Builder", "Guardian", "Explorer", "Connector", "Seeker", "Specialist"];
-const GROWTH_FOCUS_TO_PATHWAY = {
-  Career: "Builder", Leadership: "Builder", Wealth: "Builder",
-  Confidence: "Guardian", Health: "Guardian",
-  Adventure: "Explorer",
-  Relationship: "Connector", Communication: "Connector", Contribution: "Connector",
-  Purpose: "Seeker",
+// Cheap, traceable fallback heuristic (no API key) - not meant to approximate
+// real AI judgment, just a reasonable non-random default. Real generateChapterAnalysis
+// below reads the whole conversation, not just the radar shape.
+const RADAR_AXIS_TO_PATHWAY = {
+  career: "Builder", finance: "Builder",
+  emotional: "Guardian", body: "Guardian",
+  explorer: "Explorer",
+  social: "Connector",
+  purpose: "Seeker",
+  mind: "Specialist",
 };
 
 async function generateChapterAnalysis(ctx) {
   if (!hasKey()) return fallbackChapterAnalysis(ctx);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. Rangkum semua yang sudah mereka ceritakan (situasi/values/fear + growth focus + jawaban-jawaban adaptive) jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Builder"|"Guardian"|"Explorer"|"Connector"|"Seeker"|"Specialist", "pathwayNoun": string, "secondaryTrait": string|null}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik. "pathway" satu rekomendasi dari 6 nama itu berdasarkan pola dari SELURUH konteks, bukan cuma growthFocus. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Builder → "Builder"). "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah self-assessment 8-sumbu yang mereka gambar sendiri (skala 1-10), dan ctx.answers adalah seluruh percakapan Adaptive Questions yang sudah menggali cerita hidup, values, dan hambatan mereka (menggantikan pertanyaan Situasi/Values/Fear yang dulu statis). Rangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Builder"|"Guardian"|"Explorer"|"Connector"|"Seeker"|"Specialist", "pathwayNoun": string, "secondaryTrait": string|null}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali). "pathway" satu rekomendasi dari 6 nama itu berdasarkan pola dari SELURUH konteks (radar + jawaban), bukan cuma sumbu radar tertinggi. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Builder → "Builder"). "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
     const result = await callClaude(user);
     if (!result?.pathway || !PATHWAY_NAMES.includes(result.pathway)) throw new Error("bad shape");
     return result;
@@ -144,16 +204,12 @@ async function generateChapterAnalysis(ctx) {
 }
 
 function fallbackChapterAnalysis(ctx) {
-  const counts = {};
-  (ctx.growthFocus || []).forEach((f) => {
-    const p = GROWTH_FOCUS_TO_PATHWAY[f];
-    if (p) counts[p] = (counts[p] || 0) + 1;
-  });
-  const pathway = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || "Seeker";
+  const axis = highestRadarAxis(ctx.radarSnapshot);
+  const pathway = RADAR_AXIS_TO_PATHWAY[axis] || "Seeker";
   return {
     insight: hasKey()
       ? "Koneksi ke mentor lagi tersendat — tapi dari yang kamu ceritakan, ini arah yang tetap relevan buat dicoba."
-      : "Mode tanpa API key: analisis di bawah ini masih berbasis pola sederhana dari Growth Focus-mu, belum benar-benar membaca ceritamu. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.",
+      : "Mode tanpa API key: analisis di bawah ini masih berbasis pola sederhana dari radar-mu, belum benar-benar membaca ceritamu. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.",
     pathway,
     pathwayNoun: pathway,
     secondaryTrait: null,

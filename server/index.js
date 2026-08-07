@@ -76,8 +76,8 @@ app.post("/api/logout", (req, res) => {
 
 app.post("/api/onboarding/adaptive-question", requireAuth, async (req, res) => {
   try {
-    const { profile, growthFocus, questionIndex, previousAnswers } = req.body;
-    const result = await ai.generateAdaptiveQuestion({ profile, growthFocus, questionIndex, previousAnswers });
+    const { profile, radarSnapshot, previousAnswers } = req.body;
+    const result = await ai.generateAdaptiveQuestion({ profile, radarSnapshot, previousAnswers });
     res.json(result);
   } catch (e) {
     console.error(e);
@@ -87,8 +87,8 @@ app.post("/api/onboarding/adaptive-question", requireAuth, async (req, res) => {
 
 app.post("/api/onboarding/chapter-analysis", requireAuth, async (req, res) => {
   try {
-    const { profile, growthFocus, answers } = req.body;
-    const result = await ai.generateChapterAnalysis({ profile, growthFocus, answers });
+    const { profile, radarSnapshot, answers } = req.body;
+    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, answers });
     res.json(result);
   } catch (e) {
     console.error(e);
@@ -122,7 +122,11 @@ app.get("/api/state", requireAuth, async (req, res) => {
         profile: state.profile,
         pathway: state.pathway,
         pathwayNoun: state.pathwayNoun,
-        growthFocus: state.growthFocus,
+        // Both passed when present - v3 accounts have radarSnapshot, pre-v3
+        // accounts have growthFocus, MENTOR_SYSTEM knows to use whichever
+        // exists so old accounts don't silently lose their "compass".
+        growthFocus: state.growthFocus || undefined,
+        radarSnapshot: state.radarSnapshot || undefined,
         stats: state.stats,
         chapterNumber: state.chapterNumber,
         chapterTitle: state.chapterTitle,
@@ -164,24 +168,36 @@ app.get("/api/state", requireAuth, async (req, res) => {
 app.post("/api/profile", requireAuth, async (req, res) => {
   try {
     const {
-      name, situation, values, fear, stats: rawStats,
-      growthFocus, pathway: rawPathway, pathwayNoun: rawPathwayNoun, secondaryTrait,
+      name, radarSnapshot: rawRadar, originStory,
+      pathway: rawPathway, pathwayNoun: rawPathwayNoun, secondaryTrait,
     } = req.body;
-    if (!name || !situation) return res.status(400).json({ error: "Nama dan situasi wajib diisi." });
+    if (!name) return res.status(400).json({ error: "Nama wajib diisi." });
 
-    // Stats come pre-computed 0-100 from the client-side polygon (conservation-
-    // of-total redistribution already applied there) - just clamp defensively.
+    // radarSnapshot comes from the client-side radar chart (conservation-of-
+    // total redistribution already applied there, 1-10 per axis) - clamp
+    // defensively, then derive the 0-100 `stats` column from it (×10). Stored
+    // separately: radar_snapshot stays a frozen 1-10 record of what they drew,
+    // stats is the live 0-100 value that daily reflections grow over time.
+    const radarSnapshot = {};
+    Object.entries(rawRadar || {}).forEach(([k, v]) => {
+      radarSnapshot[k] = Math.max(1, Math.min(10, Math.round(Number(v))));
+    });
     const initialStats = {};
-    Object.entries(rawStats || {}).forEach(([k, v]) => {
-      initialStats[k] = Math.max(0, Math.min(100, Math.round(Number(v))));
+    Object.entries(radarSnapshot).forEach(([k, v]) => {
+      initialStats[k] = Math.max(0, Math.min(100, v * 10));
     });
 
     const pathway = (rawPathway || "").trim() || null;
     const pathwayNoun = (rawPathwayNoun || "").trim() || pathway;
 
-    const profile = { name, situation, values, fear, createdAt: new Date().toISOString() };
+    // originStory replaces the old discrete situation/values/fear fields -
+    // it's the Chapter Analysis insight (already generated from the adaptive
+    // conversation), kept as the ongoing "who is this person" context for
+    // daily quest generation. profile.insight would collide in meaning with
+    // days.insight (the daily-rotating quest insight) - originStory avoids that.
+    const profile = { name, originStory: originStory || null, createdAt: new Date().toISOString() };
     const ctx = {
-      profile, pathway, pathwayNoun, growthFocus,
+      profile, pathway, pathwayNoun, radarSnapshot,
       stats: initialStats, chapterNumber: null, chapterTitle: null, recentDays: [], today: todayKey(),
     };
     const result = await ai.generateQuest(ctx);
@@ -193,7 +209,7 @@ app.post("/api/profile", requireAuth, async (req, res) => {
       chapterTitle: result.chapterTitle || "Mencari Arah",
       pathway,
       pathwayNoun: result.pathwayNoun || pathwayNoun,
-      growthFocus,
+      radarSnapshot,
       secondaryTrait: secondaryTrait || null,
     });
     await db.upsertDay(req.userId, todayKey(), { quest: result.quest, insight: result.insight, reflection: null });
@@ -230,7 +246,9 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     } else {
       const eligible = (status === "done" || status === "partial") && wordCount(text) >= 12;
       const ctx = {
-        profile: { name: state.profile.name, situation: state.profile.situation },
+        // originStory is v3; situation is the pre-v3 fallback for accounts
+        // that onboarded before this field existed.
+        profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
         quest: day.quest,
         status,
         reflectionText: trimmedText,

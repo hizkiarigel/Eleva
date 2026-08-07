@@ -12,52 +12,66 @@ const PATHWAY_DESC = {
   Specialist: "Arah yang khusus buat kamu, di luar lima pola umum lainnya.",
 };
 
-const GROWTH_FOCUS_OPTIONS = [
-  "Career", "Purpose", "Relationship", "Leadership", "Confidence",
-  "Communication", "Wealth", "Health", "Adventure", "Contribution",
-];
-
 const MATURITY_TIERS = ["Emerging", "Practicing", "Reliable", "System", "Master"];
 function maturityTier(growthSessions) {
   return MATURITY_TIERS[Math.min(MATURITY_TIERS.length - 1, Math.floor((growthSessions || 0) / 3))];
 }
 
-// --- Polygon stats picker (conservation-of-total redistribution) ---
+// --- Radar self-assessment (8 axes, 1-10 each, always sums to exactly 40 - see
+// redistributeStats below for how the exact-conservation is guaranteed) ---
 const POLY_ORDER = ["mind", "career", "finance", "purpose", "emotional", "explorer", "social", "body"];
-const POLY_MIN = 5, POLY_MAX = 100, POLY_CENTER = 150, POLY_MAXR = 110, POLY_MINR = 15;
+const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 110, POLY_MINR = 15;
+const DEFAULT_RADAR = { body: 5, mind: 5, career: 5, finance: 5, emotional: 5, explorer: 5, social: 5, purpose: 5 };
+
 function polyRadius(value) {
   const v = Math.max(POLY_MIN, Math.min(POLY_MAX, value));
-  return POLY_MINR + (v / 100) * (POLY_MAXR - POLY_MINR);
+  return POLY_MINR + ((v - POLY_MIN) / (POLY_MAX - POLY_MIN)) * (POLY_MAXR - POLY_MINR);
 }
 function polyValueFromRadius(r) {
   const clamped = Math.max(POLY_MINR, Math.min(POLY_MAXR, r));
-  return Math.round(((clamped - POLY_MINR) / (POLY_MAXR - POLY_MINR)) * 100);
+  return Math.round(POLY_MIN + ((clamped - POLY_MINR) / (POLY_MAXR - POLY_MINR)) * (POLY_MAX - POLY_MIN));
 }
 function polyPoint(index, value) {
   const angle = ((-90 + index * 45) * Math.PI) / 180;
   const r = polyRadius(value);
   return [POLY_CENTER + r * Math.cos(angle), POLY_CENTER + r * Math.sin(angle)];
 }
+// Integer-exact redistribution: moves exactly 1 point per step between the
+// dragged axis and whichever other axis is currently most extreme (highest
+// when taking, lowest when giving). Total is invariant BY CONSTRUCTION (every
+// step is a 1-for-1 transfer between two axes), not by rounding luck - a
+// proportional-then-round approach here drifted off 40 in testing.
 function redistributeStats(stats, changedKey, rawNewValue) {
-  const newValue = Math.max(POLY_MIN, Math.min(POLY_MAX, rawNewValue));
-  const oldValue = stats[changedKey];
-  const delta = newValue - oldValue;
-  if (Math.abs(delta) < 0.01) return stats;
+  const newValue = Math.max(POLY_MIN, Math.min(POLY_MAX, Math.round(rawNewValue)));
+  let delta = newValue - stats[changedKey];
+  if (delta === 0) return stats;
+  const next = { ...stats };
   const others = Object.keys(stats).filter((k) => k !== changedKey);
-  const othersTotal = others.reduce((s, k) => s + stats[k], 0) || 1;
-  const next = { ...stats, [changedKey]: newValue };
-  others.forEach((k) => {
-    const share = stats[k] / othersTotal;
-    next[k] = Math.round(Math.max(POLY_MIN, stats[k] - delta * share));
-  });
+  while (delta > 0) {
+    const donors = others.filter((k) => next[k] > POLY_MIN);
+    if (!donors.length) break;
+    const donor = donors.reduce((a, b) => (next[b] > next[a] ? b : a));
+    next[donor] -= 1;
+    next[changedKey] += 1;
+    delta -= 1;
+  }
+  while (delta < 0) {
+    const receivers = others.filter((k) => next[k] < POLY_MAX);
+    if (!receivers.length) break;
+    const receiver = receivers.reduce((a, b) => (next[b] < next[a] ? b : a));
+    next[receiver] += 1;
+    next[changedKey] -= 1;
+    delta += 1;
+  }
   return next;
 }
 
 const root = document.getElementById("root");
 
 let onboardForm = {
-  name: "", situation: "", values: "", fear: "", growthFocus: [],
-  stats: { body: 50, mind: 50, career: 50, finance: 50, emotional: 50, explorer: 50, social: 50, purpose: 50 },
+  name: "",
+  privacyChecked: false,
+  radar: { ...DEFAULT_RADAR },
 };
 let onboardStep = 0;
 let ui = { view: "loading", label: "Membuka Eleva..." };
@@ -71,10 +85,9 @@ let authForm = { email: "", password: "", betaCode: "" };
 let privacyChecked = false;
 let authError = "";
 
-// --- Adaptive onboarding phase (Growth Focus -> Adaptive Q1-3 -> Chapter Analysis) ---
+// --- Adaptive onboarding phase (Radar chart -> open-ended Adaptive Q&A -> Chapter Analysis) ---
 let adaptivePhase = "question"; // "loading" | "question" | "thinking" | "analysis"
-let adaptiveQuestionIndex = 1; // 1, 2, or 3
-let adaptiveAnswers = []; // [{question, answer}, ...]
+let adaptiveAnswers = []; // [{question, answer}, ...] - length also serves as the "how many answered" counter
 let adaptiveCurrentQuestion = "";
 let adaptiveAnswerText = "";
 let chapterAnalysis = null; // {insight, pathway, pathwayNoun, secondaryTrait}
@@ -106,11 +119,11 @@ async function api(path, opts) {
 function resetOnboardState() {
   onboardStep = 0;
   onboardForm = {
-    name: "", situation: "", values: "", fear: "", growthFocus: [],
-    stats: { body: 50, mind: 50, career: 50, finance: 50, emotional: 50, explorer: 50, social: 50, purpose: 50 },
+    name: "",
+    privacyChecked: false,
+    radar: { ...DEFAULT_RADAR },
   };
   adaptivePhase = "question";
-  adaptiveQuestionIndex = 1;
   adaptiveAnswers = [];
   adaptiveCurrentQuestion = "";
   adaptiveAnswerText = "";
@@ -207,45 +220,39 @@ function renderAuth() {
   });
 }
 
+// Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both
+// gone, folded into the adaptive conversation and the radar chart itself.
 const ONBOARD_STEPS = [
-  { key: "name", q: "Siapa namamu?", type: "text", placeholder: "Nama panggilan" },
-  { type: "promise", q: "Sebelum lanjut...", promiseText: "Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva." },
-  { key: "situation", q: "Lagi di fase hidup yang gimana sekarang?", sub: "Nggak perlu rapi. Tulis aja apa adanya.", type: "textarea", placeholder: "Ceritakan singkat kondisimu sekarang..." },
-  { key: "values", q: "Apa yang paling kamu pegang teguh sekarang?", sub: "Nilai, prinsip, atau hal yang penting buat kamu.", type: "textarea", placeholder: "Misalnya: kejujuran, keluarga, kebebasan..." },
-  { key: "fear", q: "Apa yang paling kamu hindari atau takutkan sekarang?", type: "textarea", placeholder: "Boleh jujur, ini cuma buat kamu dan mentor AI-mu." },
-  { key: "stats", q: "Gambarkan dirimu sekarang", sub: "Tarik titik-titiknya. Menonjolkan satu sisi bikin sisi lain sedikit mengecil — bukan ke nol, cuma menyesuaikan, karena kamu (kayak semua orang) punya waktu & energi yang terbatas.", type: "stats" },
-  { key: "growthFocus", q: "Mau bangun apa dulu?", sub: "Pilih 1-3 area yang paling ingin kamu kembangkan bareng Eleva sekarang.", type: "growthFocus" },
+  { type: "namePromise", q: "Siapa namamu?", promiseText: "Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva." },
+  { type: "radar", q: "Gambarkan dirimu sekarang", sub: "Tarik titik-titiknya. Menonjolkan satu sisi bikin sisi lain sedikit mengecil — bukan ke nol, cuma menyesuaikan, karena kamu (kayak semua orang) punya waktu & energi yang terbatas." },
 ];
 
 function isStepValid(step) {
   const s = ONBOARD_STEPS[step];
-  if (s.type === "stats" || s.type === "promise") return true;
-  if (s.type === "growthFocus") {
-    return onboardForm.growthFocus.length >= 1 && onboardForm.growthFocus.length <= 3;
-  }
-  return (onboardForm[s.key] || "").trim().length > (s.key === "name" ? 0 : 2);
+  if (s.type === "radar") return true;
+  return onboardForm.name.trim().length > 0 && onboardForm.privacyChecked;
 }
 
 function renderPolygonSVG() {
-  const stats = onboardForm.stats;
-  const points = POLY_ORDER.map((k, i) => polyPoint(i, stats[k]));
+  const radar = onboardForm.radar;
+  const points = POLY_ORDER.map((k, i) => polyPoint(i, radar[k]));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
   const rings = [0.33, 0.66, 1].map((f) => {
-    const pts = POLY_ORDER.map((k, i) => polyPoint(i, f * 100));
+    const pts = POLY_ORDER.map((k, i) => polyPoint(i, POLY_MIN + f * (POLY_MAX - POLY_MIN)));
     const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
     return `<path d="${d}" class="poly-ring" />`;
   }).join("");
   const axisLines = POLY_ORDER.map((k, i) => {
-    const [x, y] = polyPoint(i, 100);
+    const [x, y] = polyPoint(i, POLY_MAX);
     return `<line x1="${POLY_CENTER}" y1="${POLY_CENTER}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="poly-axis" />`;
   }).join("");
   const labels = POLY_ORDER.map((k, i) => {
-    const [x, y] = polyPoint(i, 122);
+    const [x, y] = polyPoint(i, POLY_MAX);
     const label = STAT_ORDER.find((s) => s[0] === k)[1];
     return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="poly-label" text-anchor="middle">${esc(label)}</text>`;
   }).join("");
   const handles = POLY_ORDER.map((k, i) => {
-    const [x, y] = polyPoint(i, stats[k]);
+    const [x, y] = polyPoint(i, radar[k]);
     return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" class="poly-handle" data-stat="${k}" />`;
   }).join("");
   return `<svg viewBox="0 0 300 300" class="poly-svg" id="polySvg">${rings}${axisLines}<path d="${pathD}" class="poly-shape" id="polyShape" />${labels}${handles}</svg>`;
@@ -255,11 +262,11 @@ function updatePolygonDOM() {
   const svg = document.getElementById("polySvg");
   if (!svg) return;
   POLY_ORDER.forEach((k, i) => {
-    const [x, y] = polyPoint(i, onboardForm.stats[k]);
+    const [x, y] = polyPoint(i, onboardForm.radar[k]);
     const handle = svg.querySelector(`circle[data-stat="${k}"]`);
     if (handle) { handle.setAttribute("cx", x.toFixed(1)); handle.setAttribute("cy", y.toFixed(1)); }
   });
-  const points = POLY_ORDER.map((k, i) => polyPoint(i, onboardForm.stats[k]));
+  const points = POLY_ORDER.map((k, i) => polyPoint(i, onboardForm.radar[k]));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
   document.getElementById("polyShape")?.setAttribute("d", pathD);
 }
@@ -273,7 +280,7 @@ function attachPolygonHandlers() {
     const px = ((clientX - rect.left) / rect.width) * 300;
     const py = ((clientY - rect.top) / rect.height) * 300;
     const dist = Math.hypot(px - POLY_CENTER, py - POLY_CENTER);
-    onboardForm.stats = redistributeStats(onboardForm.stats, draggingKey, polyValueFromRadius(dist));
+    onboardForm.radar = redistributeStats(onboardForm.radar, draggingKey, polyValueFromRadius(dist));
     updatePolygonDOM();
   }
   svg.querySelectorAll(".poly-handle").forEach((handle) => {
@@ -293,19 +300,16 @@ function renderOnboarding() {
   const last = onboardStep === ONBOARD_STEPS.length - 1;
 
   let bodyHTML = "";
-  if (step.type === "text") {
-    bodyHTML = `<input type="text" id="fld" value="${esc(onboardForm[step.key])}" placeholder="${esc(step.placeholder)}" autofocus />`;
-  } else if (step.type === "textarea") {
-    bodyHTML = `<textarea id="fld" rows="4" placeholder="${esc(step.placeholder)}" autofocus>${esc(onboardForm[step.key])}</textarea>`;
-  } else if (step.type === "stats") {
+  if (step.type === "namePromise") {
+    bodyHTML = `
+      <input type="text" id="fld" value="${esc(onboardForm.name)}" placeholder="Nama panggilan" autofocus />
+      <p class="fr" style="font-size:15.5px;line-height:1.6;font-style:italic;color:var(--muted);margin:18px 0">${esc(step.promiseText)}</p>
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <input type="checkbox" id="promiseCheck" ${onboardForm.privacyChecked ? "checked" : ""} style="margin-top:3px" />
+        <label for="promiseCheck" style="margin:0;font-size:13px;line-height:1.5;color:var(--muted)">Aku mengerti dan siap mulai.</label>
+      </div>`;
+  } else if (step.type === "radar") {
     bodyHTML = `<div class="poly-wrap">${renderPolygonSVG()}</div>`;
-  } else if (step.type === "promise") {
-    bodyHTML = `<p class="fr" style="font-size:17px;line-height:1.6;font-style:italic">${esc(step.promiseText)}</p>`;
-  } else if (step.type === "growthFocus") {
-    bodyHTML = `<div class="chip-row">${GROWTH_FOCUS_OPTIONS.map((f) => `
-      <button class="chip ${onboardForm.growthFocus.includes(f) ? "active" : ""}" data-focus="${f}">${f}</button>
-    `).join("")}</div>
-    <p class="mono" id="focusCount" style="font-size:12px;color:var(--muted);margin-top:12px">${onboardForm.growthFocus.length}/3 dipilih</p>`;
   }
 
   root.innerHTML = `
@@ -321,36 +325,26 @@ function renderOnboarding() {
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:28px">
         <button class="btn-ghost" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">Kembali</button>
-        <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>${last ? "Lanjut" : "Lanjut"} →</button>
+        <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
       </div>
     </div>`;
 
   const fld = document.getElementById("fld");
-  if (fld) fld.addEventListener("input", (e) => { onboardForm[step.key] = e.target.value; document.getElementById("next").disabled = !isStepValid(onboardStep); });
-  if (step.type === "stats") attachPolygonHandlers();
-  document.querySelectorAll(".chip").forEach((b) => {
-    b.addEventListener("click", () => {
-      const f = b.dataset.focus;
-      const i = onboardForm.growthFocus.indexOf(f);
-      if (i >= 0) onboardForm.growthFocus.splice(i, 1);
-      else if (onboardForm.growthFocus.length < 3) onboardForm.growthFocus.push(f);
-      // Targeted DOM update (not a full renderOnboarding()) so the fadeUp
-      // animation doesn't restart and flicker on every chip tap.
-      document.querySelectorAll(".chip").forEach((el) => {
-        el.classList.toggle("active", onboardForm.growthFocus.includes(el.dataset.focus));
-      });
-      const counter = document.getElementById("focusCount");
-      if (counter) counter.textContent = `${onboardForm.growthFocus.length}/3 dipilih`;
-      document.getElementById("next").disabled = !isStepValid(onboardStep);
-    });
+  if (fld) fld.addEventListener("input", (e) => {
+    onboardForm.name = e.target.value;
+    document.getElementById("next").disabled = !isStepValid(onboardStep);
   });
+  document.getElementById("promiseCheck")?.addEventListener("change", (e) => {
+    onboardForm.privacyChecked = e.target.checked;
+    document.getElementById("next").disabled = !isStepValid(onboardStep);
+  });
+  if (step.type === "radar") attachPolygonHandlers();
   document.getElementById("back")?.addEventListener("click", () => { onboardStep = Math.max(0, onboardStep - 1); renderOnboarding(); });
   document.getElementById("next").addEventListener("click", () => {
     if (!isStepValid(onboardStep)) return;
     if (!last) { onboardStep++; renderOnboarding(); return; }
     // Static steps done - hand off to the adaptive AI-driven phase.
     adaptivePhase = "loading";
-    adaptiveQuestionIndex = 1;
     adaptiveAnswers = [];
     ui = { view: "adaptive" };
     render();
@@ -364,12 +358,18 @@ async function fetchAdaptiveQuestion() {
     const result = await api("/api/onboarding/adaptive-question", {
       method: "POST",
       body: {
-        profile: { name: onboardForm.name, situation: onboardForm.situation, values: onboardForm.values, fear: onboardForm.fear },
-        growthFocus: onboardForm.growthFocus,
-        questionIndex: adaptiveQuestionIndex,
+        profile: { name: onboardForm.name },
+        radarSnapshot: onboardForm.radar,
         previousAnswers: adaptiveAnswers,
       },
     });
+    // Server decides when enough has been gathered (min 4, max 10 - enforced
+    // server-side, not just requested here) - confident:true means stop and
+    // move straight to Chapter Analysis instead of showing another question.
+    if (result.confident) {
+      await fetchChapterAnalysis();
+      return;
+    }
     adaptiveCurrentQuestion = result.question;
     adaptiveAnswerText = "";
     adaptivePhase = "question";
@@ -390,8 +390,8 @@ async function fetchChapterAnalysis() {
     chapterAnalysis = await api("/api/onboarding/chapter-analysis", {
       method: "POST",
       body: {
-        profile: { name: onboardForm.name, situation: onboardForm.situation, values: onboardForm.values, fear: onboardForm.fear },
-        growthFocus: onboardForm.growthFocus,
+        profile: { name: onboardForm.name },
+        radarSnapshot: onboardForm.radar,
         answers: adaptiveAnswers,
       },
     });
@@ -410,8 +410,8 @@ async function submitOnboarding(pathway, pathwayNoun) {
     await api("/api/profile", {
       method: "POST",
       body: {
-        name: onboardForm.name, situation: onboardForm.situation, values: onboardForm.values, fear: onboardForm.fear,
-        stats: onboardForm.stats, growthFocus: onboardForm.growthFocus,
+        name: onboardForm.name, radarSnapshot: onboardForm.radar,
+        originStory: chapterAnalysis?.insight || null,
         pathway, pathwayNoun, secondaryTrait: chapterAnalysis?.secondaryTrait || null,
       },
     });
@@ -432,7 +432,7 @@ function renderAdaptive() {
     root.innerHTML = `
       <div class="shell">
         <div class="eyebrow mono">ELEVA · ONBOARDING</div>
-        <div class="step-dots">${[0, 1, 2].map((i) => `<div class="dot-seg ${i < adaptiveQuestionIndex ? "active" : ""}"></div>`).join("")}</div>
+        <div class="mono" style="font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:20px">PERTANYAAN KE-${adaptiveAnswers.length + 1}</div>
         ${onboardError ? `<p style="color:var(--rust);font-size:13.5px;margin:0 0 16px">${esc(onboardError)}</p>` : ""}
         ${!adaptiveCurrentQuestion ? `<button class="btn-primary" id="retryQ">Coba lagi</button>` : `
         <div class="fadeUp">
@@ -450,14 +450,12 @@ function renderAdaptive() {
     });
     document.getElementById("adaptiveNext")?.addEventListener("click", async () => {
       adaptiveAnswers.push({ question: adaptiveCurrentQuestion, answer: adaptiveAnswerText.trim() });
-      if (adaptiveQuestionIndex < 3) {
-        adaptiveQuestionIndex++;
-        adaptivePhase = "loading";
-        render();
-        await fetchAdaptiveQuestion();
-      } else {
-        await fetchChapterAnalysis();
-      }
+      adaptivePhase = "loading";
+      render();
+      // fetchAdaptiveQuestion re-evaluates confidence with the updated answer
+      // list, and internally redirects to fetchChapterAnalysis once satisfied
+      // (min 4/max 10 enforced server-side) - no fixed-count loop needed here.
+      await fetchAdaptiveQuestion();
     });
     return;
   }
