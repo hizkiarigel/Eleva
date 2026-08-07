@@ -18,7 +18,7 @@ function maturityTier(growthSessions) {
 }
 
 // --- Radar self-assessment (8 axes, 1-10 each, always sums to exactly 40 - see
-// redistributeStats below for how the exact-conservation is guaranteed) ---
+// applySynergyDrag/roundPreservingTotal below for how that's guaranteed) ---
 const POLY_ORDER = ["mind", "career", "finance", "purpose", "emotional", "explorer", "social", "body"];
 const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 110, POLY_MINR = 15;
 // Square viewBox with padding so axis-name labels (anchored outward) never
@@ -30,52 +30,132 @@ function polyRadius(value) {
   const v = Math.max(POLY_MIN, Math.min(POLY_MAX, value));
   return POLY_MINR + ((v - POLY_MIN) / (POLY_MAX - POLY_MIN)) * (POLY_MAXR - POLY_MINR);
 }
+// Returns a FLOAT value - rounding happens once, at the end of the whole
+// redistribution (largest-remainder across all 8 axes), never per-point.
 function polyValueFromRadius(r) {
   const clamped = Math.max(POLY_MINR, Math.min(POLY_MAXR, r));
-  return Math.round(POLY_MIN + ((clamped - POLY_MINR) / (POLY_MAXR - POLY_MINR)) * (POLY_MAX - POLY_MIN));
+  return POLY_MIN + ((clamped - POLY_MINR) / (POLY_MAXR - POLY_MINR)) * (POLY_MAX - POLY_MIN);
 }
 function polyPoint(index, value) {
   const angle = ((-90 + index * 45) * Math.PI) / 180;
   const r = polyRadius(value);
   return [POLY_CENTER + r * Math.cos(angle), POLY_CENTER + r * Math.sin(angle)];
 }
-// Integer-exact redistribution: moves exactly 1 point per step between the
-// dragged axis and whichever other axis is currently most extreme (highest
-// when taking, lowest when giving). Total is invariant BY CONSTRUCTION (every
-// step is a 1-for-1 transfer between two axes), not by rounding luck - a
-// proportional-then-round approach here drifted off 40 in testing.
-// Locked axes (max 3, user-pinned priorities) are excluded from the
-// donor/receiver pool entirely - their values never move because of another
-// axis's drag. The while-loops break when the unlocked pool runs out of
-// headroom, so the dragged axis simply stops at the feasible bound; with at
-// most 3 locked axes this can never deadlock (worst case: 3 locked at 10
-// leaves 10 points across 5 unlocked axes, still >= 5x floor of 1).
-function redistributeStats(stats, changedKey, rawNewValue, lockedKeys) {
-  const locked = new Set(lockedKeys || []);
-  const newValue = Math.max(POLY_MIN, Math.min(POLY_MAX, Math.round(rawNewValue)));
-  let delta = newValue - stats[changedKey];
-  if (delta === 0) return stats;
-  const next = { ...stats };
-  const others = Object.keys(stats).filter((k) => k !== changedKey && !locked.has(k));
-  while (delta > 0) {
-    const donors = others.filter((k) => next[k] > POLY_MIN);
-    if (!donors.length) break;
-    const donor = donors.reduce((a, b) => (next[b] > next[a] ? b : a));
-    next[donor] -= 1;
-    next[changedKey] += 1;
-    delta -= 1;
-  }
-  while (delta < 0) {
-    const receivers = others.filter((k) => next[k] < POLY_MAX);
-    if (!receivers.length) break;
-    const receiver = receivers.reduce((a, b) => (next[b] < next[a] ? b : a));
-    next[receiver] += 1;
-    next[changedKey] -= 1;
-    delta += 1;
-  }
-  return next;
+// --- Redistribution v2: evidence-based synergy (per PRD) ---
+// History: v0 shipped to production moved points to/from the most extreme
+// axis, which in practice equalized everything ("equal-split" - founder
+// flagged it as a bug); v1 was plain value-proportional; v2 (this) uses
+// actual research evidence for the 15 axis pairs that have it, and stays
+// value-proportional for pairs that don't.
+//
+// weight: kuat=3, sedang(-kuat)=2, lemah=1. direction: 1=searah, -1=berlawanan.
+// Full per-pair citations live in reference/Eleva_Correlation_Matrix.html per
+// the PRD (file not yet in this repo - rationale summaries below come from
+// the PRD itself; do not invent citations here).
+const SYNERGY = {
+  "body|emotional": { weight: 3, direction: 1 },   // kuat - exercise & depresi
+  "body|finance": { weight: 3, direction: 1 },     // kuat - financial strain
+  "body|mind": { weight: 1, direction: 1 },        // lemah - g=0.13, dewasa
+  "body|purpose": { weight: 2, direction: 1 },     // sedang-kuat - r~0.26
+  "body|career": { weight: 2, direction: -1 },     // sedang, negatif - overwork
+  "mind|career": { weight: 3, direction: 1 },      // kuat - GMA prediktor
+  "mind|explorer": { weight: 3, direction: 1 },    // kuat - nyaris definisional
+  "career|social": { weight: 3, direction: 1 },    // kuat - social capital
+  "career|purpose": { weight: 3, direction: 1 },   // kuat - calling & kepuasan
+  "career|explorer": { weight: 1, direction: 1 },  // lemah - openness bantu
+  "career|emotional": { weight: 2, direction: -1 },// sedang, negatif - burnout
+  "finance|emotional": { weight: 3, direction: 1 },// kuat - stres finansial
+  "emotional|social": { weight: 3, direction: 1 }, // kuat - loneliness
+  "emotional|purpose": { weight: 3, direction: 1 },// kuat - r=-0.49 depresi
+  "social|purpose": { weight: 3, direction: 1 },   // kuat - dua arah
+};
+function synergyFor(a, b) {
+  return SYNERGY[a + "|" + b] || SYNERGY[b + "|" + a] || null;
 }
+
 const MAX_LOCKS = 3; // deliberate cap, per founder: forces real priorities, "nggak bisa mau semuanya"
+
+// Largest-remainder rounding across ALL 8 axes at once so the total stays
+// exactly 40 - never naive per-point rounding. Locked axes are already exact
+// integers and are excluded from remainder bumps entirely.
+function roundPreservingTotal(floats, lockedKeys) {
+  const locked = new Set(lockedKeys || []);
+  const out = {};
+  let sumFloor = 0;
+  const fracs = [];
+  POLY_ORDER.forEach((k, i) => {
+    const v = Math.max(POLY_MIN, Math.min(POLY_MAX, floats[k]));
+    if (locked.has(k)) { out[k] = v; sumFloor += v; return; }
+    const f = Math.floor(v + 1e-9);
+    out[k] = f;
+    sumFloor += f;
+    fracs.push({ k, frac: v - f, i });
+  });
+  let remainder = Math.round(40 - sumFloor);
+  fracs.sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (const { k } of fracs) {
+    if (remainder <= 0) break;
+    if (out[k] < POLY_MAX) { out[k] += 1; remainder -= 1; }
+  }
+  return out;
+}
+
+// The core drag computation, run against the gesture-start snapshot (not
+// incrementally) so it's stable and reversible mid-drag. When the user moves
+// axis X by delta:
+//   1. Unlocked partners of X (pairs present in SYNERGY) share a pull equal
+//      to delta itself, split by weight and signed by direction - explicitly
+//      DIVIDED, not summed per partner (summing independently would let one
+//      small nudge demand a dozen points from the rest; the PRD documents
+//      that failure mode).
+//   2. Unlocked non-partners absorb the negated total burden proportionally
+//      to their current values (the v1 formula).
+//   3. Constraint solving: if ANY axis would leave [1,10], the WHOLE delta is
+//      scaled down uniformly (closed-form, since every change is linear in
+//      delta) - never clamp a single point in isolation.
+//   4. Largest-remainder rounding at the very end.
+// Locked axes are untouched at every step: not partners, not absorbers, not
+// constraint participants. Emergent consequence the PRD demands verified:
+// Career (evidence with all 6 others except Finance, its only absorber) tops
+// out around 7.8 and can NEVER reach 10 - if it does, this is implemented
+// wrong.
+function applySynergyDrag(base, key, targetValue, lockedKeys) {
+  const locked = new Set(lockedKeys || []);
+  const target = Math.max(POLY_MIN, Math.min(POLY_MAX, targetValue));
+  const delta = target - base[key];
+  if (Math.abs(delta) < 1e-9) return { values: { ...base }, limited: false };
+
+  const others = POLY_ORDER.filter((k) => k !== key && !locked.has(k));
+  const partners = others.filter((k) => synergyFor(key, k));
+  const nonPartners = others.filter((k) => !synergyFor(key, k));
+
+  const totalWeight = partners.reduce((s, k) => s + synergyFor(key, k).weight, 0);
+  const change = { [key]: delta };
+  let totalBurden = delta;
+  partners.forEach((k) => {
+    const { weight, direction } = synergyFor(key, k);
+    const jatah = totalWeight ? delta * (weight / totalWeight) * direction : 0;
+    change[k] = jatah;
+    totalBurden += jatah;
+  });
+  const npBase = nonPartners.reduce((s, k) => s + base[k], 0);
+  nonPartners.forEach((k) => {
+    change[k] = npBase ? -totalBurden * (base[k] / npBase) : 0;
+  });
+
+  // No absorber left for a nonzero burden => nothing can move at all.
+  let s = nonPartners.length === 0 && Math.abs(totalBurden) > 1e-9 ? 0 : 1;
+  Object.entries(change).forEach(([k, c]) => {
+    if (Math.abs(c) < 1e-9) return;
+    const room = c > 0 ? POLY_MAX - base[k] : base[k] - POLY_MIN;
+    s = Math.min(s, room / Math.abs(c));
+  });
+  s = Math.max(0, s);
+
+  const floats = { ...base };
+  Object.entries(change).forEach(([k, c]) => { floats[k] = base[k] + s * c; });
+  return { values: roundPreservingTotal(floats, lockedKeys), limited: s < 1 - 1e-9 };
+}
 
 const root = document.getElementById("root");
 
@@ -343,20 +423,41 @@ function attachPolygonHandlers() {
   const svg = document.getElementById("polySvg");
   if (!svg) return;
   let draggingKey = null;
-  let downX = 0, downY = 0, moved = false;
+  let dragBase = null; // radar snapshot at gesture start - each move recomputes from it
+  let downX = 0, downY = 0, moved = false, wasLimited = false;
   const TAP_THRESHOLD = 8; // px of pointer travel: below = tap (toggle lock), above = drag
+  function setLimitHint(key) {
+    const el = document.getElementById("limitHint");
+    if (!el) return;
+    if (key) {
+      const label = STAT_ORDER.find((s) => s[0] === key)[1];
+      el.textContent = `${label} udah di titik paling jauh yang bisa dicapai bareng kombinasi sekarang.`;
+      el.style.display = "";
+      // Subtle haptic on the rising edge only, where the device supports it.
+      if (!wasLimited && navigator.vibrate) navigator.vibrate(15);
+      wasLimited = true;
+    } else {
+      el.style.display = "none";
+      wasLimited = false;
+    }
+  }
   function moveTo(clientX, clientY) {
     const rect = svg.getBoundingClientRect();
     const px = POLY_VIEW_MIN + ((clientX - rect.left) / rect.width) * POLY_VIEW_SIZE;
     const py = POLY_VIEW_MIN + ((clientY - rect.top) / rect.height) * POLY_VIEW_SIZE;
     const dist = Math.hypot(px - POLY_CENTER, py - POLY_CENTER);
-    onboardForm.radar = redistributeStats(onboardForm.radar, draggingKey, polyValueFromRadius(dist), onboardForm.locked);
+    const res = applySynergyDrag(dragBase, draggingKey, polyValueFromRadius(dist), onboardForm.locked);
+    onboardForm.radar = res.values;
+    setLimitHint(res.limited ? draggingKey : null);
     updatePolygonDOM();
   }
   svg.querySelectorAll(".poly-handle").forEach((handle) => {
     handle.addEventListener("pointerdown", (e) => {
       draggingKey = handle.dataset.stat;
-      downX = e.clientX; downY = e.clientY; moved = false;
+      dragBase = { ...onboardForm.radar };
+      downX = e.clientX; downY = e.clientY; moved = false; wasLimited = false;
+      const el = document.getElementById("limitHint");
+      if (el) el.style.display = "none";
       handle.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
@@ -370,8 +471,9 @@ function attachPolygonHandlers() {
   svg.addEventListener("pointerup", () => {
     if (draggingKey && !moved) toggleLock(draggingKey);
     draggingKey = null;
+    dragBase = null;
   });
-  svg.addEventListener("pointercancel", () => { draggingKey = null; });
+  svg.addEventListener("pointercancel", () => { draggingKey = null; dragBase = null; });
 }
 
 function renderOnboarding() {
@@ -389,7 +491,8 @@ function renderOnboarding() {
       </div>`;
   } else if (step.type === "radar") {
     bodyHTML = `<div class="poly-wrap">${renderPolygonSVG()}</div>
-      <p class="mono" id="lockHint" style="font-size:12px;color:var(--muted);margin-top:10px;text-align:center">${esc(lockHintText())}</p>`;
+      <p class="mono" id="limitHint" style="font-size:12px;color:var(--accent);margin-top:10px;text-align:center;display:none"></p>
+      <p class="mono" id="lockHint" style="font-size:12px;color:var(--muted);margin-top:6px;text-align:center">${esc(lockHintText())}</p>`;
   }
 
   root.innerHTML = `
