@@ -76,8 +76,8 @@ app.post("/api/logout", (req, res) => {
 
 app.post("/api/onboarding/statement-card", requireAuth, async (req, res) => {
   try {
-    const { profile, radarSnapshot, previousCards } = req.body;
-    const result = await ai.generateStatementCard({ profile, radarSnapshot, previousCards });
+    const { profile, radarSnapshot, lockedAxes, previousCards } = req.body;
+    const result = await ai.generateStatementCard({ profile, radarSnapshot, lockedAxes, previousCards });
     res.json(result);
   } catch (e) {
     console.error(e);
@@ -87,8 +87,8 @@ app.post("/api/onboarding/statement-card", requireAuth, async (req, res) => {
 
 app.post("/api/onboarding/chapter-analysis", requireAuth, async (req, res) => {
   try {
-    const { profile, radarSnapshot, cards } = req.body;
-    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, cards });
+    const { profile, radarSnapshot, lockedAxes, cards } = req.body;
+    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, lockedAxes, cards });
     res.json(result);
   } catch (e) {
     console.error(e);

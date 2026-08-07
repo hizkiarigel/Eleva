@@ -21,6 +21,9 @@ function maturityTier(growthSessions) {
 // redistributeStats below for how the exact-conservation is guaranteed) ---
 const POLY_ORDER = ["mind", "career", "finance", "purpose", "emotional", "explorer", "social", "body"];
 const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 110, POLY_MINR = 15;
+// Square viewBox with padding so axis-name labels (anchored outward) never
+// clip; kept square so pointer->viewBox mapping stays a uniform scale.
+const POLY_VIEW_MIN = -16, POLY_VIEW_SIZE = 332;
 const DEFAULT_RADAR = { body: 5, mind: 5, career: 5, finance: 5, emotional: 5, explorer: 5, social: 5, purpose: 5 };
 
 function polyRadius(value) {
@@ -41,12 +44,19 @@ function polyPoint(index, value) {
 // when taking, lowest when giving). Total is invariant BY CONSTRUCTION (every
 // step is a 1-for-1 transfer between two axes), not by rounding luck - a
 // proportional-then-round approach here drifted off 40 in testing.
-function redistributeStats(stats, changedKey, rawNewValue) {
+// Locked axes (max 3, user-pinned priorities) are excluded from the
+// donor/receiver pool entirely - their values never move because of another
+// axis's drag. The while-loops break when the unlocked pool runs out of
+// headroom, so the dragged axis simply stops at the feasible bound; with at
+// most 3 locked axes this can never deadlock (worst case: 3 locked at 10
+// leaves 10 points across 5 unlocked axes, still >= 5x floor of 1).
+function redistributeStats(stats, changedKey, rawNewValue, lockedKeys) {
+  const locked = new Set(lockedKeys || []);
   const newValue = Math.max(POLY_MIN, Math.min(POLY_MAX, Math.round(rawNewValue)));
   let delta = newValue - stats[changedKey];
   if (delta === 0) return stats;
   const next = { ...stats };
-  const others = Object.keys(stats).filter((k) => k !== changedKey);
+  const others = Object.keys(stats).filter((k) => k !== changedKey && !locked.has(k));
   while (delta > 0) {
     const donors = others.filter((k) => next[k] > POLY_MIN);
     if (!donors.length) break;
@@ -65,6 +75,7 @@ function redistributeStats(stats, changedKey, rawNewValue) {
   }
   return next;
 }
+const MAX_LOCKS = 3; // deliberate cap, per founder: forces real priorities, "nggak bisa mau semuanya"
 
 const root = document.getElementById("root");
 
@@ -72,6 +83,7 @@ let onboardForm = {
   name: "",
   privacyChecked: false,
   radar: { ...DEFAULT_RADAR },
+  locked: [], // axis keys pinned by the user, max MAX_LOCKS
 };
 let onboardStep = 0;
 let ui = { view: "loading", label: "Membuka Eleva..." };
@@ -121,6 +133,7 @@ function resetOnboardState() {
     name: "",
     privacyChecked: false,
     radar: { ...DEFAULT_RADAR },
+    locked: [],
   };
   adaptivePhase = "card";
   adaptiveCards = [];
@@ -222,13 +235,26 @@ function renderAuth() {
 // gone, folded into the adaptive conversation and the radar chart itself.
 const ONBOARD_STEPS = [
   { type: "namePromise", q: "Siapa namamu?", promiseText: "Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva." },
-  { type: "radar", q: "Gambarkan dirimu sekarang", sub: "Tarik titik-titiknya. Menonjolkan satu sisi bikin sisi lain sedikit mengecil — bukan ke nol, cuma menyesuaikan, karena kamu (kayak semua orang) punya waktu & energi yang terbatas." },
+  { type: "radar", q: "Gambarkan dirimu sekarang", sub: "Tarik titik-titiknya. Menonjolkan satu sisi bikin sisi lain sedikit mengecil — bukan ke nol, cuma menyesuaikan, karena kamu (kayak semua orang) punya waktu & energi yang terbatas. Kalau ada sisi yang nggak boleh ikut bergeser, tap titiknya untuk mengunci (maksimal 3)." },
 ];
 
 function isStepValid(step) {
   const s = ONBOARD_STEPS[step];
   if (s.type === "radar") return true;
   return onboardForm.name.trim().length > 0 && onboardForm.privacyChecked;
+}
+
+function lockHintText() {
+  return `Tap titik untuk mengunci prioritas (maks ${MAX_LOCKS}) — ${onboardForm.locked.length}/${MAX_LOCKS} terkunci`;
+}
+
+// Lock glyph sits tangentially (perpendicular to the axis) next to the
+// handle, so it collides with neither the center nor the axis-name labels
+// at any value.
+function lockGlyphPos(index, value) {
+  const angle = ((-90 + index * 45) * Math.PI) / 180;
+  const [x, y] = polyPoint(index, value);
+  return [x - 16 * Math.sin(angle), y + 16 * Math.cos(angle) + 3];
 }
 
 function renderPolygonSVG() {
@@ -245,15 +271,30 @@ function renderPolygonSVG() {
     return `<line x1="${POLY_CENTER}" y1="${POLY_CENTER}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="poly-axis" />`;
   }).join("");
   const labels = POLY_ORDER.map((k, i) => {
-    const [x, y] = polyPoint(i, POLY_MAX);
+    // Names sit beyond the handles' max radius, anchored AWAY from the chart
+    // (left labels extend leftward, right ones rightward, top/bottom stay
+    // centered) so a handle at value 10 (r=11 circle with the number inside)
+    // never covers its axis name.
+    const angle = ((-90 + i * 45) * Math.PI) / 180;
+    const dx = Math.cos(angle), dy = Math.sin(angle);
+    const x = POLY_CENTER + (POLY_MAXR + 12) * dx;
+    const y = POLY_CENTER + (POLY_MAXR + 12) * dy + (dy > 0.35 ? 9 : dy < -0.35 ? -2 : 3.5);
+    const anchor = dx > 0.35 ? "start" : dx < -0.35 ? "end" : "middle";
     const label = STAT_ORDER.find((s) => s[0] === k)[1];
-    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="poly-label" text-anchor="middle">${esc(label)}</text>`;
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="poly-label" text-anchor="${anchor}">${esc(label)}</text>`;
   }).join("");
+  // Value number lives INSIDE each handle (so the exact 1-10 is always
+  // visible, not just the visual position); the circle stays the only
+  // pointer target - texts are pointer-events:none via CSS.
   const handles = POLY_ORDER.map((k, i) => {
     const [x, y] = polyPoint(i, radar[k]);
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" class="poly-handle" data-stat="${k}" />`;
+    const isLocked = onboardForm.locked.includes(k);
+    const [lx, ly] = lockGlyphPos(i, radar[k]);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" class="poly-handle ${isLocked ? "locked" : ""}" data-stat="${k}" />
+      <text x="${x.toFixed(1)}" y="${(y + 3.5).toFixed(1)}" class="poly-value" data-value-for="${k}" text-anchor="middle">${radar[k]}</text>
+      <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" class="poly-lock" data-lock-for="${k}" text-anchor="middle"${isLocked ? "" : ' style="display:none"'}>🔒</text>`;
   }).join("");
-  return `<svg viewBox="0 0 300 300" class="poly-svg" id="polySvg">${rings}${axisLines}<path d="${pathD}" class="poly-shape" id="polyShape" />${labels}${handles}</svg>`;
+  return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${rings}${axisLines}<path d="${pathD}" class="poly-shape" id="polyShape" />${labels}${handles}</svg>`;
 }
 
 function updatePolygonDOM() {
@@ -261,35 +302,75 @@ function updatePolygonDOM() {
   if (!svg) return;
   POLY_ORDER.forEach((k, i) => {
     const [x, y] = polyPoint(i, onboardForm.radar[k]);
+    const isLocked = onboardForm.locked.includes(k);
     const handle = svg.querySelector(`circle[data-stat="${k}"]`);
-    if (handle) { handle.setAttribute("cx", x.toFixed(1)); handle.setAttribute("cy", y.toFixed(1)); }
+    if (handle) {
+      handle.setAttribute("cx", x.toFixed(1));
+      handle.setAttribute("cy", y.toFixed(1));
+      handle.classList.toggle("locked", isLocked);
+    }
+    const valueText = svg.querySelector(`text[data-value-for="${k}"]`);
+    if (valueText) {
+      valueText.setAttribute("x", x.toFixed(1));
+      valueText.setAttribute("y", (y + 3.5).toFixed(1));
+      valueText.textContent = onboardForm.radar[k];
+    }
+    const lockText = svg.querySelector(`text[data-lock-for="${k}"]`);
+    if (lockText) {
+      const [lx, ly] = lockGlyphPos(i, onboardForm.radar[k]);
+      lockText.setAttribute("x", lx.toFixed(1));
+      lockText.setAttribute("y", ly.toFixed(1));
+      lockText.style.display = isLocked ? "" : "none";
+    }
   });
   const points = POLY_ORDER.map((k, i) => polyPoint(i, onboardForm.radar[k]));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
   document.getElementById("polyShape")?.setAttribute("d", pathD);
+  const hint = document.getElementById("lockHint");
+  if (hint) hint.textContent = lockHintText();
+}
+
+function toggleLock(key) {
+  const i = onboardForm.locked.indexOf(key);
+  if (i >= 0) onboardForm.locked.splice(i, 1);
+  else if (onboardForm.locked.length < MAX_LOCKS) onboardForm.locked.push(key);
+  // At the cap, tapping a 4th point deliberately does nothing - the user has
+  // to unlock one first (founder-specified trade-off, the caption shows 3/3).
+  updatePolygonDOM();
 }
 
 function attachPolygonHandlers() {
   const svg = document.getElementById("polySvg");
   if (!svg) return;
   let draggingKey = null;
+  let downX = 0, downY = 0, moved = false;
+  const TAP_THRESHOLD = 8; // px of pointer travel: below = tap (toggle lock), above = drag
   function moveTo(clientX, clientY) {
     const rect = svg.getBoundingClientRect();
-    const px = ((clientX - rect.left) / rect.width) * 300;
-    const py = ((clientY - rect.top) / rect.height) * 300;
+    const px = POLY_VIEW_MIN + ((clientX - rect.left) / rect.width) * POLY_VIEW_SIZE;
+    const py = POLY_VIEW_MIN + ((clientY - rect.top) / rect.height) * POLY_VIEW_SIZE;
     const dist = Math.hypot(px - POLY_CENTER, py - POLY_CENTER);
-    onboardForm.radar = redistributeStats(onboardForm.radar, draggingKey, polyValueFromRadius(dist));
+    onboardForm.radar = redistributeStats(onboardForm.radar, draggingKey, polyValueFromRadius(dist), onboardForm.locked);
     updatePolygonDOM();
   }
   svg.querySelectorAll(".poly-handle").forEach((handle) => {
     handle.addEventListener("pointerdown", (e) => {
       draggingKey = handle.dataset.stat;
+      downX = e.clientX; downY = e.clientY; moved = false;
       handle.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
   });
-  svg.addEventListener("pointermove", (e) => { if (draggingKey) moveTo(e.clientX, e.clientY); });
-  svg.addEventListener("pointerup", () => { draggingKey = null; });
+  svg.addEventListener("pointermove", (e) => {
+    if (!draggingKey) return;
+    if (!moved && Math.hypot(e.clientX - downX, e.clientY - downY) > TAP_THRESHOLD) moved = true;
+    // A locked axis can't be dragged - but it can still be tapped to unlock.
+    if (moved && !onboardForm.locked.includes(draggingKey)) moveTo(e.clientX, e.clientY);
+  });
+  svg.addEventListener("pointerup", () => {
+    if (draggingKey && !moved) toggleLock(draggingKey);
+    draggingKey = null;
+  });
   svg.addEventListener("pointercancel", () => { draggingKey = null; });
 }
 
@@ -307,7 +388,8 @@ function renderOnboarding() {
         <label for="promiseCheck" style="margin:0;font-size:13px;line-height:1.5;color:var(--muted)">Aku mengerti dan siap mulai.</label>
       </div>`;
   } else if (step.type === "radar") {
-    bodyHTML = `<div class="poly-wrap">${renderPolygonSVG()}</div>`;
+    bodyHTML = `<div class="poly-wrap">${renderPolygonSVG()}</div>
+      <p class="mono" id="lockHint" style="font-size:12px;color:var(--muted);margin-top:10px;text-align:center">${esc(lockHintText())}</p>`;
   }
 
   root.innerHTML = `
@@ -358,6 +440,7 @@ async function fetchStatementCard() {
       body: {
         profile: { name: onboardForm.name },
         radarSnapshot: onboardForm.radar,
+        lockedAxes: onboardForm.locked,
         previousCards: adaptiveCards,
       },
     });
@@ -390,6 +473,7 @@ async function fetchChapterAnalysis() {
       body: {
         profile: { name: onboardForm.name },
         radarSnapshot: onboardForm.radar,
+        lockedAxes: onboardForm.locked,
         cards: adaptiveCards,
       },
     });

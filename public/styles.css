@@ -118,6 +118,9 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .poly-label { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 9.5px; }
 .poly-handle { fill: var(--accent); stroke: var(--bg); stroke-width: 2; cursor: grab; touch-action: none; }
 .poly-handle:active { cursor: grabbing; }
+.poly-handle.locked { fill: var(--growth); stroke: var(--text); cursor: pointer; }
+.poly-value { fill: #1a1409; font-family: "IBM Plex Mono", monospace; font-size: 10px; font-weight: 600; pointer-events: none; user-select: none; }
+.poly-lock { font-size: 10px; pointer-events: none; user-select: none; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { padding: 9px 16px; border-radius: 20px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); font-size: 13.5px; }
