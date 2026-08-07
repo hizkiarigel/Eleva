@@ -74,21 +74,21 @@ app.post("/api/logout", (req, res) => {
 
 // --- Adaptive onboarding (stateless AI proxies; no character_state yet) ---
 
-app.post("/api/onboarding/adaptive-question", requireAuth, async (req, res) => {
+app.post("/api/onboarding/statement-card", requireAuth, async (req, res) => {
   try {
-    const { profile, radarSnapshot, previousAnswers } = req.body;
-    const result = await ai.generateAdaptiveQuestion({ profile, radarSnapshot, previousAnswers });
+    const { profile, radarSnapshot, previousCards } = req.body;
+    const result = await ai.generateStatementCard({ profile, radarSnapshot, previousCards });
     res.json(result);
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Gagal membuat pertanyaan." });
+    res.status(500).json({ error: "Gagal membuat kartu." });
   }
 });
 
 app.post("/api/onboarding/chapter-analysis", requireAuth, async (req, res) => {
   try {
-    const { profile, radarSnapshot, answers } = req.body;
-    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, answers });
+    const { profile, radarSnapshot, cards } = req.body;
+    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, cards });
     res.json(result);
   } catch (e) {
     console.error(e);

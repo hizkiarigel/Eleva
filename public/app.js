@@ -85,11 +85,10 @@ let authForm = { email: "", password: "", betaCode: "" };
 let privacyChecked = false;
 let authError = "";
 
-// --- Adaptive onboarding phase (Radar chart -> open-ended Adaptive Q&A -> Chapter Analysis) ---
-let adaptivePhase = "question"; // "loading" | "question" | "thinking" | "analysis"
-let adaptiveAnswers = []; // [{question, answer}, ...] - length also serves as the "how many answered" counter
-let adaptiveCurrentQuestion = "";
-let adaptiveAnswerText = "";
+// --- Adaptive onboarding phase (Radar chart -> statement cards -> Chapter Analysis) ---
+let adaptivePhase = "card"; // "loading" | "card" | "thinking" | "analysis"
+let adaptiveCards = []; // [{statement, response: "up"|"down"}, ...] - length also serves as the card counter
+let adaptiveCurrentStatement = "";
 let chapterAnalysis = null; // {insight, pathway, pathwayNoun, secondaryTrait}
 let overrideMode = false;
 let overrideText = "";
@@ -123,10 +122,9 @@ function resetOnboardState() {
     privacyChecked: false,
     radar: { ...DEFAULT_RADAR },
   };
-  adaptivePhase = "question";
-  adaptiveAnswers = [];
-  adaptiveCurrentQuestion = "";
-  adaptiveAnswerText = "";
+  adaptivePhase = "card";
+  adaptiveCards = [];
+  adaptiveCurrentStatement = "";
   chapterAnalysis = null;
   overrideMode = false;
   overrideText = "";
@@ -345,39 +343,39 @@ function renderOnboarding() {
     if (!last) { onboardStep++; renderOnboarding(); return; }
     // Static steps done - hand off to the adaptive AI-driven phase.
     adaptivePhase = "loading";
-    adaptiveAnswers = [];
+    adaptiveCards = [];
     ui = { view: "adaptive" };
     render();
-    fetchAdaptiveQuestion();
+    fetchStatementCard();
   });
 }
 
-async function fetchAdaptiveQuestion() {
+async function fetchStatementCard() {
   onboardError = "";
   try {
-    const result = await api("/api/onboarding/adaptive-question", {
+    const result = await api("/api/onboarding/statement-card", {
       method: "POST",
       body: {
         profile: { name: onboardForm.name },
         radarSnapshot: onboardForm.radar,
-        previousAnswers: adaptiveAnswers,
+        previousCards: adaptiveCards,
       },
     });
-    // Server decides when enough has been gathered (min 4, max 10 - enforced
-    // server-side, not just requested here) - confident:true means stop and
-    // move straight to Chapter Analysis instead of showing another question.
+    // Server decides when the swipe pattern is consistent enough (min 4,
+    // max 10 - enforced server-side, not just requested here) -
+    // confident:true means stop and move straight to Chapter Analysis
+    // instead of showing another card.
     if (result.confident) {
       await fetchChapterAnalysis();
       return;
     }
-    adaptiveCurrentQuestion = result.question;
-    adaptiveAnswerText = "";
-    adaptivePhase = "question";
+    adaptiveCurrentStatement = result.statement;
+    adaptivePhase = "card";
     render();
   } catch (e) {
     onboardError = e.message;
-    adaptivePhase = "question";
-    adaptiveCurrentQuestion = "";
+    adaptivePhase = "card";
+    adaptiveCurrentStatement = "";
     render();
   }
 }
@@ -392,14 +390,18 @@ async function fetchChapterAnalysis() {
       body: {
         profile: { name: onboardForm.name },
         radarSnapshot: onboardForm.radar,
-        answers: adaptiveAnswers,
+        cards: adaptiveCards,
       },
     });
     adaptivePhase = "analysis";
     render();
   } catch (e) {
     onboardError = e.message;
-    adaptivePhase = "question"; // fall back so there's a retry path, not a dead end
+    // Fall back to the card phase with no current statement, so the retry
+    // button re-asks the server - which re-evaluates confidence and routes
+    // straight back here once satisfied. No dead end, no stale card shown.
+    adaptivePhase = "card";
+    adaptiveCurrentStatement = "";
     render();
   }
 }
@@ -428,35 +430,37 @@ function renderAdaptive() {
     return;
   }
 
-  if (adaptivePhase === "question") {
+  if (adaptivePhase === "card") {
     root.innerHTML = `
       <div class="shell">
         <div class="eyebrow mono">ELEVA · ONBOARDING</div>
-        <div class="mono" style="font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:20px">PERTANYAAN KE-${adaptiveAnswers.length + 1}</div>
+        <div class="mono" style="font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:20px">KARTU KE-${adaptiveCards.length + 1}</div>
         ${onboardError ? `<p style="color:var(--rust);font-size:13.5px;margin:0 0 16px">${esc(onboardError)}</p>` : ""}
-        ${!adaptiveCurrentQuestion ? `<button class="btn-primary" id="retryQ">Coba lagi</button>` : `
+        ${!adaptiveCurrentStatement ? `<button class="btn-primary" id="retryCard">Coba lagi</button>` : `
         <div class="fadeUp">
-          <h1 class="fr" style="font-size:26px;font-weight:600;margin:0 0 20px">${esc(adaptiveCurrentQuestion)}</h1>
-          <div class="field"><textarea id="adaptiveAnswer" rows="4" placeholder="Jawab apa adanya..." autofocus>${esc(adaptiveAnswerText)}</textarea></div>
-        </div>
-        <div style="display:flex;justify-content:flex-end;margin-top:24px">
-          <button class="btn-primary" id="adaptiveNext" ${adaptiveAnswerText.trim().length > 2 ? "" : "disabled"}>Lanjut →</button>
+          <div class="quest-card" style="margin-bottom:14px">
+            <p class="fr" style="font-size:20px;line-height:1.65;margin:0;font-weight:500">${esc(adaptiveCurrentStatement)}</p>
+          </div>
+          <p style="color:var(--muted);font-size:13px;margin:0 0 18px;text-align:center">Seberapa "kamu banget" pernyataan ini? Tap salah satu.</p>
+          <div class="swipe-row">
+            <button class="swipe-btn down" id="swipeDown">👎 Bukan aku</button>
+            <button class="swipe-btn up" id="swipeUp">👍 Ini aku</button>
+          </div>
         </div>`}
       </div>`;
-    document.getElementById("retryQ")?.addEventListener("click", fetchAdaptiveQuestion);
-    document.getElementById("adaptiveAnswer")?.addEventListener("input", (e) => {
-      adaptiveAnswerText = e.target.value;
-      document.getElementById("adaptiveNext").disabled = adaptiveAnswerText.trim().length <= 2;
-    });
-    document.getElementById("adaptiveNext")?.addEventListener("click", async () => {
-      adaptiveAnswers.push({ question: adaptiveCurrentQuestion, answer: adaptiveAnswerText.trim() });
+    document.getElementById("retryCard")?.addEventListener("click", fetchStatementCard);
+    const respond = async (response) => {
+      adaptiveCards.push({ statement: adaptiveCurrentStatement, response });
       adaptivePhase = "loading";
       render();
-      // fetchAdaptiveQuestion re-evaluates confidence with the updated answer
-      // list, and internally redirects to fetchChapterAnalysis once satisfied
-      // (min 4/max 10 enforced server-side) - no fixed-count loop needed here.
-      await fetchAdaptiveQuestion();
-    });
+      // fetchStatementCard re-evaluates swipe-pattern consistency with the
+      // updated card list, and internally redirects to fetchChapterAnalysis
+      // once satisfied (min 4/max 10 enforced server-side) - no fixed-count
+      // loop needed here.
+      await fetchStatementCard();
+    };
+    document.getElementById("swipeUp")?.addEventListener("click", () => respond("up"));
+    document.getElementById("swipeDown")?.addEventListener("click", () => respond("down"));
     return;
   }
 

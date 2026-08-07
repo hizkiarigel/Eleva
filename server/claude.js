@@ -102,7 +102,7 @@ function fallbackReflection() {
   };
 }
 
-// --- Adaptive onboarding (Task 5 v3 — radar self-assessment + open-ended Q&A) ---
+// --- Adaptive onboarding (Task 5 v4 — radar self-assessment + statement cards) ---
 
 const RADAR_AXIS_LABELS = {
   body: "Body", mind: "Mind", career: "Career", finance: "Finance",
@@ -115,65 +115,66 @@ function highestRadarAxis(radarSnapshot) {
   return entries.sort((a, b) => b[1] - a[1])[0][0];
 }
 
-// Fallback-mode questions (no API key). These stand in for the static
-// Situasi/Values/Fear steps that v3 removed in favor of the AI-driven
-// conversation - since fallback mode has no real conversation, it covers
-// the same rough ground (life context, values, fear/obstacle, non-negotiable)
-// across exactly the 4-question minimum, same spirit as fallbackQuest/
-// fallbackReflection: honest and deterministic, not a fake-intelligence attempt.
-const ADAPTIVE_FALLBACK_QUESTIONS = [
+// Fallback-mode statements (no API key). Real cards MUST be AI-generated per
+// user (see generateStatementCard) - a static statement bank identical for
+// everyone is exactly the generic "personality test" the PRD rejects. These
+// four exist only so onboarding stays completable keyless, same spirit as
+// fallbackQuest/fallbackReflection: deterministic and honest about it, not a
+// fake-intelligence attempt. They cover the same rough ground the removed
+// static Situasi/Values/Fear steps did (life context, values, obstacle,
+// non-negotiable), phrased as agree/disagree statements.
+const ADAPTIVE_FALLBACK_STATEMENTS = [
   (radarSnapshot) => {
     const axis = highestRadarAxis(radarSnapshot);
     return axis
-      ? `Dari radar yang kamu gambar, ${RADAR_AXIS_LABELS[axis] || axis} kelihatan paling menonjol — lagi di fase hidup yang gimana sekarang sampai itu jadi paling kerasa?`
-      : "Lagi di fase hidup yang gimana sekarang?";
+      ? `Akhir-akhir ini, ${RADAR_AXIS_LABELS[axis] || axis} adalah area yang paling banyak menyita pikiranku.`
+      : "Akhir-akhir ini ada satu area hidup yang jauh lebih menyita pikiranku daripada yang lain.";
   },
-  () => "Apa yang paling kamu pegang teguh sekarang, walau situasinya nggak gampang?",
-  () => "Apa yang paling sering bikin kamu belum berani melangkah ke arah itu?",
-  () => "Kalau harus memilih, hal apa yang nggak ingin kamu korbankan dalam prosesnya?",
+  () => "Aku sebenarnya tahu apa yang penting buatku — yang berat itu konsisten menjalaninya.",
+  () => "Aku lebih sering menunda karena takut hasilnya mengecewakan, bukan karena malas.",
+  () => "Kalau harus memilih, aku lebih pilih tumbuh pelan tapi jujur daripada cepat tapi kosong.",
 ];
-const ADAPTIVE_MIN_QUESTIONS = 4;
-const ADAPTIVE_MAX_QUESTIONS = 10;
+// Card+swipe format is founder-confirmed. The 4-10 RANGE is still Claude's
+// own recommended default (founder hasn't confirmed it vs a fixed count) -
+// change these two constants if that decision changes.
+const ADAPTIVE_MIN_CARDS = 4;
+const ADAPTIVE_MAX_CARDS = 10;
 
-// ctx: {profile: {name}, radarSnapshot: {body,mind,...}, previousAnswers: [{question,answer}]}
-// Returns {question: string|null, confident: boolean}. When confident is true,
-// question may be null - the caller should stop and move to Chapter Analysis.
-// The 4-minimum/10-maximum bound is enforced here in code, not trusted purely
-// from the model's own "confident" self-report - same defense-in-depth
-// principle as the crisis-detection phrase list and the 12-word growth-gate
-// elsewhere in this codebase (AI instructions are real, but never the only
-// thing standing between a rule and its enforcement).
-async function generateAdaptiveQuestion(ctx) {
-  const answeredCount = (ctx.previousAnswers || []).length;
-  if (answeredCount >= ADAPTIVE_MAX_QUESTIONS) return { question: null, confident: true };
+// ctx: {profile: {name}, radarSnapshot: {body,mind,...}, previousCards: [{statement, response:"up"|"down"}]}
+// Returns {statement: string|null, confident: boolean}. When confident is
+// true, statement may be null - the caller should stop and move to Chapter
+// Analysis. The user never types anything: they thumb each statement up
+// ("ini aku") or down ("bukan aku"), and that swipe history is the whole
+// conversational signal. The 4-minimum/10-maximum bound is enforced here in
+// code, not trusted purely from the model's own "confident" self-report -
+// same defense-in-depth principle as the crisis-detection phrase list and
+// the 12-word growth-gate elsewhere in this codebase.
+async function generateStatementCard(ctx) {
+  const cardCount = (ctx.previousCards || []).length;
+  if (cardCount >= ADAPTIVE_MAX_CARDS) return { statement: null, confident: true };
 
   if (!hasKey()) {
-    if (answeredCount >= ADAPTIVE_FALLBACK_QUESTIONS.length) return { question: null, confident: true };
-    return { question: ADAPTIVE_FALLBACK_QUESTIONS[answeredCount](ctx.radarSnapshot), confident: false };
+    if (cardCount >= ADAPTIVE_FALLBACK_STATEMENTS.length) return { statement: null, confident: true };
+    return { statement: ADAPTIVE_FALLBACK_STATEMENTS[cardCount](ctx.radarSnapshot), confident: false };
   }
   try {
     const stageGuidance =
-      answeredCount === 0
-        ? 'Ini pertanyaan PERTAMA, belum ada jawaban sebelumnya. Gali dari ctx.radarSnapshot (sumbu mana yang paling menonjol/paling rendah) untuk memahami apa yang sedang jadi perhatian besar mereka sekarang — semacam menanyakan "lagi di fase hidup yang gimana", tapi dipicu dari pola radar mereka, bukan generik.'
-        : answeredCount < 3
-        ? "Masih tahap awal membangun konteks - lanjut gali cerita/situasi hidup mereka lebih dalam dari jawaban sebelumnya, sebelum masuk ke obstacle/values."
-        : 'Sudah cukup dalam - mulai arahkan ke obstacle/fear yang menghalangi (kalau belum tergali) atau values/non-negotiables mereka, framing TIDAK LANGSUNG (mis. "Kalau harus memilih... hal apa yang nggak ingin kamu korbankan?", BUKAN "apa nilai hidupmu?").';
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini bagian dari onboarding adaptif Eleva - percakapan bercabang, bukan daftar pertanyaan statis, yang menggantikan pertanyaan Situasi/Values/Fear yang dulu statis. Sudah ada ${answeredCount} jawaban terkumpul (minimal ${ADAPTIVE_MIN_QUESTIONS}, maksimal ${ADAPTIVE_MAX_QUESTIONS} sebelum wajib berhenti).\n\n${stageGuidance}\n\nBalas JSON dengan bentuk persis:\n{"question": string|null, "confident": boolean}\n\nAturan: set "confident":true HANYA kalau kamu sudah punya pemahaman cukup kaya soal cerita hidup, values, DAN hambatan utama mereka untuk bisa membuat Chapter Analysis yang benar-benar personal - kalau true, "question" boleh null (sistem yang menjaga batas minimal/maksimal, kamu tidak perlu menghitung sendiri). Kalau belum confident, isi "question" dengan SATU pertanyaan lanjutan singkat (1-2 kalimat), personal ke konteks mereka, nada hangat dan jujur seperti mentor - bukan form generik.`;
+      cardCount === 0
+        ? "Ini kartu PERTAMA, belum ada respons sebelumnya. Bangun pernyataan dari pola ctx.radarSnapshot (sumbu yang paling menonjol ATAU paling ditekan) — tebakan hangat soal apa yang sedang paling menyita hidup mereka sekarang."
+        : 'Baca arah swipe di ctx.previousCards: "up" berarti pernyataan itu resonan ("ini aku") — gali lebih spesifik ke arah itu; "down" berarti tidak resonan — geser ke sisi/area lain, jangan dipaksakan. Makin lanjut, arahkan pernyataan ke values, hambatan/ketakutan, atau non-negotiables mereka. JANGAN mengulang atau sekadar memparafrase pernyataan yang sudah pernah muncul.';
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini onboarding adaptif Eleva berformat KARTU PERNYATAAN — kamu menulis SATU pernyataan singkat orang-pertama ("Aku ..."), lalu pengguna merespons thumbs up ("ini aku") atau thumbs down ("bukan aku") tanpa mengetik apa pun. Pernyataan WAJIB personal untuk pengguna ini (diturunkan dari radar chart + histori swipe mereka), BUKAN diambil dari bank pernyataan tes kepribadian yang sama untuk semua orang. Sudah ada ${cardCount} kartu terjawab (minimal ${ADAPTIVE_MIN_CARDS}, maksimal ${ADAPTIVE_MAX_CARDS} sebelum wajib berhenti).\n\n${stageGuidance}\n\nBalas JSON dengan bentuk persis:\n{"statement": string|null, "confident": boolean}\n\nAturan: set "confident":true HANYA kalau pola swipe sejauh ini sudah cukup konsisten untuk membuat Chapter Analysis yang benar-benar personal (pemahaman soal arah hidup, values, DAN hambatan utama mereka) - kalau true, "statement" boleh null (sistem yang menjaga batas minimal/maksimal, kamu tidak perlu menghitung sendiri). Kalau belum, isi "statement" dengan SATU pernyataan baru: 1-2 kalimat, orang-pertama, cukup konkret untuk disetujui/ditolak dengan satu tap, nada hangat dan jujur seperti mentor.`;
     const result = await callClaude(user);
     if (typeof result?.confident !== "boolean") throw new Error("bad shape");
-    if (!result.confident && !result.question) throw new Error("bad shape");
-    // Minimum enforced here, not trusted from the model's own self-report -
-    // same defense-in-depth principle as crisis-detection and the growth-gate
-    // elsewhere in this file/codebase. A too-early confident:true is treated
-    // as a policy violation and falls through to the deterministic fallback
-    // question below, rather than retried (costs another API call for no
-    // real benefit - the fallback question is a perfectly fine substitute).
-    if (result.confident && answeredCount < ADAPTIVE_MIN_QUESTIONS) throw new Error("confident too early");
+    if (!result.confident && !result.statement) throw new Error("bad shape");
+    // A too-early confident:true is treated as a policy violation and falls
+    // through to the deterministic fallback statement below, rather than
+    // retried (another API call for no real benefit).
+    if (result.confident && cardCount < ADAPTIVE_MIN_CARDS) throw new Error("confident too early");
     return result;
   } catch (e) {
-    console.error("generateAdaptiveQuestion failed, using fallback:", e.message);
-    if (answeredCount >= ADAPTIVE_FALLBACK_QUESTIONS.length) return { question: null, confident: true };
-    return { question: ADAPTIVE_FALLBACK_QUESTIONS[answeredCount](ctx.radarSnapshot), confident: false };
+    console.error("generateStatementCard failed, using fallback:", e.message);
+    if (cardCount >= ADAPTIVE_FALLBACK_STATEMENTS.length) return { statement: null, confident: true };
+    return { statement: ADAPTIVE_FALLBACK_STATEMENTS[cardCount](ctx.radarSnapshot), confident: false };
   }
 }
 
@@ -193,7 +194,7 @@ const RADAR_AXIS_TO_PATHWAY = {
 async function generateChapterAnalysis(ctx) {
   if (!hasKey()) return fallbackChapterAnalysis(ctx);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah self-assessment 8-sumbu yang mereka gambar sendiri (skala 1-10), dan ctx.answers adalah seluruh percakapan Adaptive Questions yang sudah menggali cerita hidup, values, dan hambatan mereka (menggantikan pertanyaan Situasi/Values/Fear yang dulu statis). Rangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Builder"|"Guardian"|"Explorer"|"Connector"|"Seeker"|"Specialist", "pathwayNoun": string, "secondaryTrait": string|null}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali). "pathway" satu rekomendasi dari 6 nama itu berdasarkan pola dari SELURUH konteks (radar + jawaban), bukan cuma sumbu radar tertinggi. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Builder → "Builder"). "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah self-assessment 8-sumbu yang mereka gambar sendiri (skala 1-10), dan ctx.cards adalah kartu-kartu pernyataan yang sudah mereka respons — "response":"up" berarti pernyataan itu resonan ("ini aku"), "down" berarti tidak ("bukan aku"). Pola swipe ini + bentuk radar adalah seluruh sinyal yang kamu punya (tidak ada teks bebas dari pengguna). Rangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Builder"|"Guardian"|"Explorer"|"Connector"|"Seeker"|"Specialist", "pathwayNoun": string, "secondaryTrait": string|null}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali). "pathway" satu rekomendasi dari 6 nama itu berdasarkan pola dari SELURUH konteks (radar + arah swipe semua kartu, termasuk yang di-thumbs-down — penolakan juga informasi), bukan cuma sumbu radar tertinggi. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Builder → "Builder"). "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
     const result = await callClaude(user);
     if (!result?.pathway || !PATHWAY_NAMES.includes(result.pathway)) throw new Error("bad shape");
     return result;
@@ -218,5 +219,5 @@ function fallbackChapterAnalysis(ctx) {
 
 module.exports = {
   generateQuest, processReflection, hasKey,
-  generateAdaptiveQuestion, generateChapterAnalysis,
+  generateStatementCard, generateChapterAnalysis,
 };

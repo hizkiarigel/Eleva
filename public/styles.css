@@ -122,3 +122,9 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { padding: 9px 16px; border-radius: 20px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); font-size: 13.5px; }
 .chip.active { border-color: var(--accent); background: #e8a33d22; color: var(--accent); }
+
+.swipe-row { display: flex; gap: 12px; }
+.swipe-btn { flex: 1; padding: 15px 10px; border-radius: 10px; font-size: 15px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
+.swipe-btn.up { border-color: #7fa98f66; }
+.swipe-btn.down { border-color: #b5544a55; }
+.swipe-btn:active { transform: scale(.97); }
