@@ -51,6 +51,7 @@ async function init() {
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS pathway_trial_started_at TIMESTAMPTZ;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS secondary_trait TEXT;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_snapshot JSONB;
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_raw JSONB;
   `);
 }
 
@@ -92,7 +93,13 @@ async function getState(userId) {
     pathwayStatus: row.pathway_status,
     pathwayTrialStartedAt: row.pathway_trial_started_at,
     secondaryTrait: row.secondary_trait,
+    // radarSnapshot is the CALIBRATED radar (post Adaptive Scenario Cards) -
+    // what daily quest generation and Pathway logic read. radarRaw is the
+    // pre-calibration manual-drag result, kept only for audit/transparency
+    // (v3/v4/pre-calibration v5 accounts have radarSnapshot but no radarRaw -
+    // that's expected, not an error).
     radarSnapshot: row.radar_snapshot,
+    radarRaw: row.radar_raw,
   };
 }
 
@@ -103,20 +110,20 @@ async function getState(userId) {
 // comment at the call sites in index.js for why v2 rows aren't backfilled.
 async function createState(userId, {
   profile, stats, chapterNumber, chapterTitle, pathway, pathwayNoun,
-  growthFocus, secondaryTrait, radarSnapshot,
+  growthFocus, secondaryTrait, radarSnapshot, radarRaw,
 }) {
   await pool.query(
     `INSERT INTO character_state
        (user_id, profile, stats, chapter_number, chapter_title, growth_sessions,
-        pathway, pathway_noun, growth_focus, pathway_status, pathway_trial_started_at, secondary_trait, radar_snapshot)
-     VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, 'trial', now(), $9, $10)
+        pathway, pathway_noun, growth_focus, pathway_status, pathway_trial_started_at, secondary_trait, radar_snapshot, radar_raw)
+     VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, 'trial', now(), $9, $10, $11)
      ON CONFLICT (user_id) DO UPDATE SET
        profile = EXCLUDED.profile, stats = EXCLUDED.stats,
        chapter_number = EXCLUDED.chapter_number, chapter_title = EXCLUDED.chapter_title, growth_sessions = 0,
        pathway = EXCLUDED.pathway, pathway_noun = EXCLUDED.pathway_noun,
        growth_focus = EXCLUDED.growth_focus, pathway_status = 'trial', pathway_trial_started_at = now(),
-       secondary_trait = EXCLUDED.secondary_trait, radar_snapshot = EXCLUDED.radar_snapshot`,
-    [userId, profile, stats, chapterNumber, chapterTitle, pathway || null, pathwayNoun || null, growthFocus ? JSON.stringify(growthFocus) : null, secondaryTrait || null, radarSnapshot || null]
+       secondary_trait = EXCLUDED.secondary_trait, radar_snapshot = EXCLUDED.radar_snapshot, radar_raw = EXCLUDED.radar_raw`,
+    [userId, profile, stats, chapterNumber, chapterTitle, pathway || null, pathwayNoun || null, growthFocus ? JSON.stringify(growthFocus) : null, secondaryTrait || null, radarSnapshot || null, radarRaw || null]
   );
 }
 

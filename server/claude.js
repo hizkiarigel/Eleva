@@ -102,7 +102,8 @@ function fallbackReflection() {
   };
 }
 
-// --- Adaptive onboarding (Task 5 v4 — radar self-assessment + statement cards) ---
+// --- Adaptive onboarding (Task 5 v6 — radar self-assessment + Adaptive
+// Scenario Cards + radar calibration) ---
 
 // 7 MECE axes (Bible v1.5). Legacy 8-element keys kept as extra labels only,
 // for pre-MECE accounts whose stored snapshots still carry them.
@@ -118,72 +119,126 @@ function highestRadarAxis(radarSnapshot) {
   return entries.sort((a, b) => b[1] - a[1])[0][0];
 }
 
-// Fallback-mode statements (no API key). Real cards MUST be AI-generated per
-// user (see generateStatementCard) - a static statement bank identical for
+// v6 replaces the v4/v5 thumbs-up/down statement cards entirely: one
+// scenario, 4 options, each option mapped to ONE unlocked axis. The user
+// must pick a favorite AND a least-favorite (never just one) - both signals
+// feed the calibration engine below (see attachPolygonHandlers-adjacent
+// logic in public/app.js for how the +1/-1 deltas actually get applied
+// through the existing redistribution engine, capped at ±3 cumulative per
+// axis). Locked axes structurally can never be chosen: axis selection below
+// only ever draws from the unlocked set.
+const SCENARIO_MIN_CARDS = 2;
+const SCENARIO_MAX_CARDS = 6;
+const AXES_PER_CARD = 4;
+
+// Deterministic coverage logic (code-enforced, not trusted from the model):
+// each card must test exactly 4 unlocked axes, preferring whichever unlocked
+// axes have appeared LEAST often so far, so full coverage (every unlocked
+// axis tested at least once) completes within ceil(unlocked/4) cards - at
+// most 2 given the max is 7 axes total and locks cap at 3 (>=4 unlocked
+// always). Locked-axis exclusion happens here, structurally - not left to
+// the prompt.
+function selectCardAxes(radarSnapshot, lockedAxes, previousCards) {
+  const locked = new Set(lockedAxes || []);
+  const allAxes = Object.keys(radarSnapshot || {});
+  const unlocked = allAxes.filter((k) => !locked.has(k));
+  const seenCount = {};
+  unlocked.forEach((k) => { seenCount[k] = 0; });
+  (previousCards || []).forEach((card) => {
+    (card.options || []).forEach((opt) => {
+      if (opt.axis in seenCount) seenCount[opt.axis] += 1;
+    });
+  });
+  return [...unlocked]
+    .sort((a, b) => seenCount[a] - seenCount[b] || allAxes.indexOf(a) - allAxes.indexOf(b))
+    .slice(0, AXES_PER_CARD);
+}
+
+function coverageComplete(radarSnapshot, lockedAxes, previousCards) {
+  const locked = new Set(lockedAxes || []);
+  const unlocked = Object.keys(radarSnapshot || {}).filter((k) => !locked.has(k));
+  const seen = new Set();
+  (previousCards || []).forEach((card) => (card.options || []).forEach((opt) => seen.add(opt.axis)));
+  return unlocked.every((k) => seen.has(k));
+}
+
+// Fallback-mode scenarios (no API key). Real cards MUST be AI-generated per
+// user (see generateScenarioCard) - a static scenario bank identical for
 // everyone is exactly the generic "personality test" the PRD rejects. These
-// four exist only so onboarding stays completable keyless, same spirit as
+// exist only so onboarding stays completable keyless, same spirit as
 // fallbackQuest/fallbackReflection: deterministic and honest about it, not a
-// fake-intelligence attempt. They cover the same rough ground the removed
-// static Situasi/Values/Fear steps did (life context, values, obstacle,
-// non-negotiable), phrased as agree/disagree statements.
-const ADAPTIVE_FALLBACK_STATEMENTS = [
-  (radarSnapshot) => {
-    const axis = highestRadarAxis(radarSnapshot);
-    return axis
-      ? `Akhir-akhir ini, ${RADAR_AXIS_LABELS[axis] || axis} adalah area yang paling banyak menyita pikiranku.`
-      : "Akhir-akhir ini ada satu area hidup yang jauh lebih menyita pikiranku daripada yang lain.";
-  },
-  () => "Aku sebenarnya tahu apa yang penting buatku — yang berat itu konsisten menjalaninya.",
-  () => "Aku lebih sering menunda karena takut hasilnya mengecewakan, bukan karena malas.",
-  () => "Kalau harus memilih, aku lebih pilih tumbuh pelan tapi jujur daripada cepat tapi kosong.",
+// fake-intelligence attempt. Two frames comfortably cover up to 7 unlocked
+// axes at 4 per card (matching SCENARIO_MIN_CARDS).
+const AXIS_ACTIVITY_PHRASE = {
+  body: "Urus fisik/istirahat dulu",
+  growth: "Belajar atau coba hal baru",
+  livelihood: "Beresin kerjaan/urusan penghasilan",
+  emotional: "Proses perasaan sendiri dulu",
+  social: "Hubungi atau temui seseorang",
+  purpose: "Mikirin arah besar hidup",
+  autonomy: "Putuskan sendiri, jalan sendiri",
+};
+const SCENARIO_FALLBACK_FRAMES = [
+  () => "Tiba-tiba ada waktu luang sore ini, bebas mau dipakai buat apa.",
+  () => "Lagi kewalahan dan cuma sanggup fokus ke satu hal dulu sebelum yang lain.",
 ];
-// Card+swipe format is founder-confirmed. The 4-10 RANGE is still Claude's
-// own recommended default (founder hasn't confirmed it vs a fixed count) -
-// change these two constants if that decision changes.
-const ADAPTIVE_MIN_CARDS = 4;
-const ADAPTIVE_MAX_CARDS = 10;
+function fallbackScenarioCard(radarSnapshot, lockedAxes, previousCards) {
+  const cardCount = (previousCards || []).length;
+  if (cardCount >= SCENARIO_FALLBACK_FRAMES.length) return { scenario: null, options: null, confident: true };
+  const axes = selectCardAxes(radarSnapshot, lockedAxes, previousCards);
+  return {
+    scenario: SCENARIO_FALLBACK_FRAMES[cardCount](),
+    options: axes.map((axis) => ({ axis, text: AXIS_ACTIVITY_PHRASE[axis] || axis })),
+    confident: false,
+  };
+}
 
-// ctx: {profile: {name}, radarSnapshot: {body,mind,...}, lockedAxes: [axisKey],
-//       previousCards: [{statement, response:"up"|"down"}]}
-// lockedAxes = axes the user deliberately pinned on the radar (max 3) - a
-// strong priority signal that flows into the prompt as CONTEXT for the AI to
-// interpret; there is intentionally no code that assigns fixed "meaning" to
-// any particular combination (per PRD: no lookup table like "Body high =>
-// Social sacrificed" - the AI reads meaning from the user's actual swipes).
-// Returns {statement: string|null, confident: boolean}. When confident is
-// true, statement may be null - the caller should stop and move to Chapter
-// Analysis. The user never types anything: they thumb each statement up
-// ("ini aku") or down ("bukan aku"), and that swipe history is the whole
-// conversational signal. The 4-minimum/10-maximum bound is enforced here in
-// code, not trusted purely from the model's own "confident" self-report -
-// same defense-in-depth principle as the crisis-detection phrase list and
-// the 12-word growth-gate elsewhere in this codebase.
-async function generateStatementCard(ctx) {
+// ctx: {profile: {name}, radarSnapshot: {body,growth,...}, lockedAxes: [axisKey],
+//       previousCards: [{scenario, options:[{axis,text}], mostPreferred, leastPreferred}]}
+// Returns {scenario: string|null, options: [{axis,text}]|null, confident: boolean}.
+// When confident is true, scenario/options may be null - the caller stops
+// and moves to Chapter Analysis. The min-2/max-6 bound AND the full-coverage
+// requirement are enforced here in code, not trusted purely from the
+// model's own "confident" self-report - same defense-in-depth principle as
+// the crisis-detection phrase list and the 12-word growth-gate elsewhere.
+async function generateScenarioCard(ctx) {
   const cardCount = (ctx.previousCards || []).length;
-  if (cardCount >= ADAPTIVE_MAX_CARDS) return { statement: null, confident: true };
+  if (cardCount >= SCENARIO_MAX_CARDS) return { scenario: null, options: null, confident: true };
 
-  if (!hasKey()) {
-    if (cardCount >= ADAPTIVE_FALLBACK_STATEMENTS.length) return { statement: null, confident: true };
-    return { statement: ADAPTIVE_FALLBACK_STATEMENTS[cardCount](ctx.radarSnapshot), confident: false };
-  }
+  const axes = selectCardAxes(ctx.radarSnapshot, ctx.lockedAxes, ctx.previousCards);
+  const coverageDone = coverageComplete(ctx.radarSnapshot, ctx.lockedAxes, ctx.previousCards);
+
+  if (!hasKey()) return fallbackScenarioCard(ctx.radarSnapshot, ctx.lockedAxes, ctx.previousCards);
   try {
     const stageGuidance =
       cardCount === 0
-        ? "Ini kartu PERTAMA, belum ada respons sebelumnya. Bangun pernyataan dari pola ctx.radarSnapshot (sumbu yang paling menonjol ATAU paling ditekan) — tebakan hangat soal apa yang sedang paling menyita hidup mereka sekarang."
-        : 'Baca arah swipe di ctx.previousCards: "up" berarti pernyataan itu resonan ("ini aku") — gali lebih spesifik ke arah itu; "down" berarti tidak resonan — geser ke sisi/area lain, jangan dipaksakan. Makin lanjut, arahkan pernyataan ke values, hambatan/ketakutan, atau non-negotiables mereka. JANGAN mengulang atau sekadar memparafrase pernyataan yang sudah pernah muncul.';
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini onboarding adaptif Eleva berformat KARTU PERNYATAAN — kamu menulis SATU pernyataan singkat orang-pertama ("Aku ..."), lalu pengguna merespons thumbs up ("ini aku") atau thumbs down ("bukan aku") tanpa mengetik apa pun. Pernyataan WAJIB personal untuk pengguna ini (diturunkan dari radar chart + histori swipe mereka), BUKAN diambil dari bank pernyataan tes kepribadian yang sama untuk semua orang. Sudah ada ${cardCount} kartu terjawab (minimal ${ADAPTIVE_MIN_CARDS}, maksimal ${ADAPTIVE_MAX_CARDS} sebelum wajib berhenti).\n\n${stageGuidance}\n\nSoal ctx.lockedAxes: itu sumbu radar yang SENGAJA dikunci pengguna (maksimal 3) — sinyal prioritas yang kuat dan disengaja, lebih kuat dari sekadar nilai tinggi. Kalau ada 2-3 sumbu terkunci di nilai tinggi sekaligus (kombinasi ekstrem, mis. Body DAN Social sama-sama dikunci tinggi) dan pola swipe sejauh ini belum cukup menjelaskan apa arti kombinasi itu buat mereka, arahkan salah satu kartu berikutnya untuk menggali SPESIFIK ke kombinasi itu — jangan menyimpulkan sendiri dari asumsi umum.\n\nBalas JSON dengan bentuk persis:\n{"statement": string|null, "confident": boolean}\n\nAturan: set "confident":true HANYA kalau pola swipe sejauh ini sudah cukup konsisten untuk membuat Chapter Analysis yang benar-benar personal (pemahaman soal arah hidup, values, DAN hambatan utama mereka) - kalau true, "statement" boleh null (sistem yang menjaga batas minimal/maksimal, kamu tidak perlu menghitung sendiri). Kalau belum, isi "statement" dengan SATU pernyataan baru: 1-2 kalimat, orang-pertama, cukup konkret untuk disetujui/ditolak dengan satu tap, nada hangat dan jujur seperti mentor.`;
+        ? "Ini kartu PERTAMA, belum ada histori pilihan. Bangun skenario dari pola ctx.radarSnapshot pada axesToTest (sumbu yang menonjol/ditekan) - situasi umum yang masuk akal buat siapa saja, tapi opsinya dipersonalisasi ke radar mereka."
+        : "Baca pola pilihan di ctx.previousCards (mostPreferred = favorit, leastPreferred = paling tidak disukai, tiap kartu): sumbu yang berulang jadi favorit menandakan minat kuat, yang berulang jadi paling-tidak-disukai menandakan area yang dihindari. Bangun skenario baru yang menggali lebih spesifik ke pola itu. JANGAN mengulang skenario yang sudah pernah muncul.";
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify({ ...ctx, axesToTest: axes })}\n\nTugas: ini onboarding adaptif Eleva berformat SKENARIO - kamu menulis SATU situasi singkat ("Kamu ...", "Ketika ..."), lalu memberi TEPAT 4 opsi respons, masing-masing mewakili SATU sumbu dari axesToTest (satu opsi per sumbu, urutan bebas tapi harus mencakup PERSIS keempat sumbu itu - jangan pakai sumbu lain, dan jangan sampai ada axesToTest yang tidak terwakili). Pengguna nanti memilih SATU opsi paling disukai DAN SATU dari sisanya paling tidak disukai - kamu tidak perlu memikirkan itu, cukup tulis skenario+opsinya senatural mungkin. Skenario+opsi WAJIB personal untuk pengguna ini (dari radar chart + histori kartu di ctx.previousCards), BUKAN template generik yang sama untuk semua orang. Sudah ada ${cardCount} kartu terjawab (minimal ${SCENARIO_MIN_CARDS}, maksimal ${SCENARIO_MAX_CARDS} sebelum wajib berhenti - dan baru boleh berhenti kalau SEMUA sumbu radar yang unlocked sudah pernah muncul sebagai opsi minimal sekali, itu dicek di kode, bukan olehmu).\n\n${stageGuidance}\n\nSoal ctx.lockedAxes: sumbu yang SENGAJA dikunci pengguna (maksimal 3) - axesToTest sudah menjamin sumbu itu TIDAK termasuk, jangan menyimpang darinya.\n\nBalas JSON dengan bentuk persis:\n{"scenario": string|null, "options": [{"axis": string, "text": string}]|null, "confident": boolean}\n\nAturan: set "confident":true HANYA kalau pola pilihan sejauh ini sudah cukup konsisten untuk Chapter Analysis yang personal - kalau true, "scenario"/"options" boleh null. Kalau belum, isi "scenario" (1-2 kalimat, situasi konkret sehari-hari) dan "options" (TEPAT 4 entri, masing-masing "axis" persis salah satu dari axesToTest dan "text" 1 frasa pendek tindakan/pilihan konkret, natural buat dipilih tanpa berpikir lama). Nada hangat, personal, seperti mentor yang benar-benar memperhatikan.`;
     const result = await callClaude(user);
     if (typeof result?.confident !== "boolean") throw new Error("bad shape");
-    if (!result.confident && !result.statement) throw new Error("bad shape");
-    // A too-early confident:true is treated as a policy violation and falls
-    // through to the deterministic fallback statement below, rather than
-    // retried (another API call for no real benefit).
-    if (result.confident && cardCount < ADAPTIVE_MIN_CARDS) throw new Error("confident too early");
+    if (!result.confident) {
+      if (!result.scenario || !Array.isArray(result.options) || result.options.length !== axes.length) {
+        throw new Error("bad shape");
+      }
+      const gotAxes = new Set(result.options.map((o) => o.axis));
+      if (axes.some((a) => !gotAxes.has(a))) throw new Error("bad shape: axis mismatch");
+      // Defense-in-depth: rebuild options in a fixed, guaranteed order/axis
+      // set rather than trusting the model's array verbatim.
+      result.options = axes.map((a) => {
+        const found = result.options.find((o) => o.axis === a);
+        return { axis: a, text: (found && found.text) || AXIS_ACTIVITY_PHRASE[a] || a };
+      });
+    }
+    // A too-early confident:true (before the minimum card count, or before
+    // every unlocked axis has been tested) is a policy violation - falls
+    // through to the deterministic fallback for this round rather than
+    // being retried (another API call for no real benefit).
+    if (result.confident && (cardCount < SCENARIO_MIN_CARDS || !coverageDone)) throw new Error("confident too early");
     return result;
   } catch (e) {
-    console.error("generateStatementCard failed, using fallback:", e.message);
-    if (cardCount >= ADAPTIVE_FALLBACK_STATEMENTS.length) return { statement: null, confident: true };
-    return { statement: ADAPTIVE_FALLBACK_STATEMENTS[cardCount](ctx.radarSnapshot), confident: false };
+    console.error("generateScenarioCard failed, using fallback:", e.message);
+    return fallbackScenarioCard(ctx.radarSnapshot, ctx.lockedAxes, ctx.previousCards);
   }
 }
 
@@ -202,33 +257,51 @@ const RADAR_AXIS_TO_PATHWAY = {
   career: "Builder", finance: "Builder", explorer: "Explorer", mind: "Specialist",
 };
 
+// Axes whose calibrated value (post Adaptive Scenario Cards) landed ≥2 away
+// from the raw manual-drag value - the founder's hard requirement is that
+// this NEVER happens silently: Chapter Analysis must call it out by name.
+function significantShifts(radarRaw, radarSnapshot) {
+  if (!radarRaw || !radarSnapshot) return [];
+  return Object.keys(radarSnapshot)
+    .filter((k) => k in radarRaw && Math.abs(radarSnapshot[k] - radarRaw[k]) >= 2)
+    .map((k) => ({ axis: k, from: radarRaw[k], to: radarSnapshot[k] }));
+}
+
 async function generateChapterAnalysis(ctx) {
-  if (!hasKey()) return fallbackChapterAnalysis(ctx);
+  const shifts = significantShifts(ctx.radarRaw, ctx.radarSnapshot);
+  if (!hasKey()) return fallbackChapterAnalysis(ctx, shifts);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah self-assessment radar 7 sumbu MECE yang mereka gambar sendiri (skala 1-10, total 35: Body, Growth, Livelihood, Emotional Stability, Social, Purpose, Autonomy), ctx.lockedAxes adalah sumbu yang SENGAJA mereka kunci sebagai prioritas (maksimal 3 — sinyal disengaja, lebih kuat dari sekadar nilai tinggi), dan ctx.cards adalah kartu-kartu pernyataan yang sudah mereka respons — "response":"up" berarti pernyataan itu resonan ("ini aku"), "down" berarti tidak ("bukan aku"). Pola swipe ini + bentuk radar + sumbu terkunci adalah seluruh sinyal yang kamu punya (tidak ada teks bebas dari pengguna). PENTING: kalau ada 2-3 sumbu terkunci di nilai tinggi sekaligus (kombinasi ekstrem, mis. Body dan Social dua-duanya dikunci tinggi), interpretasi kombinasi itu WAJIB dikaitkan ke respons kartu aktual mereka — jangan mengarang generalisasi sendiri soal apa "arti" kombinasi itu. Rangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Builder"|"Guardian"|"Explorer"|"Connector"|"Seeker"|"Specialist", "pathwayNoun": string, "secondaryTrait": string|null}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali). "pathway" satu rekomendasi dari 6 nama itu berdasarkan pola dari SELURUH konteks (radar + arah swipe semua kartu, termasuk yang di-thumbs-down — penolakan juga informasi), bukan cuma sumbu radar tertinggi. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Builder → "Builder"). "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
+    const shiftNote = shifts.length
+      ? `\n\nKALIBRASI: radar awal pengguna (ctx.radarRaw, hasil drag manual mentah) bergeser signifikan (≥2 poin) di sumbu berikut setelah reaksi mereka ke skenario: ${shifts.map((s) => `${RADAR_AXIS_LABELS[s.axis] || s.axis} (${s.from}→${s.to})`).join(", ")}. WAJIB sebutkan pergeseran ini secara eksplisit di "insight" - jangan diam-diam pakai radar terkalibrasi tanpa memberi tahu pengguna bahwa persepsi awal mereka bergeser dari pilihan-pilihan konkret mereka, bukan cuma dari drag manual mereka sendiri (mis. "Kamu awalnya menandai Livelihood sangat tinggi, tapi dari beberapa hal yang kamu pilih, itu terasa tidak sekuat itu - atau memang segitu, dan aku salah baca?").`
+      : "";
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah radar TERKALIBRASI (skala 1-10, total 35: Body, Growth, Livelihood, Emotional Stability, Social, Purpose, Autonomy) - hasil drag manual pengguna (ctx.radarRaw) yang sudah dikoreksi halus berdasarkan reaksi mereka ke Adaptive Scenario Cards (ctx.cards), karena self-report di skala 1-10 rawan bias yang diuji ulang lewat pilihan konkret. ctx.lockedAxes adalah sumbu yang SENGAJA mereka kunci (maksimal 3, tidak pernah ikut kalibrasi). ctx.cards masing-masing berisi {scenario, options, mostPreferred, leastPreferred} - mostPreferred sumbu yang mereka pilih paling disukai, leastPreferred yang paling tidak disukai dari sisanya; dua sumbu yang tidak dipilih sama sekali di kartu itu netral. Pola pilihan ini + radar terkalibrasi + sumbu terkunci adalah seluruh sinyal yang kamu punya (tidak ada teks bebas dari pengguna). PENTING: kalau ada 2-3 sumbu terkunci di nilai tinggi sekaligus (kombinasi ekstrem, mis. Body dan Social dua-duanya dikunci tinggi), interpretasi kombinasi itu WAJIB dikaitkan ke pola pilihan aktual mereka - jangan mengarang generalisasi sendiri soal apa "arti" kombinasi itu.${shiftNote}\n\nRangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Builder"|"Guardian"|"Explorer"|"Connector"|"Seeker"|"Specialist", "pathwayNoun": string, "secondaryTrait": string|null}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali). "pathway" satu rekomendasi dari 6 nama itu berdasarkan pola dari SELURUH konteks (radar terkalibrasi + pola favorit/tidak-favorit semua kartu, termasuk yang paling-tidak-disukai — penolakan juga informasi), bukan cuma sumbu radar tertinggi. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Builder → "Builder"). "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
     const result = await callClaude(user);
     if (!result?.pathway || !PATHWAY_NAMES.includes(result.pathway)) throw new Error("bad shape");
-    return result;
+    return { ...result, significantShifts: shifts };
   } catch (e) {
     console.error("generateChapterAnalysis failed, using fallback:", e.message);
-    return fallbackChapterAnalysis(ctx);
+    return fallbackChapterAnalysis(ctx, shifts);
   }
 }
 
-function fallbackChapterAnalysis(ctx) {
+function fallbackChapterAnalysis(ctx, shifts) {
   const axis = highestRadarAxis(ctx.radarSnapshot);
   const pathway = RADAR_AXIS_TO_PATHWAY[axis] || "Seeker";
+  const shiftText = (shifts && shifts.length)
+    ? " Catatan kalibrasi: " + shifts.map((s) => `${RADAR_AXIS_LABELS[s.axis] || s.axis} bergeser dari ${s.from} ke ${s.to} setelah pilihan-pilihanmu di skenario`).join("; ") + "."
+    : "";
   return {
-    insight: hasKey()
+    insight: (hasKey()
       ? "Koneksi ke mentor lagi tersendat — tapi dari yang kamu ceritakan, ini arah yang tetap relevan buat dicoba."
-      : "Mode tanpa API key: analisis di bawah ini masih berbasis pola sederhana dari radar-mu, belum benar-benar membaca ceritamu. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.",
+      : "Mode tanpa API key: analisis di bawah ini masih berbasis pola sederhana dari radar-mu, belum benar-benar membaca ceritamu. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.") + shiftText,
     pathway,
     pathwayNoun: pathway,
     secondaryTrait: null,
+    significantShifts: shifts || [],
   };
 }
 
 module.exports = {
   generateQuest, processReflection, hasKey,
-  generateStatementCard, generateChapterAnalysis,
+  generateScenarioCard, generateChapterAnalysis,
 };

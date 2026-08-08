@@ -126,8 +126,9 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .chip { padding: 9px 16px; border-radius: 20px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); font-size: 13.5px; }
 .chip.active { border-color: var(--accent); background: #e8a33d22; color: var(--accent); }
 
-.swipe-row { display: flex; gap: 12px; }
-.swipe-btn { flex: 1; padding: 15px 10px; border-radius: 10px; font-size: 15px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
-.swipe-btn.up { border-color: #7fa98f66; }
-.swipe-btn.down { border-color: #b5544a55; }
-.swipe-btn:active { transform: scale(.97); }
+.scenario-options { display: flex; flex-direction: column; gap: 10px; }
+.scenario-opt { text-align: left; padding: 14px 16px; border-radius: 10px; font-size: 14.5px; line-height: 1.4; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
+.scenario-opt:active { transform: scale(.98); }
+.scenario-opt.favorite { border-color: var(--accent); background: #e8a33d18; }
+.scenario-opt.least { border-color: #b5544a77; background: #b5544a14; color: var(--muted); }
+.opt-tag { margin-right: 8px; }

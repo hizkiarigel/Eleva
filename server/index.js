@@ -74,10 +74,10 @@ app.post("/api/logout", (req, res) => {
 
 // --- Adaptive onboarding (stateless AI proxies; no character_state yet) ---
 
-app.post("/api/onboarding/statement-card", requireAuth, async (req, res) => {
+app.post("/api/onboarding/scenario-card", requireAuth, async (req, res) => {
   try {
     const { profile, radarSnapshot, lockedAxes, previousCards } = req.body;
-    const result = await ai.generateStatementCard({ profile, radarSnapshot, lockedAxes, previousCards });
+    const result = await ai.generateScenarioCard({ profile, radarSnapshot, lockedAxes, previousCards });
     res.json(result);
   } catch (e) {
     console.error(e);
@@ -87,8 +87,8 @@ app.post("/api/onboarding/statement-card", requireAuth, async (req, res) => {
 
 app.post("/api/onboarding/chapter-analysis", requireAuth, async (req, res) => {
   try {
-    const { profile, radarSnapshot, lockedAxes, cards } = req.body;
-    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, lockedAxes, cards });
+    const { profile, radarSnapshot, radarRaw, lockedAxes, cards } = req.body;
+    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, radarRaw, lockedAxes, cards });
     res.json(result);
   } catch (e) {
     console.error(e);
@@ -168,19 +168,24 @@ app.get("/api/state", requireAuth, async (req, res) => {
 app.post("/api/profile", requireAuth, async (req, res) => {
   try {
     const {
-      name, radarSnapshot: rawRadar, originStory,
+      name, radarSnapshot: rawRadar, radarRaw: rawRadarRaw, originStory,
       pathway: rawPathway, pathwayNoun: rawPathwayNoun, secondaryTrait,
     } = req.body;
     if (!name) return res.status(400).json({ error: "Nama wajib diisi." });
 
-    // radarSnapshot comes from the client-side radar chart (conservation-of-
-    // total redistribution already applied there, 1-10 per axis) - clamp
-    // defensively, then derive the 0-100 `stats` column from it (×10). Stored
-    // separately: radar_snapshot stays a frozen 1-10 record of what they drew,
-    // stats is the live 0-100 value that daily reflections grow over time.
+    // radarSnapshot comes from the client-side radar chart, AFTER Adaptive
+    // Scenario Card calibration (conservation-of-total redistribution
+    // already applied there, 1-10 per axis) - clamp defensively, then derive
+    // the 0-100 `stats` column from it (×10). radarSnapshot is what daily
+    // quest generation and Pathway logic read; radarRaw is the pre-
+    // calibration manual-drag result, kept only for audit/transparency.
     const radarSnapshot = {};
     Object.entries(rawRadar || {}).forEach(([k, v]) => {
       radarSnapshot[k] = Math.max(1, Math.min(10, Math.round(Number(v))));
+    });
+    const radarRaw = {};
+    Object.entries(rawRadarRaw || {}).forEach(([k, v]) => {
+      radarRaw[k] = Math.max(1, Math.min(10, Math.round(Number(v))));
     });
     const initialStats = {};
     Object.entries(radarSnapshot).forEach(([k, v]) => {
@@ -210,6 +215,7 @@ app.post("/api/profile", requireAuth, async (req, res) => {
       pathway,
       pathwayNoun: result.pathwayNoun || pathwayNoun,
       radarSnapshot,
+      radarRaw: Object.keys(radarRaw).length ? radarRaw : null,
       secondaryTrait: secondaryTrait || null,
     });
     await db.upsertDay(req.userId, todayKey(), { quest: result.quest, insight: result.insight, reflection: null });

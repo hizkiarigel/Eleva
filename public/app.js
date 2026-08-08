@@ -222,6 +222,8 @@ let onboardForm = {
   name: "",
   privacyChecked: false,
   radar: { ...DEFAULT_RADAR },
+  radarRaw: null, // frozen snapshot at the moment the radar step is left, before any calibration
+  calibrationSum: {}, // {axisKey: cumulative direct calibration delta so far, capped [-3,3]}
   locked: [], // axis keys pinned by the user, max MAX_LOCKS
 };
 let onboardStep = 0;
@@ -236,11 +238,15 @@ let authForm = { email: "", password: "", betaCode: "" };
 let privacyChecked = false;
 let authError = "";
 
-// --- Adaptive onboarding phase (Radar chart -> statement cards -> Chapter Analysis) ---
+// --- Adaptive onboarding phase (Radar chart -> Adaptive Scenario Cards ->
+// Chapter Analysis). v6: cards are one scenario + 4 options (one per
+// unlocked axis); each choice also calibrates the radar via the SAME
+// redistribution engine as manual dragging - see applyCalibrationCard. ---
 let adaptivePhase = "card"; // "loading" | "card" | "thinking" | "analysis"
-let adaptiveCards = []; // [{statement, response: "up"|"down"}, ...] - length also serves as the card counter
-let adaptiveCurrentStatement = "";
-let chapterAnalysis = null; // {insight, pathway, pathwayNoun, secondaryTrait}
+let adaptiveCards = []; // [{scenario, options:[{axis,text}], mostPreferred, leastPreferred}, ...] - length also serves as the card counter
+let adaptiveScenario = null; // {scenario, options} for the card currently on screen
+let adaptiveSelection = { mostPreferred: null, leastPreferred: null }; // in-progress picks for the current card
+let chapterAnalysis = null; // {insight, pathway, pathwayNoun, secondaryTrait, significantShifts}
 let overrideMode = false;
 let overrideText = "";
 let onboardError = "";
@@ -272,15 +278,46 @@ function resetOnboardState() {
     name: "",
     privacyChecked: false,
     radar: { ...DEFAULT_RADAR },
+    radarRaw: null, // frozen snapshot at the moment the radar step is left, before any calibration
+    calibrationSum: {}, // {axisKey: cumulative direct calibration delta so far, capped [-3,3]}
     locked: [],
   };
   adaptivePhase = "card";
   adaptiveCards = [];
-  adaptiveCurrentStatement = "";
+  adaptiveScenario = null;
+  adaptiveSelection = { mostPreferred: null, leastPreferred: null };
   chapterAnalysis = null;
   overrideMode = false;
   overrideText = "";
   onboardError = "";
+}
+
+// Applies one card's two signals (favorite = +1, least-favorite = -1) to the
+// radar through the EXISTING zero-sum + synergy engine (applySynergyDrag) -
+// per PRD, calibration reuses the manual-drag mechanism rather than a
+// separate system that could break the total=35 invariant. Each axis's
+// cumulative DIRECT signal (i.e. only when that axis itself was picked as
+// favorite/least-favorite, not collateral movement from redistribution) is
+// capped at ±3 net across the whole session; once an axis hits its cap,
+// further direct signals toward the same side are silently absorbed to 0 -
+// the axis can still appear in later cards for coverage, its own delta just
+// stops moving it further.
+function clampCalibrationDelta(axis, rawDelta) {
+  const current = onboardForm.calibrationSum[axis] || 0;
+  const next = Math.max(-3, Math.min(3, current + rawDelta));
+  const effective = next - current;
+  onboardForm.calibrationSum[axis] = next;
+  return effective;
+}
+function applyCalibrationCard(card) {
+  const favDelta = clampCalibrationDelta(card.mostPreferred, 1);
+  onboardForm.radar = applySynergyDrag(
+    onboardForm.radar, card.mostPreferred, onboardForm.radar[card.mostPreferred] + favDelta, onboardForm.locked
+  ).values;
+  const leastDelta = clampCalibrationDelta(card.leastPreferred, -1);
+  onboardForm.radar = applySynergyDrag(
+    onboardForm.radar, card.leastPreferred, onboardForm.radar[card.leastPreferred] + leastDelta, onboardForm.locked
+  ).values;
 }
 
 async function boot() {
@@ -584,19 +621,21 @@ function renderOnboarding() {
   document.getElementById("next").addEventListener("click", () => {
     if (!isStepValid(onboardStep)) return;
     if (!last) { onboardStep++; renderOnboarding(); return; }
-    // Static steps done - hand off to the adaptive AI-driven phase.
+    // Static steps done - freeze the pre-calibration radar for audit, then
+    // hand off to the adaptive AI-driven phase.
+    onboardForm.radarRaw = { ...onboardForm.radar };
     adaptivePhase = "loading";
     adaptiveCards = [];
     ui = { view: "adaptive" };
     render();
-    fetchStatementCard();
+    fetchScenarioCard();
   });
 }
 
-async function fetchStatementCard() {
+async function fetchScenarioCard() {
   onboardError = "";
   try {
-    const result = await api("/api/onboarding/statement-card", {
+    const result = await api("/api/onboarding/scenario-card", {
       method: "POST",
       body: {
         profile: { name: onboardForm.name },
@@ -605,21 +644,22 @@ async function fetchStatementCard() {
         previousCards: adaptiveCards,
       },
     });
-    // Server decides when the swipe pattern is consistent enough (min 4,
-    // max 10 - enforced server-side, not just requested here) -
-    // confident:true means stop and move straight to Chapter Analysis
-    // instead of showing another card.
+    // Server decides when the choice pattern is consistent enough AND every
+    // unlocked axis has been tested at least once (min 2, max 6 - enforced
+    // server-side, not just requested here) - confident:true means stop and
+    // move straight to Chapter Analysis instead of showing another card.
     if (result.confident) {
       await fetchChapterAnalysis();
       return;
     }
-    adaptiveCurrentStatement = result.statement;
+    adaptiveScenario = { scenario: result.scenario, options: result.options };
+    adaptiveSelection = { mostPreferred: null, leastPreferred: null };
     adaptivePhase = "card";
     render();
   } catch (e) {
     onboardError = e.message;
     adaptivePhase = "card";
-    adaptiveCurrentStatement = "";
+    adaptiveScenario = null;
     render();
   }
 }
@@ -634,6 +674,7 @@ async function fetchChapterAnalysis() {
       body: {
         profile: { name: onboardForm.name },
         radarSnapshot: onboardForm.radar,
+        radarRaw: onboardForm.radarRaw,
         lockedAxes: onboardForm.locked,
         cards: adaptiveCards,
       },
@@ -642,11 +683,11 @@ async function fetchChapterAnalysis() {
     render();
   } catch (e) {
     onboardError = e.message;
-    // Fall back to the card phase with no current statement, so the retry
+    // Fall back to the card phase with no current scenario, so the retry
     // button re-asks the server - which re-evaluates confidence and routes
     // straight back here once satisfied. No dead end, no stale card shown.
     adaptivePhase = "card";
-    adaptiveCurrentStatement = "";
+    adaptiveScenario = null;
     render();
   }
 }
@@ -657,7 +698,7 @@ async function submitOnboarding(pathway, pathwayNoun) {
     await api("/api/profile", {
       method: "POST",
       body: {
-        name: onboardForm.name, radarSnapshot: onboardForm.radar,
+        name: onboardForm.name, radarSnapshot: onboardForm.radar, radarRaw: onboardForm.radarRaw,
         originStory: chapterAnalysis?.insight || null,
         pathway, pathwayNoun, secondaryTrait: chapterAnalysis?.secondaryTrait || null,
       },
@@ -676,36 +717,75 @@ function renderAdaptive() {
   }
 
   if (adaptivePhase === "card") {
+    const sel = adaptiveSelection;
+    const bothPicked = sel.mostPreferred && sel.leastPreferred;
+    const instruction = !sel.mostPreferred
+      ? "Tap opsi yang paling kamu suka."
+      : !sel.leastPreferred
+        ? "Sekarang tap satu dari sisanya yang paling nggak kamu suka."
+        : "Siap lanjut, atau tap ulang buat ganti pilihan.";
     root.innerHTML = `
       <div class="shell">
         <div class="eyebrow mono">ELEVA · ONBOARDING</div>
         <div class="mono" style="font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:20px">KARTU KE-${adaptiveCards.length + 1}</div>
         ${onboardError ? `<p style="color:var(--rust);font-size:13.5px;margin:0 0 16px">${esc(onboardError)}</p>` : ""}
-        ${!adaptiveCurrentStatement ? `<button class="btn-primary" id="retryCard">Coba lagi</button>` : `
+        ${!adaptiveScenario ? `<button class="btn-primary" id="retryCard">Coba lagi</button>` : `
         <div class="fadeUp">
           <div class="quest-card" style="margin-bottom:14px">
-            <p class="fr" style="font-size:20px;line-height:1.65;margin:0;font-weight:500">${esc(adaptiveCurrentStatement)}</p>
+            <p class="fr" style="font-size:19px;line-height:1.65;margin:0;font-weight:500">${esc(adaptiveScenario.scenario)}</p>
           </div>
-          <p style="color:var(--muted);font-size:13px;margin:0 0 18px;text-align:center">Seberapa "kamu banget" pernyataan ini? Tap salah satu.</p>
-          <div class="swipe-row">
-            <button class="swipe-btn down" id="swipeDown">👎 Bukan aku</button>
-            <button class="swipe-btn up" id="swipeUp">👍 Ini aku</button>
+          <p style="color:var(--muted);font-size:13px;margin:0 0 14px;text-align:center">${esc(instruction)}</p>
+          <div class="scenario-options">
+            ${adaptiveScenario.options.map((opt) => {
+              const isFav = sel.mostPreferred === opt.axis;
+              const isLeast = sel.leastPreferred === opt.axis;
+              const cls = isFav ? "favorite" : isLeast ? "least" : "";
+              const tag = isFav ? "👍" : isLeast ? "👎" : "";
+              return `<button class="scenario-opt ${cls}" data-axis="${opt.axis}">${tag ? `<span class="opt-tag">${tag}</span>` : ""}${esc(opt.text)}</button>`;
+            }).join("")}
           </div>
+          <button class="btn-primary full" id="confirmCard" style="margin-top:18px" ${bothPicked ? "" : "disabled"}>Lanjut →</button>
         </div>`}
       </div>`;
-    document.getElementById("retryCard")?.addEventListener("click", fetchStatementCard);
-    const respond = async (response) => {
-      adaptiveCards.push({ statement: adaptiveCurrentStatement, response });
+    document.getElementById("retryCard")?.addEventListener("click", fetchScenarioCard);
+    document.querySelectorAll(".scenario-opt").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const axis = btn.dataset.axis;
+        if (adaptiveSelection.mostPreferred === axis) {
+          adaptiveSelection = { mostPreferred: null, leastPreferred: null };
+        } else if (adaptiveSelection.leastPreferred === axis) {
+          adaptiveSelection.leastPreferred = null;
+        } else if (!adaptiveSelection.mostPreferred) {
+          adaptiveSelection.mostPreferred = axis;
+        } else if (!adaptiveSelection.leastPreferred) {
+          adaptiveSelection.leastPreferred = axis;
+        } else {
+          adaptiveSelection = { mostPreferred: axis, leastPreferred: null };
+        }
+        renderAdaptive();
+      });
+    });
+    document.getElementById("confirmCard")?.addEventListener("click", async () => {
+      const card = {
+        scenario: adaptiveScenario.scenario, options: adaptiveScenario.options,
+        mostPreferred: adaptiveSelection.mostPreferred, leastPreferred: adaptiveSelection.leastPreferred,
+      };
+      try {
+        applyCalibrationCard(card);
+      } catch (e) {
+        onboardError = "Gagal menerapkan kalibrasi: " + e.message;
+        renderAdaptive();
+        return;
+      }
+      adaptiveCards.push(card);
       adaptivePhase = "loading";
       render();
-      // fetchStatementCard re-evaluates swipe-pattern consistency with the
-      // updated card list, and internally redirects to fetchChapterAnalysis
-      // once satisfied (min 4/max 10 enforced server-side) - no fixed-count
-      // loop needed here.
-      await fetchStatementCard();
-    };
-    document.getElementById("swipeUp")?.addEventListener("click", () => respond("up"));
-    document.getElementById("swipeDown")?.addEventListener("click", () => respond("down"));
+      // fetchScenarioCard re-evaluates choice-pattern consistency AND axis
+      // coverage with the updated card list, and internally redirects to
+      // fetchChapterAnalysis once satisfied (min 2/max 6, full unlocked-axis
+      // coverage - all enforced server-side) - no fixed-count loop needed here.
+      await fetchScenarioCard();
+    });
     return;
   }
 
@@ -716,6 +796,10 @@ function renderAdaptive() {
         <div class="eyebrow mono">ELEVA · CHAPTER ANALYSIS</div>
         <div style="height:20px"></div>
         <p class="fr" style="font-size:17px;line-height:1.7;margin:0 0 28px">${esc(chapterAnalysis?.insight || "")}</p>
+        ${chapterAnalysis?.significantShifts?.length ? `
+        <p class="mono" style="font-size:11.5px;color:var(--muted);margin:-18px 0 20px;line-height:1.6">
+          Kalibrasi radar: ${chapterAnalysis.significantShifts.map((s) => `${esc(statLabel(s.axis))} ${s.from}→${s.to}`).join(", ")} — bergeser dari radar awalmu berdasarkan pilihan-pilihanmu barusan.
+        </p>` : ""}
         <div class="quest-card" style="margin-bottom:20px">
           <div class="qlabel mono">PATHWAY REKOMENDASI</div>
           <h2 class="fr">${esc(pw || "")}${chapterAnalysis?.pathwayNoun && chapterAnalysis.pathwayNoun !== pw ? `: ${esc(chapterAnalysis.pathwayNoun)}` : ""}</h2>
