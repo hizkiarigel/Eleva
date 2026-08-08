@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Eleva — Peta Bukti Korelasi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#14141c; --surface:#1d1d28; --surface2:#23212e;
+  --text:#edeae3; --muted:#8b8a99; --hair:rgba(255,255,255,.09);
+  --pos:#7fa98f; --neg:#b5544a; --mix:#e8a33d; --unresolved:#9b7fc0; --none:#3a3a46;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased}
+.fr{font-family:'Fraunces',serif}
+.mono{font-family:'IBM Plex Mono',monospace}
+.wrap{max-width:900px;margin:0 auto;padding:32px 16px 60px}
+.eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--muted);margin-bottom:10px}
+h1{font-family:'Fraunces',serif;font-weight:600;font-size:26px;margin:0 0 8px;line-height:1.25}
+.sub{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px;max-width:60ch}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:22px;padding:14px 16px;background:var(--surface);border:1px solid var(--hair);border-radius:10px}
+.legend-item{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted)}
+.swatch{width:13px;height:13px;border-radius:3px;flex:none}
+
+.matrix-scroll{overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.matrix{display:grid;grid-template-columns:96px repeat(6,44px);gap:3px;width:max-content}
+.col-head{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10.5px;color:var(--muted);height:88px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;font-family:'IBM Plex Mono',monospace}
+.row-head{font-size:11px;color:var(--muted);display:flex;align-items:center;padding-right:8px;justify-content:flex-end;text-align:right;font-family:'IBM Plex Mono',monospace}
+.cell{height:44px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .12s ease;position:relative}
+.cell:active{transform:scale(0.93)}
+.cell.selected{outline:2px solid var(--text);outline-offset:1px}
+.cell-empty{visibility:hidden}
+.dot{width:7px;height:7px;border-radius:50%}
+
+.detail{margin-top:22px;background:var(--surface2);border:1px solid var(--hair);border-radius:12px;padding:20px;min-height:120px}
+.detail-empty{color:var(--muted);font-size:13.5px;text-align:center;padding:30px 10px}
+.detail .pair-name{font-family:'Fraunces',serif;font-weight:600;font-size:19px;margin:0 0 8px}
+.status-badge{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.5px;padding:3px 9px;border-radius:20px;margin-bottom:12px}
+.detail p{font-size:14px;line-height:1.65;margin:0 0 10px;color:var(--text)}
+.source{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--muted);border-top:1px solid var(--hair);padding-top:10px;margin-top:12px}
+
+.footnote{margin-top:24px;font-size:12px;color:var(--muted);line-height:1.7;border-top:1px solid var(--hair);padding-top:16px}
+.footnote strong{color:var(--text)}
+.count-row{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
+.count-row b{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">ELEVA · RESEARCH LEDGER</div>
+  <h1 class="fr">Peta Bukti Korelasi Antar-Elemen</h1>
+  <p class="sub">21 pasangan dari 7 Character Stats MECE (v1.5). Tap satu sel untuk lihat sumber dan penjelasannya. Ini bukti populasi rata-rata, bukan kepastian tiap individu — dipakai sebagai nudge lembut, bukan rumus tetap.</p>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="matrix-scroll">
+    <div class="matrix" id="matrix"></div>
+  </div>
+
+  <div class="detail" id="detail">
+    <div class="detail-empty">Tap salah satu sel di atas untuk lihat detail buktinya.</div>
+  </div>
+
+  <div class="count-row" id="counts"></div>
+
+  <div class="footnote">
+    <strong>Cara baca:</strong> border solid = ada bukti nyata (studi/meta-analisis nyata ditemukan). Border putus-putus = tidak ada bukti langsung yang ditemukan, atau evidensinya bersyarat/campuran. Semua ini korelasional (kecuali disebutkan sebaliknya) — bukan berarti satu menyebabkan yang lain, dan bukan berarti berlaku pasti untuk satu orang tertentu.
+  </div>
+</div>
+
+<script>
+const STATS = [
+  ['body','Body'], ['growth','Growth'], ['livelihood','Livelihood'],
+  ['emotional','Emotional\nStability'], ['social','Social'], ['purpose','Purpose'], ['autonomy','Autonomy'],
+];
+
+const STATUS = {
+  strong:    { label: 'Positif — kuat',        color: 'var(--pos)',        opacity: 1,    dash:false },
+  weak:      { label: 'Positif — lemah/bersyarat', color: 'var(--pos)',    opacity: .42,  dash:true },
+  negative:  { label: 'Negatif — bersyarat',    color: 'var(--neg)',       opacity: .8,   dash:false },
+  mixed:     { label: 'Campuran',               color: 'var(--mix)',      opacity: .6,   dash:true },
+  unresolved:{ label: 'Belum terjawab (jebakan konstruk)', color: 'var(--unresolved)', opacity: .6, dash:true },
+  none:      { label: 'Belum ketemu bukti',     color: 'var(--none)',     opacity: .35,  dash:true },
+};
+
+// key = "a|b" using STATS order, a index < b index
+const PAIRS = {
+  'body|growth':     { status:'weak', note:'Olahraga membantu fungsi kognitif, tapi efeknya kecil khusus di usia 18–30 (g=0.13) — jauh lebih besar di kelompok usia lain. (Dari komponen Mind lama; Body-Explorer lama tidak ada evidence.)', source:'Meta-analisis Bayesian, dewasa muda sehat (Communications Psychology)' },
+  'body|livelihood': { status:'mixed', note:'CAMPURAN dari merge: tekanan finansial memperburuk kesehatan fisik (positif kuat) TAPI jam kerja berlebih/overwork juga merusak kesehatan (negatif sedang). Dua arah bertabrakan — tidak dipakai sebagai nudge terarah.', source:'Financial strain systematic review; Wong, Chan & Ngan (2018) meta-analisis jam kerja' },
+  'body|emotional':  { status:'strong', note:'Olahraga menurunkan gejala depresi & cemas secara konsisten — didukung RCT, bukan cuma korelasi.', source:'Meta-meta-analisis 92 studi, Health Psychology Review' },
+  'body|social':     { status:'mixed', note:'Olahraga sendirian tidak terbukti mengurangi kesepian. Olahraga BERKELOMPOK yang terbukti — bedanya di aspek sosialnya, bukan olahraganya.', source:'Systematic review, physical activity & loneliness interventions' },
+  'body|purpose':    { status:'weak', note:'Asosiasi lemah-sedang (r≈0.26) antara meaning in life dan kesehatan fisik yang dilaporkan sendiri. Dipakai sebagai sedang-kuat (w2) di sistem sinergi.', source:'Meta-analisis 66 studi' },
+  'body|autonomy':   { status:'weak', note:'Perceived control berasosiasi dengan keluhan fisik yang lebih rendah — evidence lemah tapi nyata.', source:'Spector, meta-analisis perceived control (autonomy & partisipasi kerja)' },
+
+  'growth|livelihood':{ status:'strong', note:'Kemampuan kognitif umum adalah prediktor tunggal terkuat performa kerja lintas jenis pekerjaan (dari komponen Mind-Career lama; Career-Explorer lemah positif ikut mendukung arah yang sama).', source:'Schmidt & Hunter (1998); revisi Sackett dkk. (2022) tetap kuat' },
+  'growth|emotional':{ status:'none', note:'Belum ada studi langsung yang ditemukan.' },
+  'growth|social':   { status:'none', note:'Belum ada studi langsung yang ditemukan.' },
+  'growth|purpose':  { status:'none', note:'Belum ada studi langsung yang ditemukan.' },
+  'growth|autonomy': { status:'weak', note:'Autonomy support memprediksi engagement & performa belajar lewat kepuasan kebutuhan psikologis (SDT konteks edukasi, beberapa meta-analisis). Dipakai sebagai sedang (w2).', source:'Bureau dkk. (2022); meta-analisis SDT edukasi (144 studi, 79rb siswa)' },
+
+  'livelihood|emotional':{ status:'mixed', note:'CAMPURAN dari merge: stres finansial pemicu konsisten depresi/cemas (positif kuat) TAPI burnout dari jam kerja berlebih juga merusak kesehatan mental (negatif sedang). Tidak dipakai sebagai nudge terarah.', source:'PLOS One (2022) 40 studi; meta-analisis burnout n=84.169' },
+  'livelihood|social':{ status:'weak', note:'Modal sosial memprediksi kesuksesan karier lewat akses informasi & sponsorship. Diencerkan ke sedang-kuat (w2) karena komponen Finance-Social tidak punya evidence.', source:'Seibert, Kraimer & Liden (2001)' },
+  'livelihood|purpose':{ status:'weak', note:'Calling → kepuasan & makna kerja (200+ studi). Diencerkan ke sedang-kuat (w2) karena komponen Finance-Purpose unresolved (jebakan konstruk materialisme).', source:'Duffy & Dik, program riset calling' },
+  'livelihood|autonomy':{ status:'strong', note:'Job autonomy adalah salah satu prediktor terkuat job satisfaction dalam literatur work design.', source:'Humphrey, Nahrgang & Morgeson (2007) — 259 studi, 219.625 partisipan' },
+
+  'emotional|social':{ status:'strong', note:'Kesepian/isolasi sosial adalah faktor risiko kesehatan mental dengan besar efek setara merokok.', source:'Holt-Lunstad dkk., rangkaian meta-analisis' },
+  'emotional|purpose':{ status:'strong', note:'Purpose berkorelasi negatif kuat dengan depresi (r=-0.49) dan cemas (r=-0.36).', source:'Boreham dkk. (2023), meta-analisis n=66.468' },
+  'emotional|autonomy':{ status:'strong', note:'Kepuasan kebutuhan autonomy → wellbeing, salah satu temuan paling konsisten di Self-Determination Theory. Perceived control juga berasosiasi dengan distress emosional yang lebih rendah.', source:'Meta-analisis SDT workplace (192 studi); Spector, perceived control' },
+
+  'social|purpose':{ status:'strong', note:'Makna hidup dan koneksi sosial saling memperkuat dari waktu ke waktu — bukan cuma satu arah.', source:'Stavrova & Luhmann, studi longitudinal nasional' },
+  'social|autonomy':{ status:'none', note:'Belum ada studi langsung pasangan ini yang ditemukan (autonomy & relatedness adalah dua kebutuhan SDT yang berbeda; korelasi langsung antar keduanya tidak dicari secara spesifik di literatur yang ketemu).' },
+
+  'purpose|autonomy':{ status:'weak', note:'Autonomy → experienced meaningfulness sebagai mediator utama efek job design (dipakai sebagai sedang/w2 — evidence-nya jalur mediasi, bukan korelasi langsung).', source:'Humphrey dkk. (2007), mediating role of experienced meaningfulness' },
+};
+
+function keyFor(i,j){ // i col index < j row index
+  return STATS[i][0] + '|' + STATS[j][0];
+}
+
+function renderLegend(){
+  const el = document.getElementById('legend');
+  el.innerHTML = Object.entries(STATUS).map(([k,v])=>`
+    <div class="legend-item">
+      <span class="swatch" style="background:${v.color};opacity:${v.opacity};${v.dash?`border:1px dashed ${v.color}`:''}"></span>
+      ${v.label}
+    </div>`).join('');
+}
+
+function renderMatrix(){
+  const el = document.getElementById('matrix');
+  let html = `<div></div>`;
+  for(let c=0;c<6;c++){
+    html += `<div class="col-head">${STATS[c][1].replace('\\n',' ')}</div>`;
+  }
+  for(let r=1;r<7;r++){
+    html += `<div class="row-head">${STATS[r][1].replace('\\n',' ')}</div>`;
+    for(let c=0;c<6;c++){
+      if(c>=r){ html += `<div class="cell cell-empty"></div>`; continue; }
+      const key = keyFor(c,r);
+      const p = PAIRS[key];
+      const s = STATUS[p.status];
+      html += `<div class="cell" data-key="${key}" style="background:${s.color};opacity:${s.opacity};${s.dash?`border:1.5px dashed ${s.color}`:'border:1.5px solid transparent'}"></div>`;
+    }
+  }
+  el.innerHTML = html;
+  el.querySelectorAll('.cell[data-key]').forEach(cellEl=>{
+    cellEl.addEventListener('click', ()=>selectPair(cellEl));
+  });
+}
+
+function selectPair(cellEl){
+  document.querySelectorAll('.cell').forEach(c=>c.classList.remove('selected'));
+  cellEl.classList.add('selected');
+  const key = cellEl.dataset.key;
+  const [aKey,bKey] = key.split('|');
+  const a = STATS.find(s=>s[0]===aKey)[1].replace('\n',' ');
+  const b = STATS.find(s=>s[0]===bKey)[1].replace('\n',' ');
+  const p = PAIRS[key];
+  const s = STATUS[p.status];
+  const el = document.getElementById('detail');
+  el.innerHTML = `
+    <div class="pair-name">${a} ↔ ${b}</div>
+    <div class="status-badge" style="background:${s.color}22;color:${s.color};border:1px solid ${s.color}55">${s.label}</div>
+    <p>${p.note}</p>
+    ${p.source ? `<div class="source">Sumber: ${p.source}</div>` : ''}
+  `;
+}
+
+function renderCounts(){
+  const counts = {};
+  Object.values(PAIRS).forEach(p=>{ counts[p.status]=(counts[p.status]||0)+1; });
+  const el = document.getElementById('counts');
+  el.innerHTML = Object.entries(STATUS).map(([k,v])=>
+    `<span><b>${counts[k]||0}</b> ${v.label.toLowerCase()}</span>`
+  ).join('');
+}
+
+renderLegend();
+renderMatrix();
+renderCounts();
+</script>
+</body>
+</html>

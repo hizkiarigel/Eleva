@@ -1,7 +1,19 @@
+// 7 MECE stats (Bible v1.5): Mind+Explorer merged into Growth (Openness &
+// Intellect are one Big Five factor), Career+Finance merged into Livelihood
+// (salary is core to the research definition of career success), Autonomy
+// added (SDT - the Collectively-Exhaustive gap for an audience that lost
+// direction).
 const STAT_ORDER = [
-  ["body", "Body"], ["mind", "Mind"], ["career", "Career"], ["finance", "Finance"],
-  ["emotional", "Emotional Stability"], ["explorer", "Explorer"], ["social", "Social"], ["purpose", "Purpose"],
+  ["body", "Body"], ["growth", "Growth"], ["livelihood", "Livelihood"],
+  ["emotional", "Emotional Stability"], ["social", "Social"], ["purpose", "Purpose"], ["autonomy", "Autonomy"],
 ];
+// Pre-MECE accounts (8-element era) keep their stored stats keys until they
+// reset & re-onboard - display labels only, deliberately NOT a data
+// migration (per PRD: founder resets, nobody else has real data).
+const LEGACY_STAT_LABELS = { mind: "Mind", career: "Career", finance: "Finance", explorer: "Explorer" };
+function statLabel(key) {
+  return STAT_ORDER.find((s) => s[0] === key)?.[1] || LEGACY_STAT_LABELS[key] || key;
+}
 
 const PATHWAY_DESC = {
   Builder: "Membangun sesuatu dari nol, butuh konsistensi untuk menyelesaikannya.",
@@ -17,67 +29,76 @@ function maturityTier(growthSessions) {
   return MATURITY_TIERS[Math.min(MATURITY_TIERS.length - 1, Math.floor((growthSessions || 0) / 3))];
 }
 
-// --- Radar self-assessment (8 axes, 1-10 each, always sums to exactly 40 - see
-// applySynergyDrag/roundPreservingTotal below for how that's guaranteed) ---
-const POLY_ORDER = ["mind", "career", "finance", "purpose", "emotional", "explorer", "social", "body"];
+// --- Radar self-assessment (7 MECE axes, 1-10 each, always sums to exactly
+// 35 - see applySynergyDrag/roundPreservingTotal below for how that's
+// guaranteed) ---
+const POLY_ORDER = ["body", "growth", "livelihood", "emotional", "social", "purpose", "autonomy"];
+const POLY_TOTAL = 35; // 7 axes x default 5 - the fixed zero-sum budget
 const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 110, POLY_MINR = 15;
+const POLY_STEP_DEG = 360 / POLY_ORDER.length; // heptagon: ~51.43deg per axis
 // Square viewBox with padding so axis-name labels (anchored outward) never
 // clip; kept square so pointer->viewBox mapping stays a uniform scale.
-const POLY_VIEW_MIN = -16, POLY_VIEW_SIZE = 332;
-const DEFAULT_RADAR = { body: 5, mind: 5, career: 5, finance: 5, emotional: 5, explorer: 5, social: 5, purpose: 5 };
+// Wider than the 8-axis era: the heptagon puts "Livelihood" at a
+// near-horizontal angle where it needs the full word to the right.
+// Center invariant: POLY_VIEW_MIN + POLY_VIEW_SIZE/2 === POLY_CENTER.
+const POLY_VIEW_MIN = -34, POLY_VIEW_SIZE = 368;
+const DEFAULT_RADAR = { body: 5, growth: 5, livelihood: 5, emotional: 5, social: 5, purpose: 5, autonomy: 5 };
 
 function polyRadius(value) {
   const v = Math.max(POLY_MIN, Math.min(POLY_MAX, value));
   return POLY_MINR + ((v - POLY_MIN) / (POLY_MAX - POLY_MIN)) * (POLY_MAXR - POLY_MINR);
 }
 // Returns a FLOAT value - rounding happens once, at the end of the whole
-// redistribution (largest-remainder across all 8 axes), never per-point.
+// redistribution (largest-remainder across all 7 axes), never per-point.
 function polyValueFromRadius(r) {
   const clamped = Math.max(POLY_MINR, Math.min(POLY_MAXR, r));
   return POLY_MIN + ((clamped - POLY_MINR) / (POLY_MAXR - POLY_MINR)) * (POLY_MAX - POLY_MIN);
 }
 function polyPoint(index, value) {
-  const angle = ((-90 + index * 45) * Math.PI) / 180;
+  const angle = ((-90 + index * POLY_STEP_DEG) * Math.PI) / 180;
   const r = polyRadius(value);
   return [POLY_CENTER + r * Math.cos(angle), POLY_CENTER + r * Math.sin(angle)];
 }
-// --- Redistribution v2: evidence-based synergy (per PRD) ---
-// History: v0 shipped to production moved points to/from the most extreme
-// axis, which in practice equalized everything ("equal-split" - founder
-// flagged it as a bug); v1 was plain value-proportional; v2 (this) uses
-// actual research evidence for the 15 axis pairs that have it, and stays
-// value-proportional for pairs that don't.
+// --- Synergy evidence (v5, 7 MECE elements = 21 pairs) ---
+// 14 pairs have directed evidence (below); 3 are "campuran" (component
+// evidence collides after the merges - no directed nudge, treated as plain
+// non-partners); 4 have no direct study found. Full per-pair citations:
+// reference/Eleva_Correlation_Matrix.html (open in a browser, tap a cell).
 //
 // weight: kuat=3, sedang(-kuat)=2, lemah=1. direction: 1=searah, -1=berlawanan.
-// Full per-pair citations live in reference/Eleva_Correlation_Matrix.html per
-// the PRD (file not yet in this repo - rationale summaries below come from
-// the PRD itself; do not invent citations here).
+// No negative pair survives the MECE merge (the two old ones dissolved into
+// "campuran") - direction:-1 stays supported in the math for future evidence.
 const SYNERGY = {
-  "body|emotional": { weight: 3, direction: 1 },   // kuat - exercise & depresi
-  "body|finance": { weight: 3, direction: 1 },     // kuat - financial strain
-  "body|mind": { weight: 1, direction: 1 },        // lemah - g=0.13, dewasa
-  "body|purpose": { weight: 2, direction: 1 },     // sedang-kuat - r~0.26
-  "body|career": { weight: 2, direction: -1 },     // sedang, negatif - overwork
-  "mind|career": { weight: 3, direction: 1 },      // kuat - GMA prediktor
-  "mind|explorer": { weight: 3, direction: 1 },    // kuat - nyaris definisional
-  "career|social": { weight: 3, direction: 1 },    // kuat - social capital
-  "career|purpose": { weight: 3, direction: 1 },   // kuat - calling & kepuasan
-  "career|explorer": { weight: 1, direction: 1 },  // lemah - openness bantu
-  "career|emotional": { weight: 2, direction: -1 },// sedang, negatif - burnout
-  "finance|emotional": { weight: 3, direction: 1 },// kuat - stres finansial
-  "emotional|social": { weight: 3, direction: 1 }, // kuat - loneliness
-  "emotional|purpose": { weight: 3, direction: 1 },// kuat - r=-0.49 depresi
-  "social|purpose": { weight: 3, direction: 1 },   // kuat - dua arah
+  "body|growth": { weight: 1, direction: 1 },       // lemah - olahraga & kognisi, g=0.13 dewasa muda (meta-analisis Bayesian)
+  "body|emotional": { weight: 3, direction: 1 },    // kuat - olahraga vs depresi/cemas, RCT (meta-meta 92 studi)
+  "body|purpose": { weight: 2, direction: 1 },      // sedang-kuat - meaning & kesehatan fisik r~0.26 (meta 66 studi)
+  "body|autonomy": { weight: 1, direction: 1 },     // lemah - perceived control & keluhan fisik rendah (Spector)
+  "growth|livelihood": { weight: 3, direction: 1 }, // kuat - GMA prediktor terkuat performa kerja (Schmidt & Hunter 1998; Sackett 2022)
+  "growth|autonomy": { weight: 2, direction: 1 },   // sedang - autonomy support -> engagement belajar (SDT edukasi, Bureau 2022)
+  "livelihood|social": { weight: 2, direction: 1 }, // sedang-kuat - social capital -> career success (Seibert 2001; diencerkan, Finance-Social tanpa evidence)
+  "livelihood|purpose": { weight: 2, direction: 1 },// sedang-kuat - calling -> job satisfaction (Duffy & Dik; diencerkan, Finance-Purpose unresolved)
+  "livelihood|autonomy": { weight: 3, direction: 1 },// kuat - job autonomy -> job satisfaction (Humphrey 2007, 259 studi, 219rb partisipan)
+  "emotional|social": { weight: 3, direction: 1 },  // kuat - loneliness (Holt-Lunstad)
+  "emotional|purpose": { weight: 3, direction: 1 }, // kuat - purpose vs depresi r=-0.49, cemas r=-0.36 (Boreham 2023)
+  "emotional|autonomy": { weight: 3, direction: 1 },// kuat - SDT need satisfaction -> wellbeing (192 studi); perceived control
+  "social|purpose": { weight: 3, direction: 1 },    // kuat - dua arah (Stavrova & Luhmann, longitudinal)
+  "purpose|autonomy": { weight: 2, direction: 1 },  // sedang - autonomy -> experienced meaningfulness (mediator, Humphrey 2007)
 };
+// CAMPURAN (komponen bertabrakan - non-partner, menyerap netral tanpa arah):
+//   body|livelihood      - financial strain (positif) VS overwork (negatif)
+//   emotional|livelihood - stres finansial (positif) VS burnout (negatif)
+//   body|social          - cuma olahraga BERKELOMPOK yang terbukti
+// BELUM KETEMU (non-partner biasa): growth|emotional, growth|social,
+//   growth|purpose, social|autonomy
 function synergyFor(a, b) {
   return SYNERGY[a + "|" + b] || SYNERGY[b + "|" + a] || null;
 }
 
 const MAX_LOCKS = 3; // deliberate cap, per founder: forces real priorities, "nggak bisa mau semuanya"
 
-// Largest-remainder rounding across ALL 8 axes at once so the total stays
-// exactly 40 - never naive per-point rounding. Locked axes are already exact
-// integers and are excluded from remainder bumps entirely.
+// Largest-remainder rounding across ALL 7 axes at once so the total stays
+// exactly POLY_TOTAL (35) - never naive per-point rounding. Locked axes are
+// already exact integers and are excluded from remainder bumps entirely.
 function roundPreservingTotal(floats, lockedKeys) {
   const locked = new Set(lockedKeys || []);
   const out = {};
@@ -91,7 +112,7 @@ function roundPreservingTotal(floats, lockedKeys) {
     sumFloor += f;
     fracs.push({ k, frac: v - f, i });
   });
-  let remainder = Math.round(40 - sumFloor);
+  let remainder = Math.round(POLY_TOTAL - sumFloor);
   fracs.sort((a, b) => b.frac - a.frac || a.i - b.i);
   for (const { k } of fracs) {
     if (remainder <= 0) break;
@@ -101,34 +122,45 @@ function roundPreservingTotal(floats, lockedKeys) {
 }
 
 // The core drag computation, run against the gesture-start snapshot (not
-// incrementally) so it's stable and reversible mid-drag. When the user moves
-// axis X by delta:
-//   1. Unlocked partners of X (pairs present in SYNERGY) share a pull equal
-//      to delta itself, split by weight and signed by direction - explicitly
-//      DIVIDED, not summed per partner (summing independently would let one
-//      small nudge demand a dozen points from the rest; the PRD documents
-//      that failure mode).
-//   2. Unlocked non-partners absorb the negated total burden proportionally
-//      to their current values (the v1 formula).
-//   3. Saturation pass: a partner or non-partner already sitting exactly at
-//      the bound its own uncapped share would push it past gets excluded
-//      from the pool - pinned to zero change, and (partners only) its
-//      forgone jatah dropped from totalBurden - then the pool is recomputed
-//      and rechecked until nothing new saturates. Without this, one axis
-//      already at its floor/ceiling (left there by an earlier drag) forced
-//      the single scale factor below to zero and rejected the WHOLE
-//      gesture, even with other axes still having room (bug filed by
-//      founder: Social pinned at 1 blocked Explorer outright, when Explorer
-//      should still reach ~8.5 by drawing on Finance/Emotional/Purpose).
-//   4. Constraint solving: if ANY surviving axis would still leave [1,10],
-//      the WHOLE delta is scaled down uniformly (closed-form, since every
-//      change is linear in delta) - never clamp a single point in isolation.
-//   5. Largest-remainder rounding at the very end.
-// Locked axes are untouched at every step: not partners, not absorbers, not
-// constraint participants. Emergent consequence the PRD demands verified:
-// Career (evidence with all 6 others except Finance, its only absorber) tops
-// out around 7.8 and can NEVER reach 10 - if it does, this is implemented
-// wrong.
+// incrementally) so it's stable and reversible mid-drag.
+//
+// v5 unified re-normalization (per PRD 7-element revision, replacing the
+// old two-stage "partners pulled along + non-partners absorb 2x delta"
+// formula). When the user moves axis X by delta, ALL unlocked other axes
+// form ONE shared pool and together change by EXACTLY -delta (that is the
+// whole zero-sum budget, no more), split proportionally to each axis's pull
+// strength:
+//   - evidence partner Y of X: pull = weight(Y) * direction(Y) - stronger
+//     evidence shares more of the movement;
+//   - non-partner Z (including "campuran" pairs - they absorb neutrally):
+//     pull = current value of Z (the old v1 proportional rule).
+// Same formula for every axis, no topology special-casing - this is what
+// keeps the system safe even for a hyper-connected axis (Autonomy: 5
+// evidence partners, only Social as a pure non-partner) and for any future
+// evidence additions (the old formula demanded 2x delta from non-partners
+// alone, which starved axes with few of them - documented in the PRD as the
+// reason for this re-normalization).
+//
+// On top of the shares:
+//   1. Saturation pass: a pool member already sitting exactly at the bound
+//      its share would push it past is excluded and the pool re-normalizes
+//      among the rest (still exactly -delta in total) - repeat until stable.
+//      Without this, one axis parked at its floor by an earlier drag would
+//      force the global scale factor to zero and freeze the whole gesture
+//      (bug filed by founder, twice).
+//   2. Constraint solving: if any surviving member (or X itself) would still
+//      leave [1,10] at full delta, the WHOLE delta is scaled down uniformly
+//      (closed-form, every change is linear in delta) - never one point
+//      clamped in isolation.
+//   3. Largest-remainder rounding to POLY_TOTAL at the very end.
+// Locked axes are untouched at every step: not pool members, not constraint
+// participants.
+//
+// direction:-1 note: no negative pair survives the MECE merge, so today all
+// pulls are positive. The sign math below follows the PRD pseudocode
+// (pull = weight * direction) literally; if research later adds a negative
+// pair, revisit how a negative pull should interact with the shared pool
+// before shipping it.
 function applySynergyDrag(base, key, targetValue, lockedKeys) {
   const locked = new Set(lockedKeys || []);
   const target = Math.max(POLY_MIN, Math.min(POLY_MAX, targetValue));
@@ -136,55 +168,42 @@ function applySynergyDrag(base, key, targetValue, lockedKeys) {
   if (Math.abs(delta) < 1e-9) return { values: { ...base }, limited: false };
 
   const others = POLY_ORDER.filter((k) => k !== key && !locked.has(k));
-  const partnerKeys = others.filter((k) => synergyFor(key, k));
-  const nonPartnerKeys = others.filter((k) => !synergyFor(key, k));
-  const fullWeight = partnerKeys.reduce((s, k) => s + synergyFor(key, k).weight, 0);
+  const pullOf = (k) => {
+    const syn = synergyFor(key, k);
+    return syn ? syn.weight * syn.direction : base[k];
+  };
 
-  const excludedPartners = new Set();
-  const excludedNonPartners = new Set();
-  let partnerChange = {};
-  let nonPartnerChange = {};
-  let totalBurden = delta;
+  const excluded = new Set();
+  let change = {};
   for (let iter = 0; iter <= others.length; iter++) {
-    partnerChange = {};
-    totalBurden = delta;
-    partnerKeys.forEach((k) => {
-      if (excludedPartners.has(k)) return;
-      const { weight, direction } = synergyFor(key, k);
-      const jatah = fullWeight ? delta * (weight / fullWeight) * direction : 0;
-      partnerChange[k] = jatah;
-      totalBurden += jatah;
-    });
+    const active = others.filter((k) => !excluded.has(k));
+    const totalPull = active.reduce((s, k) => s + pullOf(k), 0);
+    change = { [key]: delta };
+    if (totalPull > 1e-9) {
+      active.forEach((k) => { change[k] = -delta * (pullOf(k) / totalPull); });
+    } else {
+      // Degenerate pool (empty, or net-nonpositive pull from a future
+      // negative pair): nothing can absorb - the constraint step below
+      // resolves this to a frozen, feedback-giving stop, not a silent one.
+      active.forEach((k) => { change[k] = 0; });
+    }
 
-    const activeNonPartners = nonPartnerKeys.filter((k) => !excludedNonPartners.has(k));
-    const npBase = activeNonPartners.reduce((s, k) => s + base[k], 0);
-    nonPartnerChange = {};
-    activeNonPartners.forEach((k) => {
-      nonPartnerChange[k] = npBase ? -totalBurden * (base[k] / npBase) : 0;
-    });
-
-    // Anyone already exactly at the bound their own uncapped share would
-    // push them past gets excluded, not scaled - that's what lets the rest
-    // of the pool keep absorbing instead of freezing the whole gesture.
+    // Anyone already exactly at the bound its own share would push it past
+    // gets excluded, not scaled - the rest re-absorb its share, which is
+    // what lets a floored axis stop blocking everyone else.
     let newlySaturated = false;
-    partnerKeys.forEach((k) => {
-      if (excludedPartners.has(k) || Math.abs(partnerChange[k]) < 1e-9) return;
-      const room = partnerChange[k] > 0 ? POLY_MAX - base[k] : base[k] - POLY_MIN;
-      if (room <= 1e-9) { excludedPartners.add(k); newlySaturated = true; }
-    });
-    activeNonPartners.forEach((k) => {
-      if (Math.abs(nonPartnerChange[k]) < 1e-9) return;
-      const room = nonPartnerChange[k] > 0 ? POLY_MAX - base[k] : base[k] - POLY_MIN;
-      if (room <= 1e-9) { excludedNonPartners.add(k); newlySaturated = true; }
+    active.forEach((k) => {
+      if (Math.abs(change[k]) < 1e-9) return;
+      const room = change[k] > 0 ? POLY_MAX - base[k] : base[k] - POLY_MIN;
+      if (room <= 1e-9) { excluded.add(k); newlySaturated = true; }
     });
     if (!newlySaturated) break;
   }
 
-  const change = { [key]: delta, ...partnerChange, ...nonPartnerChange };
-  const activeNonPartnerCount = nonPartnerKeys.length - excludedNonPartners.size;
+  const absorbing = others.filter((k) => Math.abs(change[k] || 0) > 1e-9);
 
-  // No absorber left for a nonzero burden => nothing can move at all.
-  let s = activeNonPartnerCount === 0 && Math.abs(totalBurden) > 1e-9 ? 0 : 1;
+  // No absorber left for a nonzero delta => nothing can move at all.
+  let s = absorbing.length === 0 ? 0 : 1;
   Object.entries(change).forEach(([k, c]) => {
     if (Math.abs(c) < 1e-9) return;
     const room = c > 0 ? POLY_MAX - base[k] : base[k] - POLY_MIN;
@@ -372,7 +391,7 @@ function lockHintText() {
 // handle, so it collides with neither the center nor the axis-name labels
 // at any value.
 function lockGlyphPos(index, value) {
-  const angle = ((-90 + index * 45) * Math.PI) / 180;
+  const angle = ((-90 + index * POLY_STEP_DEG) * Math.PI) / 180;
   const [x, y] = polyPoint(index, value);
   return [x - 16 * Math.sin(angle), y + 16 * Math.cos(angle) + 3];
 }
@@ -395,12 +414,12 @@ function renderPolygonSVG() {
     // (left labels extend leftward, right ones rightward, top/bottom stay
     // centered) so a handle at value 10 (r=11 circle with the number inside)
     // never covers its axis name.
-    const angle = ((-90 + i * 45) * Math.PI) / 180;
+    const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
     const dx = Math.cos(angle), dy = Math.sin(angle);
     const x = POLY_CENTER + (POLY_MAXR + 12) * dx;
     const y = POLY_CENTER + (POLY_MAXR + 12) * dy + (dy > 0.35 ? 9 : dy < -0.35 ? -2 : 3.5);
     const anchor = dx > 0.35 ? "start" : dx < -0.35 ? "end" : "middle";
-    const label = STAT_ORDER.find((s) => s[0] === k)[1];
+    const label = statLabel(k);
     return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="poly-label" text-anchor="${anchor}">${esc(label)}</text>`;
   }).join("");
   // Value number lives INSIDE each handle (so the exact 1-10 is always
@@ -470,8 +489,7 @@ function attachPolygonHandlers() {
     const el = document.getElementById("limitHint");
     if (!el) return;
     if (key) {
-      const label = STAT_ORDER.find((s) => s[0] === key)[1];
-      el.textContent = `${label} udah di titik paling jauh yang bisa dicapai bareng kombinasi sekarang.`;
+      el.textContent = `${statLabel(key)} udah di titik paling jauh yang bisa dicapai bareng kombinasi sekarang.`;
       el.style.display = "";
       // Subtle haptic on the rising edge only, where the device supports it.
       if (!wasLimited && navigator.vibrate) navigator.vibrate(15);
@@ -748,7 +766,7 @@ function renderDashboard() {
           ${today.reflection.status === "done" ? "SELESAI" : today.reflection.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
         </div>
         <p class="fr" style="font-style:italic;font-size:14.5px;margin:0;line-height:1.6">${esc(today.reflection.mentorReply)}</p>
-        ${Object.keys(today.reflection.deltas || {}).length ? `<div class="deltas">${Object.entries(today.reflection.deltas).map(([k, v]) => `<span class="delta-chip">${STAT_ORDER.find(x => x[0] === k)?.[1] || k} +${v}</span>`).join("")}</div>` : ""}
+        ${Object.keys(today.reflection.deltas || {}).length ? `<div class="deltas">${Object.entries(today.reflection.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
       </div>`}
   `;
 
@@ -793,11 +811,20 @@ function renderDashboard() {
       ${reflectFormHTML}
       <div style="margin-bottom:28px">
         <div class="eyebrow mono">CHARACTER STATS</div>
-        ${STAT_ORDER.map(([k, label]) => `
+        ${(() => {
+          // Render whatever stats this account actually has: new accounts get
+          // the 7 MECE keys in STAT_ORDER order; pre-MECE accounts (8-element
+          // era) keep showing their stored keys with legacy labels until they
+          // reset & re-onboard - display tolerance, deliberately not a data
+          // migration.
+          const keys = STAT_ORDER.map(([k]) => k).filter((k) => k in (s.stats || {}));
+          Object.keys(s.stats || {}).forEach((k) => { if (!keys.includes(k)) keys.push(k); });
+          return keys.map((k) => `
           <div class="stat-bar">
-            <div class="row-top"><span class="label">${label}</span><span class="mono">${s.stats[k]}</span></div>
+            <div class="row-top"><span class="label">${statLabel(k)}</span><span class="mono">${s.stats[k]}</span></div>
             <div class="track"><div class="fill" style="width:${s.stats[k]}%"></div></div>
-          </div>`).join("")}
+          </div>`).join("");
+        })()}
       </div>
       ${s.history?.length ? `
       <div style="margin-bottom:28px">
