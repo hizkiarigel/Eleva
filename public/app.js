@@ -110,10 +110,20 @@ function roundPreservingTotal(floats, lockedKeys) {
 //      that failure mode).
 //   2. Unlocked non-partners absorb the negated total burden proportionally
 //      to their current values (the v1 formula).
-//   3. Constraint solving: if ANY axis would leave [1,10], the WHOLE delta is
-//      scaled down uniformly (closed-form, since every change is linear in
-//      delta) - never clamp a single point in isolation.
-//   4. Largest-remainder rounding at the very end.
+//   3. Saturation pass: a partner or non-partner already sitting exactly at
+//      the bound its own uncapped share would push it past gets excluded
+//      from the pool - pinned to zero change, and (partners only) its
+//      forgone jatah dropped from totalBurden - then the pool is recomputed
+//      and rechecked until nothing new saturates. Without this, one axis
+//      already at its floor/ceiling (left there by an earlier drag) forced
+//      the single scale factor below to zero and rejected the WHOLE
+//      gesture, even with other axes still having room (bug filed by
+//      founder: Social pinned at 1 blocked Explorer outright, when Explorer
+//      should still reach ~8.5 by drawing on Finance/Emotional/Purpose).
+//   4. Constraint solving: if ANY surviving axis would still leave [1,10],
+//      the WHOLE delta is scaled down uniformly (closed-form, since every
+//      change is linear in delta) - never clamp a single point in isolation.
+//   5. Largest-remainder rounding at the very end.
 // Locked axes are untouched at every step: not partners, not absorbers, not
 // constraint participants. Emergent consequence the PRD demands verified:
 // Career (evidence with all 6 others except Finance, its only absorber) tops
@@ -126,25 +136,55 @@ function applySynergyDrag(base, key, targetValue, lockedKeys) {
   if (Math.abs(delta) < 1e-9) return { values: { ...base }, limited: false };
 
   const others = POLY_ORDER.filter((k) => k !== key && !locked.has(k));
-  const partners = others.filter((k) => synergyFor(key, k));
-  const nonPartners = others.filter((k) => !synergyFor(key, k));
+  const partnerKeys = others.filter((k) => synergyFor(key, k));
+  const nonPartnerKeys = others.filter((k) => !synergyFor(key, k));
+  const fullWeight = partnerKeys.reduce((s, k) => s + synergyFor(key, k).weight, 0);
 
-  const totalWeight = partners.reduce((s, k) => s + synergyFor(key, k).weight, 0);
-  const change = { [key]: delta };
+  const excludedPartners = new Set();
+  const excludedNonPartners = new Set();
+  let partnerChange = {};
+  let nonPartnerChange = {};
   let totalBurden = delta;
-  partners.forEach((k) => {
-    const { weight, direction } = synergyFor(key, k);
-    const jatah = totalWeight ? delta * (weight / totalWeight) * direction : 0;
-    change[k] = jatah;
-    totalBurden += jatah;
-  });
-  const npBase = nonPartners.reduce((s, k) => s + base[k], 0);
-  nonPartners.forEach((k) => {
-    change[k] = npBase ? -totalBurden * (base[k] / npBase) : 0;
-  });
+  for (let iter = 0; iter <= others.length; iter++) {
+    partnerChange = {};
+    totalBurden = delta;
+    partnerKeys.forEach((k) => {
+      if (excludedPartners.has(k)) return;
+      const { weight, direction } = synergyFor(key, k);
+      const jatah = fullWeight ? delta * (weight / fullWeight) * direction : 0;
+      partnerChange[k] = jatah;
+      totalBurden += jatah;
+    });
+
+    const activeNonPartners = nonPartnerKeys.filter((k) => !excludedNonPartners.has(k));
+    const npBase = activeNonPartners.reduce((s, k) => s + base[k], 0);
+    nonPartnerChange = {};
+    activeNonPartners.forEach((k) => {
+      nonPartnerChange[k] = npBase ? -totalBurden * (base[k] / npBase) : 0;
+    });
+
+    // Anyone already exactly at the bound their own uncapped share would
+    // push them past gets excluded, not scaled - that's what lets the rest
+    // of the pool keep absorbing instead of freezing the whole gesture.
+    let newlySaturated = false;
+    partnerKeys.forEach((k) => {
+      if (excludedPartners.has(k) || Math.abs(partnerChange[k]) < 1e-9) return;
+      const room = partnerChange[k] > 0 ? POLY_MAX - base[k] : base[k] - POLY_MIN;
+      if (room <= 1e-9) { excludedPartners.add(k); newlySaturated = true; }
+    });
+    activeNonPartners.forEach((k) => {
+      if (Math.abs(nonPartnerChange[k]) < 1e-9) return;
+      const room = nonPartnerChange[k] > 0 ? POLY_MAX - base[k] : base[k] - POLY_MIN;
+      if (room <= 1e-9) { excludedNonPartners.add(k); newlySaturated = true; }
+    });
+    if (!newlySaturated) break;
+  }
+
+  const change = { [key]: delta, ...partnerChange, ...nonPartnerChange };
+  const activeNonPartnerCount = nonPartnerKeys.length - excludedNonPartners.size;
 
   // No absorber left for a nonzero burden => nothing can move at all.
-  let s = nonPartners.length === 0 && Math.abs(totalBurden) > 1e-9 ? 0 : 1;
+  let s = activeNonPartnerCount === 0 && Math.abs(totalBurden) > 1e-9 ? 0 : 1;
   Object.entries(change).forEach(([k, c]) => {
     if (Math.abs(c) < 1e-9) return;
     const room = c > 0 ? POLY_MAX - base[k] : base[k] - POLY_MIN;
