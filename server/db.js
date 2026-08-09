@@ -52,6 +52,7 @@ async function init() {
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS secondary_trait TEXT;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_snapshot JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_raw JSONB;
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS goals JSONB;
   `);
 }
 
@@ -100,6 +101,10 @@ async function getState(userId) {
     // that's expected, not an error).
     radarSnapshot: row.radar_snapshot,
     radarRaw: row.radar_raw,
+    // v13: 1-3 free-text First Trial goals captured right after Pathway
+    // confirmation (the WHAT; pathway is the constant HOW). Array of strings.
+    // Pre-v13 accounts have null - callers treat that as [].
+    goals: row.goals || [],
   };
 }
 
@@ -110,20 +115,24 @@ async function getState(userId) {
 // comment at the call sites in index.js for why v2 rows aren't backfilled.
 async function createState(userId, {
   profile, stats, chapterNumber, chapterTitle, pathway, pathwayNoun,
-  growthFocus, secondaryTrait, radarSnapshot, radarRaw,
+  growthFocus, secondaryTrait, radarSnapshot, radarRaw, goals,
 }) {
   await pool.query(
     `INSERT INTO character_state
        (user_id, profile, stats, chapter_number, chapter_title, growth_sessions,
-        pathway, pathway_noun, growth_focus, pathway_status, pathway_trial_started_at, secondary_trait, radar_snapshot, radar_raw)
-     VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, 'trial', now(), $9, $10, $11)
+        pathway, pathway_noun, growth_focus, pathway_status, pathway_trial_started_at, secondary_trait, radar_snapshot, radar_raw, goals)
+     VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, 'trial', now(), $9, $10, $11, $12)
      ON CONFLICT (user_id) DO UPDATE SET
        profile = EXCLUDED.profile, stats = EXCLUDED.stats,
        chapter_number = EXCLUDED.chapter_number, chapter_title = EXCLUDED.chapter_title, growth_sessions = 0,
        pathway = EXCLUDED.pathway, pathway_noun = EXCLUDED.pathway_noun,
        growth_focus = EXCLUDED.growth_focus, pathway_status = 'trial', pathway_trial_started_at = now(),
-       secondary_trait = EXCLUDED.secondary_trait, radar_snapshot = EXCLUDED.radar_snapshot, radar_raw = EXCLUDED.radar_raw`,
-    [userId, profile, stats, chapterNumber, chapterTitle, pathway || null, pathwayNoun || null, growthFocus ? JSON.stringify(growthFocus) : null, secondaryTrait || null, radarSnapshot || null, radarRaw || null]
+       secondary_trait = EXCLUDED.secondary_trait, radar_snapshot = EXCLUDED.radar_snapshot, radar_raw = EXCLUDED.radar_raw,
+       goals = EXCLUDED.goals`,
+    // goals is an ARRAY going into a jsonb column - must be JSON.stringify'd
+    // explicitly (pg doesn't auto-encode JS arrays to jsonb correctly; same
+    // lesson as growth_focus in v2, documented in PRD).
+    [userId, profile, stats, chapterNumber, chapterTitle, pathway || null, pathwayNoun || null, growthFocus ? JSON.stringify(growthFocus) : null, secondaryTrait || null, radarSnapshot || null, radarRaw || null, goals && goals.length ? JSON.stringify(goals) : null]
   );
 }
 
@@ -173,7 +182,12 @@ async function recentDays(userId, excludeDate, limit = 3) {
   );
   return rows.map((r) => ({
     date: r.date,
-    quest: r.quest?.title,
+    quest: r.quest?.title, // title only - keeps AI context lean
+    // v13: which of the user's goals that day's quest was assigned to -
+    // surfaced as a sibling (quest above is a flattened string) because the
+    // goal-rotation selector in index.js reads it; caught by the multi-day
+    // simulation, where rotation silently stuck on goal #1 without this.
+    goalIndex: r.quest?.goalIndex,
     reflection: r.reflection,
   }));
 }

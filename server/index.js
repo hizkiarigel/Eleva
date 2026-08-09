@@ -31,6 +31,31 @@ function wordCount(text) {
   return (text || "").trim().split(/\s+/).filter(Boolean).length;
 }
 
+// v13 goal rotation: the AI decides HOW to chase a goal, but WHICH of the
+// user's 1-3 First Trial goals today's quest targets is decided HERE,
+// deterministically - prioritize the goal that has gone LONGEST without a
+// quest (same coverage principle as scenario-card axis selection), never
+// random and never always goal #1. days must be newest-first (recentDays
+// order); a day whose quest carries no goalIndex (pre-v13, or malformed)
+// simply doesn't count as touching any goal.
+function pickActiveGoalIndex(goals, days) {
+  if (!Array.isArray(goals) || goals.length === 0) return null;
+  const lastSeen = goals.map(() => Infinity); // Infinity = never targeted -> highest priority
+  (days || []).forEach((d, i) => {
+    // recentDays flattens quest to its title and lifts goalIndex to a
+    // sibling field; raw day rows carry it inside quest - accept both.
+    const gi = d?.goalIndex ?? d?.quest?.goalIndex;
+    if (Number.isInteger(gi) && gi >= 0 && gi < goals.length && lastSeen[gi] === Infinity) {
+      lastSeen[gi] = i; // i grows with age; smallest i = most recently targeted
+    }
+  });
+  let best = 0;
+  for (let i = 1; i < goals.length; i++) {
+    if (lastSeen[i] > lastSeen[best]) best = i; // strict > keeps lowest index on ties
+  }
+  return best;
+}
+
 function requireAuth(req, res, next) {
   if (!req.session || !req.session.userId) {
     return res.status(401).json({ error: "Belum login." });
@@ -118,6 +143,11 @@ app.get("/api/state", requireAuth, async (req, res) => {
     const tk = todayKey();
     let today = await db.getDay(req.userId, tk);
     if (!today) {
+      // One 14-day fetch serves both goal rotation (needs the fuller window
+      // to know which goal has waited longest) and the 3-day AI context.
+      const recent = await db.recentDays(req.userId, tk, 14);
+      const goals = state.goals || [];
+      const activeGoalIndex = pickActiveGoalIndex(goals, recent);
       const ctx = {
         profile: state.profile,
         pathway: state.pathway,
@@ -127,13 +157,21 @@ app.get("/api/state", requireAuth, async (req, res) => {
         // exists so old accounts don't silently lose their "compass".
         growthFocus: state.growthFocus || undefined,
         radarSnapshot: state.radarSnapshot || undefined,
+        // v13: goals = the user's 1-3 First Trial targets (the WHAT; pathway
+        // stays the constant HOW). activeGoal = the one today's quest must
+        // aim at, chosen deterministically above - not left to the model.
+        goals: goals.length ? goals : undefined,
+        activeGoal: activeGoalIndex != null ? goals[activeGoalIndex] : undefined,
         stats: state.stats,
         chapterNumber: state.chapterNumber,
         chapterTitle: state.chapterTitle,
-        recentDays: await db.recentDays(req.userId, tk, 3),
+        recentDays: recent.slice(0, 3),
         today: tk,
       };
       const result = await ai.generateQuest(ctx);
+      // Stamp which goal this quest was assigned to server-side (rotation
+      // input for future days) - deterministic, never trusted from the model.
+      if (activeGoalIndex != null && result.quest) result.quest.goalIndex = activeGoalIndex;
       await db.updateState(req.userId, {
         stats: state.stats,
         chapterNumber: result.chapterNumber || state.chapterNumber,
@@ -170,8 +208,17 @@ app.post("/api/profile", requireAuth, async (req, res) => {
     const {
       name, radarSnapshot: rawRadar, radarRaw: rawRadarRaw, originStory,
       pathway: rawPathway, pathwayNoun: rawPathwayNoun, secondaryTrait,
+      goals: rawGoals,
     } = req.body;
     if (!name) return res.status(400).json({ error: "Nama wajib diisi." });
+
+    // v13: 1-3 free-text First Trial goals, captured right after Pathway
+    // confirmation. Sanitized server-side: strings only, trimmed, empties
+    // dropped, hard-capped at 3 entries / 200 chars each.
+    const goals = (Array.isArray(rawGoals) ? rawGoals : [])
+      .map((g) => String(g || "").trim().slice(0, 200))
+      .filter(Boolean)
+      .slice(0, 3);
 
     // radarSnapshot comes from the client-side radar chart, AFTER Adaptive
     // Scenario Card calibration (conservation-of-total redistribution
@@ -201,11 +248,18 @@ app.post("/api/profile", requireAuth, async (req, res) => {
     // daily quest generation. profile.insight would collide in meaning with
     // days.insight (the daily-rotating quest insight) - originStory avoids that.
     const profile = { name, originStory: originStory || null, createdAt: new Date().toISOString() };
+    // Day one of the First Trial: no history yet, so rotation trivially
+    // starts at the first listed goal (same pickActiveGoalIndex the daily
+    // route uses - one code path for the rule, not two).
+    const activeGoalIndex = pickActiveGoalIndex(goals, []);
     const ctx = {
       profile, pathway, pathwayNoun, radarSnapshot,
+      goals: goals.length ? goals : undefined,
+      activeGoal: activeGoalIndex != null ? goals[activeGoalIndex] : undefined,
       stats: initialStats, chapterNumber: null, chapterTitle: null, recentDays: [], today: todayKey(),
     };
     const result = await ai.generateQuest(ctx);
+    if (activeGoalIndex != null && result.quest) result.quest.goalIndex = activeGoalIndex;
 
     await db.createState(req.userId, {
       profile,
@@ -217,6 +271,7 @@ app.post("/api/profile", requireAuth, async (req, res) => {
       radarSnapshot,
       radarRaw: Object.keys(radarRaw).length ? radarRaw : null,
       secondaryTrait: secondaryTrait || null,
+      goals,
     });
     await db.upsertDay(req.userId, todayKey(), { quest: result.quest, insight: result.insight, reflection: null });
 

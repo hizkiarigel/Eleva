@@ -274,7 +274,7 @@ let authError = "";
 // Chapter Analysis). v6: cards are one scenario + 4 options (one per
 // unlocked axis); each choice also calibrates the radar via the SAME
 // redistribution engine as manual dragging - see applyCalibrationCard. ---
-let adaptivePhase = "card"; // "loading" | "card" | "thinking" | "analysis"
+let adaptivePhase = "card"; // "loading" | "card" | "thinking" | "analysis" | "goals"
 let adaptiveCards = []; // [{scenario, options:[{axis,text}], mostPreferred, leastPreferred}, ...] - length also serves as the card counter
 let adaptiveScenario = null; // {scenario, options} for the card currently on screen
 let adaptiveSelection = { mostPreferred: null, leastPreferred: null }; // in-progress picks for the current card
@@ -283,6 +283,11 @@ let pathwayOptions = []; // 3 swipeable candidate cards, computed once when chap
 let selectedPathwayIndex = null;
 let overrideMode = false;
 let overrideText = "";
+// v13 goal capture - deliberately NOT an onboarding card: it's the bridge
+// into First Trial, shown right after the Pathway is confirmed (either a
+// carousel card or the manual override), before the first daily quest.
+let goalInputs = ["", "", ""]; // 1-3 free-text goals, min 1 required
+let pendingPathway = null; // {pathway, pathwayNoun} held while the goals screen is up
 let onboardError = "";
 
 function wordCount(t) { return (t || "").trim().split(/\s+/).filter(Boolean).length; }
@@ -326,6 +331,8 @@ function resetOnboardState() {
   selectedPathwayIndex = null;
   overrideMode = false;
   overrideText = "";
+  goalInputs = ["", "", ""];
+  pendingPathway = null;
   onboardError = "";
 }
 
@@ -842,7 +849,7 @@ async function fetchChapterAnalysis() {
   }
 }
 
-async function submitOnboarding(pathway, pathwayNoun) {
+async function submitOnboarding(pathway, pathwayNoun, goals) {
   root.innerHTML = spinnerHTML("AI sedang membaca ceritamu...");
   try {
     await api("/api/profile", {
@@ -851,6 +858,7 @@ async function submitOnboarding(pathway, pathwayNoun) {
         name: onboardForm.name, radarSnapshot: onboardForm.radar, radarRaw: onboardForm.radarRaw,
         originStory: chapterAnalysis?.insight || null,
         pathway, pathwayNoun, secondaryTrait: chapterAnalysis?.secondaryTrait || null,
+        goals: goals || [],
       },
     });
     await boot();
@@ -991,7 +999,11 @@ function renderAdaptive() {
     document.getElementById("acceptPathway")?.addEventListener("click", () => {
       if (selectedPathwayIndex === null) return;
       const chosen = pathwayOptions[selectedPathwayIndex];
-      submitOnboarding(chosen.pathway, chosen.pathwayNoun);
+      // v13: Pathway confirmed (the HOW) -> capture 1-3 goals (the WHAT)
+      // before anything is persisted or the first quest is generated.
+      pendingPathway = { pathway: chosen.pathway, pathwayNoun: chosen.pathwayNoun };
+      adaptivePhase = "goals";
+      renderAdaptive();
     });
     document.getElementById("openOverride")?.addEventListener("click", () => { overrideMode = true; overrideText = ""; renderAdaptive(); });
     document.getElementById("cancelOverride")?.addEventListener("click", () => { overrideMode = false; renderAdaptive(); });
@@ -1001,7 +1013,50 @@ function renderAdaptive() {
     });
     document.getElementById("confirmOverride")?.addEventListener("click", () => {
       const v = overrideText.trim();
-      submitOnboarding(v, v);
+      pendingPathway = { pathway: v, pathwayNoun: v };
+      adaptivePhase = "goals";
+      renderAdaptive();
+    });
+    return;
+  }
+
+  if (adaptivePhase === "goals") {
+    const filled = goalInputs.map((g) => g.trim()).filter(Boolean);
+    root.innerHTML = `
+      <div class="shell">
+        <div class="eyebrow mono">ELEVA · FIRST TRIAL</div>
+        <div style="height:16px"></div>
+        <div class="chapter-header">
+          <h1 class="fr" style="font-size:28px">Apa yang mau kamu capai selama masa ini?</h1>
+          <div class="rule"></div>
+          <p class="insight">Tulis 1-3 hal — boleh dari area yang beda-beda sekaligus. Pathway-mu (${esc(pendingPathway?.pathway || "")}) yang menentukan GAYA mengejarnya; ini soal APA yang dikejar.</p>
+        </div>
+        ${["mis. Punya badan sehat", "mis. IELTS band 6.5", "mis. Dapat kerja remote sebagai data analyst"].map((ph, i) => `
+        <div class="field">
+          <label>Goal ${i + 1}${i === 0 ? "" : " (opsional)"}</label>
+          <input type="text" data-goal="${i}" maxlength="200" value="${esc(goalInputs[i])}" placeholder="${esc(ph)}" />
+        </div>`).join("")}
+        <button class="btn-primary full" id="confirmGoals" ${filled.length ? "" : "disabled"}>Mulai First Trial (14 hari)</button>
+        <div style="text-align:center;margin-top:16px">
+          <button class="btn-ghost" id="backToPathway">← Balik pilih Pathway</button>
+        </div>
+      </div>`;
+    document.querySelectorAll("input[data-goal]").forEach((inp) => {
+      inp.addEventListener("input", (e) => {
+        goalInputs[Number(inp.dataset.goal)] = e.target.value;
+        const any = goalInputs.some((g) => g.trim());
+        document.getElementById("confirmGoals").disabled = !any;
+      });
+    });
+    document.getElementById("backToPathway")?.addEventListener("click", () => {
+      pendingPathway = null;
+      adaptivePhase = "analysis";
+      renderAdaptive();
+    });
+    document.getElementById("confirmGoals")?.addEventListener("click", () => {
+      const goals = goalInputs.map((g) => g.trim()).filter(Boolean).slice(0, 3);
+      if (!goals.length || !pendingPathway) return;
+      submitOnboarding(pendingPathway.pathway, pendingPathway.pathwayNoun, goals);
     });
   }
 }
