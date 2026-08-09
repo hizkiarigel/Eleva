@@ -256,6 +256,7 @@ let onboardForm = {
   radarRaw: null, // frozen snapshot at the moment the radar step is left, before any calibration
   calibrationSum: {}, // {axisKey: cumulative direct calibration delta so far, capped [-3,3]}
   locked: [], // axis keys pinned by the user, max MAX_LOCKS
+  lockedOriginalValue: {}, // {axisKey: value at the moment it was locked} - see applyCalibrationCard v12
 };
 let onboardStep = 0;
 let ui = { view: "loading", label: "Membuka Eleva..." };
@@ -314,6 +315,7 @@ function resetOnboardState() {
     radarRaw: null, // frozen snapshot at the moment the radar step is left, before any calibration
     calibrationSum: {}, // {axisKey: cumulative direct calibration delta so far, capped [-3,3]}
     locked: [],
+    lockedOriginalValue: {},
   };
   adaptivePhase = "card";
   adaptiveCards = [];
@@ -338,13 +340,15 @@ function resetOnboardState() {
 // the axis can still appear in later cards for coverage, its own delta just
 // stops moving it further.
 //
-// v7: a locked axis's NUMBER never moves here at all, even if it was picked
-// as favorite/least-favorite - scenario cards can now offer locked axes as
-// options (server/claude.js widened axis selection to all 7), but picking
-// one only produces a narrative "lock tension" signal, reconstructed
-// server-side from the cards array itself (see computeLockTension) - no
-// numeric application, so nothing to skip-and-track here beyond the locked
-// check itself.
+// v7-v11: a locked axis's NUMBER never moved here at all, even if it was
+// picked as favorite/least-favorite - only a narrative "lock tension" signal
+// (computeLockTension, server-side). v12 REVERSES that for the specific case
+// of a CONTRARY pick (the pick pulls against what the lock declared - see
+// isContraryPick below): the founder's own test run showed a lock repeatedly
+// contradicted by real answers just sat there immune, with contradiction
+// surfacing only as a reflective question at the very end - too weak. A
+// pick that AGREES with the lock (reinforcing it) still does nothing, since
+// there's no new information in confirming what was already declared.
 function clampCalibrationDelta(axis, rawDelta) {
   const current = onboardForm.calibrationSum[axis] || 0;
   const next = Math.max(-3, Math.min(3, current + rawDelta));
@@ -360,12 +364,32 @@ function clampCalibrationDelta(axis, rawDelta) {
 // so the calibrated radar responds faster to a clear pattern without
 // widening how far any single axis can drift from the manual-drag radar.
 const CALIBRATION_PICK_MAGNITUDE = 2;
+
+// v12: mirrors computeLockTension's server-side "contrary" definition
+// (server/claude.js) exactly, but must run client-side, live, per pick -
+// not just reconstructed afterward for a narrative blurb. Judged against
+// lockedOriginalValue (the value AT THE MOMENT OF LOCKING), never the live
+// radar value - otherwise an axis eroding past the 5-midpoint would flip
+// what counts as "contrary" partway through the same session, corrupting
+// its own erosion direction.
+function isContraryPick(axis, sign) {
+  const original = onboardForm.lockedOriginalValue[axis];
+  if (original == null) return false; // shouldn't happen for a locked axis, but never treat as contrary if untracked
+  return (original > 5 && sign === -1) || (original < 5 && sign === 1);
+}
+
 function applyCalibrationCard(card) {
   [[card.mostPreferred, 1], [card.leastPreferred, -1]].forEach(([axis, sign]) => {
-    if (onboardForm.locked.includes(axis)) return; // locked: value never moves, tension is narrative-only
+    if (onboardForm.locked.includes(axis) && !isContraryPick(axis, sign)) return; // locked + agrees with the lock: no new info, no movement
     const delta = clampCalibrationDelta(axis, sign * CALIBRATION_PICK_MAGNITUDE);
+    // A locked axis that IS eroding needs to be excluded from its OWN
+    // lockedKeys for this one drag call (it's the key being dragged), while
+    // every other still-locked axis stays fully immune to the redistribution
+    // this triggers - that's what .filter((k) => k !== axis) does; for an
+    // unlocked axis this is a no-op (axis was never in the list).
+    const dragLocks = onboardForm.locked.filter((k) => k !== axis);
     onboardForm.radar = applySynergyDrag(
-      onboardForm.radar, axis, onboardForm.radar[axis] + delta, onboardForm.locked
+      onboardForm.radar, axis, onboardForm.radar[axis] + delta, dragLocks
     ).values;
   });
 }
@@ -597,8 +621,18 @@ function updatePolygonDOM() {
 
 function toggleLock(key) {
   const i = onboardForm.locked.indexOf(key);
-  if (i >= 0) onboardForm.locked.splice(i, 1);
-  else if (onboardForm.locked.length < MAX_LOCKS) onboardForm.locked.push(key);
+  if (i >= 0) {
+    onboardForm.locked.splice(i, 1);
+    delete onboardForm.lockedOriginalValue[key]; // re-locking later re-captures fresh
+  } else if (onboardForm.locked.length < MAX_LOCKS) {
+    onboardForm.locked.push(key);
+    // Snapshot the value AT THE MOMENT OF LOCKING - this is what "contrary"
+    // erosion (applyCalibrationCard) measures against for the rest of the
+    // session, not the live/possibly-already-eroded radar value. Without
+    // this, an axis eroding past the 5-midpoint would flip what counts as
+    // "contrary" partway through calibration (see v12 riwayat in PRD.md).
+    onboardForm.lockedOriginalValue[key] = onboardForm.radar[key];
+  }
   // At the cap, tapping a 4th point deliberately does nothing - the user has
   // to unlock one first (founder-specified trade-off, the caption shows 3/3).
   updatePolygonDOM();
@@ -789,6 +823,7 @@ async function fetchChapterAnalysis() {
         radarSnapshot: onboardForm.radar,
         radarRaw: onboardForm.radarRaw,
         lockedAxes: onboardForm.locked,
+        lockedOriginalValue: onboardForm.lockedOriginalValue,
         cards: adaptiveCards,
       },
     });

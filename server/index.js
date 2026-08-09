@@ -87,8 +87,8 @@ app.post("/api/onboarding/scenario-card", requireAuth, async (req, res) => {
 
 app.post("/api/onboarding/chapter-analysis", requireAuth, async (req, res) => {
   try {
-    const { profile, radarSnapshot, radarRaw, lockedAxes, cards } = req.body;
-    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, radarRaw, lockedAxes, cards });
+    const { profile, radarSnapshot, radarRaw, lockedAxes, lockedOriginalValue, cards } = req.body;
+    const result = await ai.generateChapterAnalysis({ profile, radarSnapshot, radarRaw, lockedAxes, lockedOriginalValue, cards });
     res.json(result);
   } catch (e) {
     console.error(e);

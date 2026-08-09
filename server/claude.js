@@ -165,26 +165,33 @@ function coverageComplete(radarSnapshot, lockedAxes, previousCards) {
   return allAxes.every((k) => seen.has(k));
 }
 
-// Reconstructed purely from the answered cards + which axes are locked +
-// their (never-changing) locked value - no separate client-side bookkeeping
-// needed, the cards array already carries everything. "Contrary" means the
-// pick pulls against what the lock already declared: favoriting an axis
-// locked LOW (<5, user deliberately deprioritized it), or least-favoriting
-// one locked HIGH (>5, user deliberately prioritized it). A lock sitting
-// exactly at the default (5) carries no directional claim, so it can never
-// register tension. Returns the raw per-pick entries; flaggedTensionAxes
-// below reduces that to "worth surfacing to the user."
-function computeLockTension(cards, lockedAxes, radarSnapshot) {
+// Reconstructed from the answered cards + which axes are locked. "Contrary"
+// means the pick pulls against what the lock already declared: favoriting
+// an axis locked LOW (<5, user deliberately deprioritized it), or
+// least-favoriting one locked HIGH (>5, user deliberately prioritized it).
+// A lock sitting exactly at the default (5) carries no directional claim,
+// so it can never register tension. Returns the raw per-pick entries;
+// flaggedTensionAxes below reduces that to "worth surfacing to the user."
+//
+// v12: judged against lockedOriginalValue (the value AT THE MOMENT OF
+// LOCKING, tracked client-side in public/app.js), NOT radarSnapshot - the
+// number itself can now erode when contradicted (see applyCalibrationCard,
+// public/app.js), so using the post-erosion radarSnapshot value here would
+// let an axis that already crossed the 5-midpoint flip what counts as
+// "contrary" partway through the same session. Falls back to radarSnapshot
+// only if lockedOriginalValue wasn't sent (older client, defensive only -
+// this codebase's standing pattern for schema/field additions).
+function computeLockTension(cards, lockedAxes, radarSnapshot, lockedOriginalValue) {
   const locked = new Set(lockedAxes || []);
   const entries = [];
   (cards || []).forEach((card, cardIndex) => {
     [["mostPreferred", "favorite"], ["leastPreferred", "least"]].forEach(([field, direction]) => {
       const axis = card[field];
       if (!axis || !locked.has(axis)) return;
-      const value = radarSnapshot?.[axis];
-      if (value == null) return;
-      const contrary = (value > 5 && direction === "least") || (value < 5 && direction === "favorite");
-      entries.push({ axis, cardIndex, direction, value, contrary });
+      const original = lockedOriginalValue?.[axis] ?? radarSnapshot?.[axis];
+      if (original == null) return;
+      const contrary = (original > 5 && direction === "least") || (original < 5 && direction === "favorite");
+      entries.push({ axis, cardIndex, direction, value: original, contrary });
     });
   });
   return entries;
@@ -323,17 +330,24 @@ function significantShifts(radarRaw, radarSnapshot) {
 
 async function generateChapterAnalysis(ctx) {
   const shifts = significantShifts(ctx.radarRaw, ctx.radarSnapshot);
-  const tension = computeLockTension(ctx.cards, ctx.lockedAxes, ctx.radarSnapshot);
+  const tension = computeLockTension(ctx.cards, ctx.lockedAxes, ctx.radarSnapshot, ctx.lockedOriginalValue);
   const flaggedTension = flaggedTensionAxes(tension);
-  if (!hasKey()) return fallbackChapterAnalysis(ctx, shifts, flaggedTension);
+  // v12: a flagged axis's locked number may have already ERODED (see
+  // applyCalibrationCard, public/app.js - every contrary pick nudges it,
+  // capped at +/-3 net like normal calibration) - report both the original
+  // declaration and where it landed, instead of claiming a fixed number.
+  const erodedLocks = flaggedTension
+    .map((a) => ({ axis: a, from: ctx.lockedOriginalValue?.[a], to: ctx.radarSnapshot?.[a] }))
+    .filter((e) => e.from != null && e.to != null && e.from !== e.to);
+  if (!hasKey()) return fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks);
   try {
     const shiftNote = shifts.length
       ? `\n\nKALIBRASI: radar awal pengguna (ctx.radarRaw, hasil drag manual mentah) bergeser signifikan (≥2 poin) di sumbu berikut setelah reaksi mereka ke skenario: ${shifts.map((s) => `${RADAR_AXIS_LABELS[s.axis] || s.axis} (${s.from}→${s.to})`).join(", ")}. WAJIB sebutkan pergeseran ini secara eksplisit di "insight" - jangan diam-diam pakai radar terkalibrasi tanpa memberi tahu pengguna bahwa persepsi awal mereka bergeser dari pilihan-pilihan konkret mereka, bukan cuma dari drag manual mereka sendiri (mis. "Kamu awalnya menandai Livelihood sangat tinggi, tapi dari beberapa hal yang kamu pilih, itu terasa tidak sekuat itu - atau memang segitu, dan aku salah baca?").`
       : "";
     const tensionNote = flaggedTension.length
-      ? `\n\nKETEGANGAN LOCK: sumbu berikut dikunci pengguna (angkanya TIDAK PERNAH berubah) tapi berulang kali dipilih BERLAWANAN dari nilai kuncinya (mis. dikunci tinggi tapi berulang jadi paling-tidak-disukai, atau dikunci rendah tapi berulang jadi favorit): ${flaggedTension.map((a) => RADAR_AXIS_LABELS[a] || a).join(", ")}. WAJIB munculkan ini di "insight" sebagai PERTANYAAN REFLEKTIF ke pengguna (bukan pernyataan final soal siapa yang benar), mis. "Kamu kunci Body di 10, tapi pilihan-pilihanmu di kartu beberapa kali condong ke arah lain - masih yakin, atau ini layak dipikir ulang?" JANGAN menyarankan mengubah angka locked-nya sendiri (itu cuma bisa lewat jalur override manual pengguna).`
+      ? `\n\nKETEGANGAN LOCK: sumbu berikut dikunci pengguna tapi berulang kali dipilih BERLAWANAN dari nilai kuncinya (mis. dikunci tinggi tapi berulang jadi paling-tidak-disukai, atau dikunci rendah tapi berulang jadi favorit): ${flaggedTension.map((a) => RADAR_AXIS_LABELS[a] || a).join(", ")}.${erodedLocks.length ? ` Angkanya SUDAH BERGESER akibat ini (v12 - kontradiksi berulang mengikis angka locked, bukan cuma dicatat): ${erodedLocks.map((e) => `${RADAR_AXIS_LABELS[e.axis] || e.axis} (${e.from}→${e.to})`).join(", ")}. WAJIB sebutkan pergeseran ANGKA ini secara eksplisit dan konkret di "insight", bukan cuma isyarat samar.` : ""} WAJIB munculkan ini di "insight" sebagai OBSERVASI JUJUR ke pengguna (bukan pernyataan final soal siapa yang benar), mis. "Kamu kunci Body di 10, tapi pilihan-pilihanmu di kartu beberapa kali condong ke arah lain, jadi sekarang turun ke 7 - masih relevan segitu, atau ini layak dipikir ulang?" Kamu TIDAK perlu menyarankan pengguna mengubah apa pun secara manual - sistem sudah menyesuaikan angkanya sendiri berdasarkan pola pilihan mereka; kalau pengguna tidak setuju dengan hasil itu, jalur override manual yang sudah ada tetap tersedia.`
       : "";
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah radar TERKALIBRASI (skala 1-10, total 35: Body, Growth, Livelihood, Emotional Stability, Social, Purpose, Autonomy) - hasil drag manual pengguna (ctx.radarRaw) yang sudah dikoreksi halus berdasarkan reaksi mereka ke Adaptive Scenario Cards (ctx.cards), karena self-report di skala 1-10 rawan bias yang diuji ulang lewat pilihan konkret. ctx.lockedAxes adalah sumbu yang SENGAJA mereka kunci (maksimal 3) - angkanya TIDAK PERNAH ikut kalibrasi, tapi BOLEH tetap muncul sebagai opsi kartu (lihat KETEGANGAN LOCK di bawah kalau relevan). ctx.cards masing-masing berisi {scenario, options, mostPreferred, leastPreferred} - mostPreferred sumbu yang mereka pilih paling disukai, leastPreferred yang paling tidak disukai dari sisanya; dua sumbu yang tidak dipilih sama sekali di kartu itu netral. Pola pilihan ini + radar terkalibrasi + sumbu terkunci adalah seluruh sinyal yang kamu punya (tidak ada teks bebas dari pengguna). PENTING: kalau ada 2-3 sumbu terkunci di nilai tinggi sekaligus (kombinasi ekstrem, mis. Body dan Social dua-duanya dikunci tinggi), interpretasi kombinasi itu WAJIB dikaitkan ke pola pilihan aktual mereka - jangan mengarang generalisasi sendiri soal apa "arti" kombinasi itu.${shiftNote}${tensionNote}\n\nRangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Architect"|"Warden"|"Weaver"|"Pilgrim"|"Specialist", "pathwayNoun": string, "pathwayBlurb": string, "secondaryTrait": string|null, "rawPathwayTop2": [{"pathway": string, "blurb": string}, {"pathway": string, "blurb": string}]}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali) — ini bagian Chapter, boleh bicara soal fase/masalah hidup yang sedang dijalani. "pathway" satu rekomendasi UTAMA dari 5 nama itu berdasarkan pola dari SELURUH konteks (radar terkalibrasi + pola favorit/tidak-favorit semua kartu, termasuk yang paling-tidak-disukai — penolakan juga informasi), bukan cuma sumbu radar tertinggi. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Architect → "Architect"). "pathwayBlurb" SATU kalimat pendek kenapa "pathway" ini relevan SECARA GAYA PERILAKU (ingat aturan Pathway≠Chapter di system prompt — bukan soal masalah/fase hidup yang sedang dijalani, itu sudah tugas "insight" di atas) - dipakai sebagai label kartu terpisah, jangan mengulang kalimat "insight" persis sama. "rawPathwayTop2": DUA kandidat pathway TERKUAT kalau kamu HANYA melihat ctx.radarRaw (radar SEBELUM kalibrasi) - untuk field ini SAJA, abaikan ctx.cards sepenuhnya, murni bentuk radar mentahnya; urutkan dari paling kuat, masing-masing dengan "blurb" satu kalimat (gaya perilaku, sama aturan dengan pathwayBlurb) kenapa radar mentah itu mengarah ke sana. Ini bukan rekomendasi utama - tujuannya menunjukkan ke pengguna bagaimana radar AWAL saja (sebelum bukti dari pilihan konkret) akan mengarahkan mereka, sebagai pembanding; boleh sama atau beda dengan "pathway". "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah radar TERKALIBRASI (skala 1-10, total 35: Body, Growth, Livelihood, Emotional Stability, Social, Purpose, Autonomy) - hasil drag manual pengguna (ctx.radarRaw) yang sudah dikoreksi halus berdasarkan reaksi mereka ke Adaptive Scenario Cards (ctx.cards), karena self-report di skala 1-10 rawan bias yang diuji ulang lewat pilihan konkret. ctx.lockedAxes adalah sumbu yang SENGAJA mereka kunci (maksimal 3) dan BOLEH tetap muncul sebagai opsi kartu - angkanya TETAP KEBAL dari pilihan yang MENDUKUNG kuncinya, tapi (v12) BOLEH terkikis kalau pilihan berulang kali BERLAWANAN dari kuncinya (lihat KETEGANGAN LOCK di bawah kalau relevan) - jadi jangan berasumsi nilai di ctx.radarSnapshot untuk sumbu locked itu pasti sama dengan saat pertama dikunci. ctx.cards masing-masing berisi {scenario, options, mostPreferred, leastPreferred} - mostPreferred sumbu yang mereka pilih paling disukai, leastPreferred yang paling tidak disukai dari sisanya; dua sumbu yang tidak dipilih sama sekali di kartu itu netral. Pola pilihan ini + radar terkalibrasi + sumbu terkunci adalah seluruh sinyal yang kamu punya (tidak ada teks bebas dari pengguna). PENTING: kalau ada 2-3 sumbu terkunci di nilai tinggi sekaligus (kombinasi ekstrem, mis. Body dan Social dua-duanya dikunci tinggi), interpretasi kombinasi itu WAJIB dikaitkan ke pola pilihan aktual mereka - jangan mengarang generalisasi sendiri soal apa "arti" kombinasi itu.${shiftNote}${tensionNote}\n\nRangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Architect"|"Warden"|"Weaver"|"Pilgrim"|"Specialist", "pathwayNoun": string, "pathwayBlurb": string, "secondaryTrait": string|null, "rawPathwayTop2": [{"pathway": string, "blurb": string}, {"pathway": string, "blurb": string}]}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali) — ini bagian Chapter, boleh bicara soal fase/masalah hidup yang sedang dijalani. "pathway" satu rekomendasi UTAMA dari 5 nama itu berdasarkan pola dari SELURUH konteks (radar terkalibrasi + pola favorit/tidak-favorit semua kartu, termasuk yang paling-tidak-disukai — penolakan juga informasi), bukan cuma sumbu radar tertinggi. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Architect → "Architect"). "pathwayBlurb" SATU kalimat pendek kenapa "pathway" ini relevan SECARA GAYA PERILAKU (ingat aturan Pathway≠Chapter di system prompt — bukan soal masalah/fase hidup yang sedang dijalani, itu sudah tugas "insight" di atas) - dipakai sebagai label kartu terpisah, jangan mengulang kalimat "insight" persis sama. "rawPathwayTop2": DUA kandidat pathway TERKUAT kalau kamu HANYA melihat ctx.radarRaw (radar SEBELUM kalibrasi) - untuk field ini SAJA, abaikan ctx.cards sepenuhnya, murni bentuk radar mentahnya; urutkan dari paling kuat, masing-masing dengan "blurb" satu kalimat (gaya perilaku, sama aturan dengan pathwayBlurb) kenapa radar mentah itu mengarah ke sana. Ini bukan rekomendasi utama - tujuannya menunjukkan ke pengguna bagaimana radar AWAL saja (sebelum bukti dari pilihan konkret) akan mengarahkan mereka, sebagai pembanding; boleh sama atau beda dengan "pathway". "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
     const result = await callClaude(user);
     if (!result?.pathway || !PATHWAY_NAMES.includes(result.pathway)) throw new Error("bad shape");
     if (typeof result.pathwayBlurb !== "string") throw new Error("bad shape: pathwayBlurb");
@@ -346,11 +360,11 @@ async function generateChapterAnalysis(ctx) {
     return { ...result, significantShifts: shifts, lockTension: flaggedTension };
   } catch (e) {
     console.error("generateChapterAnalysis failed, using fallback:", e.message);
-    return fallbackChapterAnalysis(ctx, shifts, flaggedTension);
+    return fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks);
   }
 }
 
-function fallbackChapterAnalysis(ctx, shifts, flaggedTension) {
+function fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks) {
   const axis = highestRadarAxis(ctx.radarSnapshot);
   const pathway = RADAR_AXIS_TO_PATHWAY[axis] || "Pilgrim";
   const rawPathwayTop2 = topAxes(ctx.radarRaw || ctx.radarSnapshot, 2).map((a) => ({
@@ -360,8 +374,14 @@ function fallbackChapterAnalysis(ctx, shifts, flaggedTension) {
   const shiftText = (shifts && shifts.length)
     ? " Catatan kalibrasi: " + shifts.map((s) => `${RADAR_AXIS_LABELS[s.axis] || s.axis} bergeser dari ${s.from} ke ${s.to} setelah pilihan-pilihanmu di skenario`).join("; ") + "."
     : "";
+  const erodedByAxis = new Map((erodedLocks || []).map((e) => [e.axis, e]));
   const tensionText = (flaggedTension && flaggedTension.length)
-    ? " Catatan kunci: " + flaggedTension.map((a) => `kamu mengunci ${RADAR_AXIS_LABELS[a] || a}, tapi beberapa pilihanmu condong ke arah lain — masih yakin, atau ini layak dipikir ulang?`).join(" ")
+    ? " Catatan kunci: " + flaggedTension.map((a) => {
+        const e = erodedByAxis.get(a);
+        return e
+          ? `kamu mengunci ${RADAR_AXIS_LABELS[a] || a} di ${e.from}, tapi beberapa pilihanmu condong ke arah lain, jadi sekarang turun ke ${e.to} — masih relevan segitu, atau ini layak dipikir ulang?`
+          : `kamu mengunci ${RADAR_AXIS_LABELS[a] || a}, tapi beberapa pilihanmu condong ke arah lain — masih yakin, atau ini layak dipikir ulang?`;
+      }).join(" ")
     : "";
   return {
     insight: (hasKey()
