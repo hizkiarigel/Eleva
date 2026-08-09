@@ -352,10 +352,18 @@ function clampCalibrationDelta(axis, rawDelta) {
   onboardForm.calibrationSum[axis] = next;
   return effective;
 }
+// v11: per-pick magnitude doubled (±1 -> ±2) per founder request - after
+// running onboarding themselves, one or two consistent picks on an axis
+// felt too weak to "prove" real intent, and 6 cards' worth of answers
+// barely moved the before/after comparison. The ±3 cumulative cap (v6) is
+// UNCHANGED - this just means ~2 consistent picks reach it instead of 3,
+// so the calibrated radar responds faster to a clear pattern without
+// widening how far any single axis can drift from the manual-drag radar.
+const CALIBRATION_PICK_MAGNITUDE = 2;
 function applyCalibrationCard(card) {
   [[card.mostPreferred, 1], [card.leastPreferred, -1]].forEach(([axis, sign]) => {
     if (onboardForm.locked.includes(axis)) return; // locked: value never moves, tension is narrative-only
-    const delta = clampCalibrationDelta(axis, sign);
+    const delta = clampCalibrationDelta(axis, sign * CALIBRATION_PICK_MAGNITUDE);
     onboardForm.radar = applySynergyDrag(
       onboardForm.radar, axis, onboardForm.radar[axis] + delta, onboardForm.locked
     ).values;
