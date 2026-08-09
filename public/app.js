@@ -69,24 +69,34 @@ function polyPoint(index, value) {
 // non-partners); 4 have no direct study found. Full per-pair citations:
 // reference/Eleva_Correlation_Matrix.html (open in a browser, tap a cell).
 //
-// weight: kuat=3, sedang(-kuat)=2, lemah=1. direction: 1=searah, -1=berlawanan.
+// weight: kuat=6, sedang(-kuat)=4, lemah=2. direction: 1=searah, -1=berlawanan.
 // No negative pair survives the MECE merge (the two old ones dissolved into
 // "campuran") - direction:-1 stays supported in the math for future evidence.
+//
+// Scale doubled from the original 3/2/1 (v5-v8) to 6/4/2 (v9) - founder found
+// the synergy effect visually unreadable: non-partner pull uses the axis's
+// CURRENT VALUE (~5 near the default), which was routinely stronger than a
+// weak (1) or even a strong (3) partner's pull, so evidence-linked axes often
+// moved LESS than unrelated ones - backwards from what the radar is supposed
+// to communicate. Doubling only the partner side (non-partner pull is still
+// literally the current value, unchanged) makes a strong partner (6) reliably
+// outweigh a mid-range non-partner (~5), while ratios between partners of
+// different strength are preserved exactly (6:4:2 = 3:2:1).
 const SYNERGY = {
-  "body|growth": { weight: 1, direction: 1 },       // lemah - olahraga & kognisi, g=0.13 dewasa muda (meta-analisis Bayesian)
-  "body|emotional": { weight: 3, direction: 1 },    // kuat - olahraga vs depresi/cemas, RCT (meta-meta 92 studi)
-  "body|purpose": { weight: 2, direction: 1 },      // sedang-kuat - meaning & kesehatan fisik r~0.26 (meta 66 studi)
-  "body|autonomy": { weight: 1, direction: 1 },     // lemah - perceived control & keluhan fisik rendah (Spector)
-  "growth|livelihood": { weight: 3, direction: 1 }, // kuat - GMA prediktor terkuat performa kerja (Schmidt & Hunter 1998; Sackett 2022)
-  "growth|autonomy": { weight: 2, direction: 1 },   // sedang - autonomy support -> engagement belajar (SDT edukasi, Bureau 2022)
-  "livelihood|social": { weight: 2, direction: 1 }, // sedang-kuat - social capital -> career success (Seibert 2001; diencerkan, Finance-Social tanpa evidence)
-  "livelihood|purpose": { weight: 2, direction: 1 },// sedang-kuat - calling -> job satisfaction (Duffy & Dik; diencerkan, Finance-Purpose unresolved)
-  "livelihood|autonomy": { weight: 3, direction: 1 },// kuat - job autonomy -> job satisfaction (Humphrey 2007, 259 studi, 219rb partisipan)
-  "emotional|social": { weight: 3, direction: 1 },  // kuat - loneliness (Holt-Lunstad)
-  "emotional|purpose": { weight: 3, direction: 1 }, // kuat - purpose vs depresi r=-0.49, cemas r=-0.36 (Boreham 2023)
-  "emotional|autonomy": { weight: 3, direction: 1 },// kuat - SDT need satisfaction -> wellbeing (192 studi); perceived control
-  "social|purpose": { weight: 3, direction: 1 },    // kuat - dua arah (Stavrova & Luhmann, longitudinal)
-  "purpose|autonomy": { weight: 2, direction: 1 },  // sedang - autonomy -> experienced meaningfulness (mediator, Humphrey 2007)
+  "body|growth": { weight: 2, direction: 1 },       // lemah - olahraga & kognisi, g=0.13 dewasa muda (meta-analisis Bayesian)
+  "body|emotional": { weight: 6, direction: 1 },    // kuat - olahraga vs depresi/cemas, RCT (meta-meta 92 studi)
+  "body|purpose": { weight: 4, direction: 1 },      // sedang-kuat - meaning & kesehatan fisik r~0.26 (meta 66 studi)
+  "body|autonomy": { weight: 2, direction: 1 },     // lemah - perceived control & keluhan fisik rendah (Spector)
+  "growth|livelihood": { weight: 6, direction: 1 }, // kuat - GMA prediktor terkuat performa kerja (Schmidt & Hunter 1998; Sackett 2022)
+  "growth|autonomy": { weight: 4, direction: 1 },   // sedang - autonomy support -> engagement belajar (SDT edukasi, Bureau 2022)
+  "livelihood|social": { weight: 4, direction: 1 }, // sedang-kuat - social capital -> career success (Seibert 2001; diencerkan, Finance-Social tanpa evidence)
+  "livelihood|purpose": { weight: 4, direction: 1 },// sedang-kuat - calling -> job satisfaction (Duffy & Dik; diencerkan, Finance-Purpose unresolved)
+  "livelihood|autonomy": { weight: 6, direction: 1 },// kuat - job autonomy -> job satisfaction (Humphrey 2007, 259 studi, 219rb partisipan)
+  "emotional|social": { weight: 6, direction: 1 },  // kuat - loneliness (Holt-Lunstad)
+  "emotional|purpose": { weight: 6, direction: 1 }, // kuat - purpose vs depresi r=-0.49, cemas r=-0.36 (Boreham 2023)
+  "emotional|autonomy": { weight: 6, direction: 1 },// kuat - SDT need satisfaction -> wellbeing (192 studi); perceived control
+  "social|purpose": { weight: 6, direction: 1 },    // kuat - dua arah (Stavrova & Luhmann, longitudinal)
+  "purpose|autonomy": { weight: 4, direction: 1 },  // sedang - autonomy -> experienced meaningfulness (mediator, Humphrey 2007)
 };
 // CAMPURAN (komponen bertabrakan - non-partner, menyerap netral tanpa arah):
 //   body|livelihood      - financial strain (positif) VS overwork (negatif)
