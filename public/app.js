@@ -23,6 +23,7 @@ const PATHWAY_DESC = {
   Seeker: "Belum tahu arah pastinya, dan sedang aktif mencari.",
   Specialist: "Arah yang khusus buat kamu, di luar lima pola umum lainnya.",
 };
+const PATHWAY_NAMES = Object.keys(PATHWAY_DESC);
 
 const MATURITY_TIERS = ["Emerging", "Practicing", "Reliable", "System", "Master"];
 function maturityTier(growthSessions) {
@@ -246,7 +247,9 @@ let adaptivePhase = "card"; // "loading" | "card" | "thinking" | "analysis"
 let adaptiveCards = []; // [{scenario, options:[{axis,text}], mostPreferred, leastPreferred}, ...] - length also serves as the card counter
 let adaptiveScenario = null; // {scenario, options} for the card currently on screen
 let adaptiveSelection = { mostPreferred: null, leastPreferred: null }; // in-progress picks for the current card
-let chapterAnalysis = null; // {insight, pathway, pathwayNoun, secondaryTrait, significantShifts}
+let chapterAnalysis = null; // {insight, pathway, pathwayNoun, pathwayBlurb, secondaryTrait, significantShifts, lockTension, rawPathwayTop2}
+let pathwayOptions = []; // 3 swipeable candidate cards, computed once when chapterAnalysis loads - see buildPathwayOptions
+let selectedPathwayIndex = null;
 let overrideMode = false;
 let overrideText = "";
 let onboardError = "";
@@ -287,6 +290,8 @@ function resetOnboardState() {
   adaptiveScenario = null;
   adaptiveSelection = { mostPreferred: null, leastPreferred: null };
   chapterAnalysis = null;
+  pathwayOptions = [];
+  selectedPathwayIndex = null;
   overrideMode = false;
   overrideText = "";
   onboardError = "";
@@ -302,6 +307,14 @@ function resetOnboardState() {
 // further direct signals toward the same side are silently absorbed to 0 -
 // the axis can still appear in later cards for coverage, its own delta just
 // stops moving it further.
+//
+// v7: a locked axis's NUMBER never moves here at all, even if it was picked
+// as favorite/least-favorite - scenario cards can now offer locked axes as
+// options (server/claude.js widened axis selection to all 7), but picking
+// one only produces a narrative "lock tension" signal, reconstructed
+// server-side from the cards array itself (see computeLockTension) - no
+// numeric application, so nothing to skip-and-track here beyond the locked
+// check itself.
 function clampCalibrationDelta(axis, rawDelta) {
   const current = onboardForm.calibrationSum[axis] || 0;
   const next = Math.max(-3, Math.min(3, current + rawDelta));
@@ -310,14 +323,13 @@ function clampCalibrationDelta(axis, rawDelta) {
   return effective;
 }
 function applyCalibrationCard(card) {
-  const favDelta = clampCalibrationDelta(card.mostPreferred, 1);
-  onboardForm.radar = applySynergyDrag(
-    onboardForm.radar, card.mostPreferred, onboardForm.radar[card.mostPreferred] + favDelta, onboardForm.locked
-  ).values;
-  const leastDelta = clampCalibrationDelta(card.leastPreferred, -1);
-  onboardForm.radar = applySynergyDrag(
-    onboardForm.radar, card.leastPreferred, onboardForm.radar[card.leastPreferred] + leastDelta, onboardForm.locked
-  ).values;
+  [[card.mostPreferred, 1], [card.leastPreferred, -1]].forEach(([axis, sign]) => {
+    if (onboardForm.locked.includes(axis)) return; // locked: value never moves, tension is narrative-only
+    const delta = clampCalibrationDelta(axis, sign);
+    onboardForm.radar = applySynergyDrag(
+      onboardForm.radar, axis, onboardForm.radar[axis] + delta, onboardForm.locked
+    ).values;
+  });
 }
 
 async function boot() {
@@ -471,6 +483,45 @@ function renderPolygonSVG() {
       <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" class="poly-lock" data-lock-for="${k}" text-anchor="middle"${isLocked ? "" : ' style="display:none"'}>🔒</text>`;
   }).join("");
   return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${rings}${axisLines}<path d="${pathD}" class="poly-shape" id="polyShape" />${labels}${handles}</svg>`;
+}
+
+// Read-only before/after comparison for Chapter Analysis (v7, WAJIB tampil):
+// two outlines overlaid on one chart (raw = dashed/muted, calibrated =
+// solid/accent) sharing the same rings/axis-label chrome as the interactive
+// radar, so the user sees the SHAPE change directly rather than reading text
+// that just says "it changed." No handles, no drag - purely a picture.
+function renderRadarComparisonSVG(radarRaw, radarCalibrated) {
+  const pathFor = (radar) => {
+    const points = POLY_ORDER.map((k, i) => polyPoint(i, radar[k]));
+    return points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
+  };
+  const rings = [0.33, 0.66, 1].map((f) => {
+    const pts = POLY_ORDER.map((k, i) => polyPoint(i, POLY_MIN + f * (POLY_MAX - POLY_MIN)));
+    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
+    return `<path d="${d}" class="poly-ring" />`;
+  }).join("");
+  const axisLines = POLY_ORDER.map((k, i) => {
+    const [x, y] = polyPoint(i, POLY_MAX);
+    return `<line x1="${POLY_CENTER}" y1="${POLY_CENTER}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="poly-axis" />`;
+  }).join("");
+  const labels = POLY_ORDER.map((k, i) => {
+    const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
+    const dx = Math.cos(angle), dy = Math.sin(angle);
+    const x = POLY_CENTER + (POLY_MAXR + 12) * dx;
+    const y = POLY_CENTER + (POLY_MAXR + 12) * dy + (dy > 0.35 ? 9 : dy < -0.35 ? -2 : 3.5);
+    const anchor = dx > 0.35 ? "start" : dx < -0.35 ? "end" : "middle";
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="poly-label" text-anchor="${anchor}">${esc(statLabel(k))}</text>`;
+  }).join("");
+  return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg poly-compare" id="polyCompareSvg">
+    ${rings}${axisLines}
+    <path d="${pathFor(radarRaw)}" class="poly-shape-raw" id="polyShapeRaw" />
+    <path d="${pathFor(radarCalibrated)}" class="poly-shape-calibrated" id="polyShapeCalibrated" />
+    ${labels}
+  </svg>
+  <div class="poly-compare-legend">
+    <span class="legend-item"><span class="legend-dot raw"></span>Radar awal (sebelum kartu)</span>
+    <span class="legend-item"><span class="legend-dot calibrated"></span>Radar terkalibrasi</span>
+  </div>`;
 }
 
 function updatePolygonDOM() {
@@ -664,6 +715,30 @@ async function fetchScenarioCard() {
   }
 }
 
+// 3 candidate Pathway cards (v7, replaces the single fixed recommendation):
+// #1 calibrated (from chapterAnalysis.pathway - the full-context AI pick),
+// #2 raw-radar (from rawPathwayTop2, falling back to the 2nd-strongest if
+// the strongest collides with #1), #3 a random wildcard from whatever's
+// left. Computed ONCE per analysis (not on every re-render) so the wildcard
+// doesn't shuffle out from under the user while they're looking at it.
+function buildPathwayOptions(analysis) {
+  const option1 = {
+    pathway: analysis.pathway, pathwayNoun: analysis.pathwayNoun,
+    blurb: analysis.pathwayBlurb, source: "calibrated",
+  };
+  const rawTop2 = analysis.rawPathwayTop2 || [];
+  let rawPick = rawTop2[0];
+  if (!rawPick || rawPick.pathway === option1.pathway) rawPick = rawTop2[1];
+  if (!rawPick || rawPick.pathway === option1.pathway) {
+    rawPick = { pathway: PATHWAY_NAMES.find((p) => p !== option1.pathway) || option1.pathway, blurb: "Berdasarkan radar awal sebelum kalibrasi." };
+  }
+  const option2 = { pathway: rawPick.pathway, pathwayNoun: rawPick.pathway, blurb: rawPick.blurb, source: "raw" };
+  const remaining = PATHWAY_NAMES.filter((p) => p !== option1.pathway && p !== option2.pathway);
+  const wildcard = remaining[Math.floor(Math.random() * remaining.length)] || option1.pathway;
+  const option3 = { pathway: wildcard, pathwayNoun: wildcard, blurb: "Coba lihat arah yang beda.", source: "wildcard" };
+  return [option1, option2, option3];
+}
+
 async function fetchChapterAnalysis() {
   onboardError = "";
   adaptivePhase = "thinking";
@@ -679,6 +754,8 @@ async function fetchChapterAnalysis() {
         cards: adaptiveCards,
       },
     });
+    pathwayOptions = buildPathwayOptions(chapterAnalysis);
+    selectedPathwayIndex = null;
     adaptivePhase = "analysis";
     render();
   } catch (e) {
@@ -790,24 +867,36 @@ function renderAdaptive() {
   }
 
   if (adaptivePhase === "analysis") {
-    const pw = chapterAnalysis?.pathway;
+    const flaggedLock = chapterAnalysis?.lockTension || [];
     root.innerHTML = `
       <div class="shell">
         <div class="eyebrow mono">ELEVA · CHAPTER ANALYSIS</div>
         <div style="height:20px"></div>
-        <p class="fr" style="font-size:17px;line-height:1.7;margin:0 0 28px">${esc(chapterAnalysis?.insight || "")}</p>
+        <p class="fr" style="font-size:17px;line-height:1.7;margin:0 0 20px">${esc(chapterAnalysis?.insight || "")}</p>
+        <div class="poly-wrap" style="flex-direction:column;align-items:center;margin-bottom:14px">
+          ${renderRadarComparisonSVG(onboardForm.radarRaw || onboardForm.radar, onboardForm.radar)}
+        </div>
         ${chapterAnalysis?.significantShifts?.length ? `
-        <p class="mono" style="font-size:11.5px;color:var(--muted);margin:-18px 0 20px;line-height:1.6">
+        <p class="mono" style="font-size:11.5px;color:var(--muted);margin:0 0 12px;line-height:1.6">
           Kalibrasi radar: ${chapterAnalysis.significantShifts.map((s) => `${esc(statLabel(s.axis))} ${s.from}→${s.to}`).join(", ")} — bergeser dari radar awalmu berdasarkan pilihan-pilihanmu barusan.
         </p>` : ""}
-        <div class="quest-card" style="margin-bottom:20px">
-          <div class="qlabel mono">PATHWAY REKOMENDASI</div>
-          <h2 class="fr">${esc(pw || "")}${chapterAnalysis?.pathwayNoun && chapterAnalysis.pathwayNoun !== pw ? `: ${esc(chapterAnalysis.pathwayNoun)}` : ""}</h2>
-          <p class="desc">${esc(PATHWAY_DESC[pw] || "")}</p>
-          ${chapterAnalysis?.secondaryTrait ? `<p class="why">Trait tambahan yang kelihatan: ${esc(chapterAnalysis.secondaryTrait)}</p>` : ""}
+        ${flaggedLock.length ? `
+        <p class="mono" style="font-size:11.5px;color:var(--accent);margin:0 0 20px;line-height:1.6">
+          Ketegangan kunci: pilihan-pilihanmu di kartu beberapa kali condong berlawanan dari sumbu yang kamu kunci (${flaggedLock.map((a) => esc(statLabel(a))).join(", ")}) — angkanya tetap seperti kamu kunci, tapi layak dipikir ulang kalau mau, lihat insight di atas.
+        </p>` : ""}
+        ${chapterAnalysis?.secondaryTrait ? `<p class="why" style="margin:0 0 16px">Trait tambahan yang kelihatan: ${esc(chapterAnalysis.secondaryTrait)}</p>` : ""}
+        <div class="eyebrow mono" style="margin-top:4px">PILIH PATHWAY</div>
+        <div class="pathway-carousel">
+          ${pathwayOptions.map((opt, i) => `
+            <div class="pathway-card ${selectedPathwayIndex === i ? "selected" : ""}" data-idx="${i}">
+              <div class="qlabel mono">${opt.source === "calibrated" ? "REKOMENDASI UTAMA" : opt.source === "raw" ? "DARI RADAR AWAL" : "COBA ARAH LAIN"}</div>
+              <h2 class="fr">${esc(opt.pathway)}${opt.pathwayNoun && opt.pathwayNoun !== opt.pathway ? `: ${esc(opt.pathwayNoun)}` : ""}</h2>
+              <p class="desc">${esc(PATHWAY_DESC[opt.pathway] || "")}</p>
+              <p class="why">${esc(opt.blurb || "")}</p>
+            </div>`).join("")}
         </div>
         ${!overrideMode ? `
-        <button class="btn-primary full" id="acceptPathway">Mulai First Trial (14 hari)</button>
+        <button class="btn-primary full" id="acceptPathway" ${selectedPathwayIndex === null ? "disabled" : ""}>Mulai First Trial (14 hari)</button>
         <div style="text-align:center;margin-top:16px">
           <button class="btn-ghost" id="openOverride">Bukan ini — aku tahu persis mau melatih apa</button>
         </div>` : `
@@ -820,7 +909,17 @@ function renderAdaptive() {
           <button class="btn-ghost" id="cancelOverride">Batal, pakai rekomendasi AI</button>
         </div>`}
       </div>`;
-    document.getElementById("acceptPathway")?.addEventListener("click", () => submitOnboarding(chapterAnalysis.pathway, chapterAnalysis.pathwayNoun));
+    document.querySelectorAll(".pathway-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        selectedPathwayIndex = Number(card.dataset.idx);
+        renderAdaptive();
+      });
+    });
+    document.getElementById("acceptPathway")?.addEventListener("click", () => {
+      if (selectedPathwayIndex === null) return;
+      const chosen = pathwayOptions[selectedPathwayIndex];
+      submitOnboarding(chosen.pathway, chosen.pathwayNoun);
+    });
     document.getElementById("openOverride")?.addEventListener("click", () => { overrideMode = true; overrideText = ""; renderAdaptive(); });
     document.getElementById("cancelOverride")?.addEventListener("click", () => { overrideMode = false; renderAdaptive(); });
     document.getElementById("overrideInput")?.addEventListener("input", (e) => {
