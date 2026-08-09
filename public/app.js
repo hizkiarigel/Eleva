@@ -28,6 +28,46 @@ const PATHWAY_DESC = {
 };
 const PATHWAY_NAMES = Object.keys(PATHWAY_DESC);
 
+// v14 bug fix: the goal-input placeholders were the founder's OWN literal
+// examples from the PRD ("Punya badan sehat", "IELTS band 6.5", ...) -
+// those were illustration for writing the PRD, never meant to be hardcoded
+// verbatim into the app for every single user (founder caught this in
+// testing - the placeholder was identical to their own real goal). Fixed
+// with per-Pathway generic placeholders instead - static/hardcoded, no new
+// API call, matching the gaya of each Pathway.
+const PATHWAY_GOAL_PLACEHOLDER = {
+  Architect: "mis. Selesaikan portofolio 5 proyek dalam 3 bulan",
+  Warden: "mis. Konsisten olahraga 4x seminggu tanpa putus",
+  Weaver: "mis. Bangun ulang koneksi dengan 5 teman lama",
+  Pilgrim: "mis. Coba 3 jalur karier berbeda sebelum memutuskan satu",
+};
+// Specialist has no fixed placeholder by design (the whole point is a
+// user-defined domain) - PRD's own worked example: "Sales" -> a sales-shaped
+// placeholder. Tiny static hint table, NOT an AI call; anything unmatched
+// falls through to the neutral template using the user's own words.
+const SPECIALIST_GOAL_HINTS = {
+  sales: "mis. Closing 5 klien baru bulan ini",
+  desain: "mis. Selesaikan 3 project desain untuk portofolio",
+  "desain grafis": "mis. Selesaikan 3 project desain untuk portofolio",
+  coding: "mis. Rilis 1 proyek pribadi yang bisa dipakai orang lain",
+  programming: "mis. Rilis 1 proyek pribadi yang bisa dipakai orang lain",
+  marketing: "mis. Jalankan 3 campaign kecil dan bandingkan hasilnya",
+  konten: "mis. Konsisten posting konten 3x seminggu selama sebulan",
+};
+function goalPlaceholder(pendingPathway) {
+  if (!pendingPathway) return "mis. Target konkret 14 hari ke depan";
+  const { pathway, pathwayNoun } = pendingPathway;
+  if (PATHWAY_GOAL_PLACEHOLDER[pathway]) return PATHWAY_GOAL_PLACEHOLDER[pathway];
+  // Specialist (canonical, from a carousel card) or a free-typed override -
+  // probe whichever text actually names the domain (override: pathway IS
+  // the custom text; canonical Specialist card: pathwayNoun is the AI's
+  // inferred role, e.g. "Closer" for a sales context).
+  const probe = (pathway !== "Specialist" ? pathway : pathwayNoun || "").toLowerCase().trim();
+  if (SPECIALIST_GOAL_HINTS[probe]) return SPECIALIST_GOAL_HINTS[probe];
+  const label = pathway && pathway !== "Specialist" ? pathway : (pathwayNoun && pathwayNoun !== "Specialist" ? pathwayNoun : "spesialisasimu");
+  return `mis. ${label}, target konkret 14 hari ke depan`;
+}
+
 const MATURITY_TIERS = ["Emerging", "Practicing", "Reliable", "System", "Master"];
 function maturityTier(growthSessions) {
   return MATURITY_TIERS[Math.min(MATURITY_TIERS.length - 1, Math.floor((growthSessions || 0) / 3))];
@@ -1031,10 +1071,10 @@ function renderAdaptive() {
           <div class="rule"></div>
           <p class="insight">Tulis 1-3 hal — boleh dari area yang beda-beda sekaligus. Pathway-mu (${esc(pendingPathway?.pathway || "")}) yang menentukan GAYA mengejarnya; ini soal APA yang dikejar.</p>
         </div>
-        ${["mis. Punya badan sehat", "mis. IELTS band 6.5", "mis. Dapat kerja remote sebagai data analyst"].map((ph, i) => `
+        ${[0, 1, 2].map((i) => `
         <div class="field">
           <label>Goal ${i + 1}${i === 0 ? "" : " (opsional)"}</label>
-          <input type="text" data-goal="${i}" maxlength="200" value="${esc(goalInputs[i])}" placeholder="${esc(ph)}" />
+          <input type="text" data-goal="${i}" maxlength="200" value="${esc(goalInputs[i])}" placeholder="${esc(goalPlaceholder(pendingPathway))}" />
         </div>`).join("")}
         <button class="btn-primary full" id="confirmGoals" ${filled.length ? "" : "disabled"}>Mulai First Trial (14 hari)</button>
         <div style="text-align:center;margin-top:16px">
