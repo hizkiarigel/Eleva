@@ -182,9 +182,26 @@ function applySynergyDrag(base, key, targetValue, lockedKeys) {
   if (Math.abs(delta) < 1e-9) return { values: { ...base }, limited: false };
 
   const others = POLY_ORDER.filter((k) => k !== key && !locked.has(k));
+  // v10: non-partner pull damped to half its current value. Two reasons,
+  // both from founder testing on production:
+  //   1. Readable synergy gradient on a single drag - undamped, a mid-range
+  //      non-partner (value ~5) out-pulled even a strong evidence partner,
+  //      so the per-axis spread came out near-uniform and the whole synergy
+  //      concept was invisible on the chart. Damped, one Body drag now reads
+  //      strong partner (-2) > mid partner/non-partner (-1) > weak (0).
+  //   2. Calibration retention - the scenario-card signals reuse this exact
+  //      engine, and an axis the user consistently favorites grows tall,
+  //      which undamped made it the BIGGEST collateral absorber of every
+  //      later signal (pull = its own value) - actively cancelling the very
+  //      gains the user's picks just built. Halving non-partner pull halves
+  //      that drain, so consistent answers accumulate instead of washing
+  //      out, and the before/after comparison actually shows them.
+  // Still proportional to current value (low axes keep absorbing less, the
+  // natural floor protection), still normalized to exactly -delta in total.
+  const NONPARTNER_DAMP = 0.5;
   const pullOf = (k) => {
     const syn = synergyFor(key, k);
-    return syn ? syn.weight * syn.direction : base[k];
+    return syn ? syn.weight * syn.direction : base[k] * NONPARTNER_DAMP;
   };
 
   const excluded = new Set();
