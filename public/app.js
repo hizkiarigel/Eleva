@@ -15,13 +15,16 @@ function statLabel(key) {
   return STAT_ORDER.find((s) => s[0] === key)?.[1] || LEGACY_STAT_LABELS[key] || key;
 }
 
+// Bible v1.7: Pathway = gaya berinteraksi dengan dunia (tahan lama, soal
+// perilaku), BUKAN fase/masalah hidup (itu tugas Chapter, lihat PRD riwayat
+// v8/Bible v1.7 Bab 13) - deskripsi di bawah sengaja tidak menyebut apa pun
+// soal pemulihan emosional/"belum tahu arah", itu pattern lama yang direvisi.
 const PATHWAY_DESC = {
-  Builder: "Membangun sesuatu dari nol, butuh konsistensi untuk menyelesaikannya.",
-  Guardian: "Belajar stabil secara emosi, jadi sandaran diri sendiri dulu.",
-  Explorer: "Keluar dari rutinitas lama, mencoba arah yang belum pernah dijalani.",
-  Connector: "Membangun ulang relasi/koneksi sosial yang sempat renggang.",
-  Seeker: "Belum tahu arah pastinya, dan sedang aktif mencari.",
-  Specialist: "Arah yang khusus buat kamu, di luar lima pola umum lainnya.",
+  Architect: "Membangun & menyusun sesuatu secara metodis, langkah demi langkah terlihat.",
+  Warden: "Menjaga & mempertahankan — fokus ke konsistensi, jadi fondasi yang bisa diandalkan.",
+  Weaver: "Menghubungkan orang & ide — fokus ke jaringan dan memfasilitasi koneksi.",
+  Pilgrim: "Menjelajah luas secara sengaja sebelum berkomitmen — gaya eksploratif, bukan tersesat.",
+  Specialist: "Menyelam dalam ke satu domain spesifik yang tidak masuk kategori umum.",
 };
 const PATHWAY_NAMES = Object.keys(PATHWAY_DESC);
 
