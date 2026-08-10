@@ -473,3 +473,23 @@ Dari `UPDATE_PROMPT.pdf` founder (10 Agustus), Fokus 2 — dua sub-item dikerjak
 - [x] Target yang dipilih muncul sebagai konteks nyata di prompt quest berikutnya untuk goal yang sama
 - [x] Refleksi tetap terpisah, tidak digabung/dihapus
 - [x] Berlaku untuk kedua tipe goal terstruktur (cardio dan gym), bukan cuma lari
+
+## 16. Task 11 — Fokus 0: bug tampilan form fisik + revisi field (SELESAI)
+
+Dari `UPDATE_PROMPT.pdf` susulan founder (10 Agustus, prioritas tertinggi sesi ini), dua bagian:
+
+**Bug tampilan (diverifikasi, TIDAK butuh perubahan kode)**: founder melampirkan `reference/screenshots/body-quest-completion-target.png` sebagai bukti quest `completionType="structured-physical"` masih menampilkan kotak refleksi generik dulu saat tap "Mulai", dengan form terstruktur disembunyikan di link sekunder "Aktivitas fisik? Catat sebagai record →". Diverifikasi lewat quest yang di-tag `structured-physical` langsung via SQL + Playwright: kode HASIL Fokus 1 sesi ini (`recordMode = quest?.completionType === "structured-physical"` di handler `[data-reflect-id]`, `public/app.js`) SUDAH membuat field terstruktur tampil langsung sebagai tampilan utama — toggle "Balik ke refleksi teks aja" hanya render kalau `!mustRecord`, jadi tidak pernah muncul untuk quest bertag ini. Screenshot founder kemungkinan diambil dari build produksi sebelum Fokus 1 di-deploy. Tidak ada perubahan kode untuk bagian ini.
+
+**Revisi field (perubahan nyata)**:
+1. **Durasi format MM:SS** — input `durasiMenit` di form cardio jadi `type="text"` (placeholder "20:01"), di-parse client-side (`parseDurasiMenit`, `public/app.js`) jadi menit desimal tepat SEBELUM dikirim ke server — satu titik konversi di edge klien, representasi internal (pace calc, target metrics `server/targets.js`, validasi `server/structured.js`) tidak berubah sama sekali, semua tetap menerima angka polos seperti sebelumnya. Toleran menerima angka polos tanpa titik dua juga (kompatibilitas/kemudahan).
+2. **RPE 1-10 dihapus total** dari form cardio DAN gym — field UI, validasi wajib di `server/structured.js`, referensi di prompt `processReflection` (`server/claude.js`), dan `structSummary` (`public/app.js`) semua dibersihkan bersamaan, tidak ada RPE tersisa di manapun di codebase.
+3. **"Titik mulai berat" cardio** (sebelumnya teks bebas) diganti picker 3 pilihan **Ringan / Cukup / Berat** (tombol `[data-tberat]`, styling sama dengan status picker yang sudah ada). Field refleksi kondisional **"Apa yang bikin berat?"** (`titikBeratDetail`) HANYA muncul dan HANYA wajib diisi kalau pilih "Berat" — Ringan/Cukup tidak memaksa penjelasan lanjutan. **Sengaja cardio-only**: revisi founder menyebut nama field ini secara eksplisit ("Titik mulai berat"), sementara field gym yang mirip punya nama & konsep berbeda ("Titik gagal/berat" — set/rep mana yang gagal, bukan kapan mulai terasa berat) dan tidak disebut di revisi, jadi tetap teks bebas seperti semula.
+
+**DoD**:
+- [x] Tidak ada field/label RPE di form cardio maupun gym (dites eksplisit: 0 kemunculan teks "RPE")
+- [x] Input durasi cardio `type="text"`, placeholder MM:SS, pace terhitung benar dari nilai MM:SS yang diparse
+- [x] Picker Ringan/Cukup/Berat menggantikan input teks lama untuk cardio; input teks lama (`data-sf="titikBerat"`) sudah tidak ada di DOM
+- [x] Pilih Ringan atau Cukup — TIDAK memunculkan field detail
+- [x] Pilih Berat — field detail muncul; submit dengan field itu kosong ditolak inline (bukan crash/silent fail); submit dengan field terisi tersimpan dan tampil di kartu hasil + Riwayat
+- [x] Form gym: RPE hilang, "Titik gagal/berat" tetap teks bebas seperti semula
+- [x] Regresi penuh: carousel per-goal (Fokus 1), pace display (Fokus 2.1), Target Berikutnya A/B/C + manual override (Fokus 2.2/2.3) semua tetap hijau dengan payload yang disesuaikan skema field baru

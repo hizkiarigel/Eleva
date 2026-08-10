@@ -35,16 +35,16 @@ function validateStructuredData(kind, data) {
     const jenisLain = String(data.jenisLainnya || "").trim();
     const durasi = num(data.durasiMenit);
     const jarak = data.jarakKm === "" || data.jarakKm == null ? null : num(data.jarakKm);
-    const rpe = num(data.rpe);
-    const titik = String(data.titikBerat || "").trim();
+    const titikBerat = String(data.titikBerat || "").trim();
+    const titikBeratDetail = String(data.titikBeratDetail || "").trim();
 
     if (!CARDIO_ACTIVITIES.includes(jenis)) return { ok: false, error: "Pilih jenis aktivitasnya dulu." };
     if (jenis === "Lainnya" && !jenisLain) return { ok: false, error: "Tulis jenis aktivitasnya di kolom 'Lainnya'." };
-    if (durasi == null || durasi <= 0) return { ok: false, error: "Durasi (menit) wajib diisi angka lebih dari 0." };
+    if (durasi == null || durasi <= 0) return { ok: false, error: "Durasi wajib diisi, format MM:SS (mis. 20:01)." };
     if (durasi > 600) return { ok: false, error: "Durasi lebih dari 10 jam dalam sehari tidak wajar — cek lagi angkanya." };
     if (jarak != null && (jarak < 0 || jarak > 200)) return { ok: false, error: "Jarak di luar rentang wajar (0-200 km) — cek lagi angkanya." };
-    if (rpe == null || !Number.isInteger(rpe) || rpe < 1 || rpe > 10) return { ok: false, error: "Tingkat usaha (RPE) wajib angka bulat 1-10." };
-    if (!titik) return { ok: false, error: "Titik mulai berat wajib diisi (mis. 'menit ke-12' atau 'awal/tengah/akhir')." };
+    if (!["Ringan", "Cukup", "Berat"].includes(titikBerat)) return { ok: false, error: "Pilih titik mulai berat: Ringan, Cukup, atau Berat." };
+    if (titikBerat === "Berat" && !titikBeratDetail) return { ok: false, error: "Ceritakan singkat apa yang bikin berat." };
 
     if (jarak != null && jarak > 0) {
       const speed = jarak / (durasi / 60);
@@ -52,7 +52,7 @@ function validateStructuredData(kind, data) {
       if (speed > cap) {
         return {
           ok: false,
-          error: `Durasi ${durasi} menit dengan jarak ${jarak} km berarti ${speed.toFixed(1)} km/jam — tidak wajar untuk ${jenis === "Lainnya" ? jenisLain || "aktivitas ini" : jenis}. Cek lagi salah satu angkanya.`,
+          error: `Durasi ${durasi.toFixed(2)} menit dengan jarak ${jarak} km berarti ${speed.toFixed(1)} km/jam — tidak wajar untuk ${jenis === "Lainnya" ? jenisLain || "aktivitas ini" : jenis}. Cek lagi salah satu angkanya.`,
         };
       }
     }
@@ -65,8 +65,8 @@ function validateStructuredData(kind, data) {
         ...(jenis === "Lainnya" ? { jenisLainnya: jenisLain } : {}),
         durasiMenit: durasi,
         ...(jarak != null ? { jarakKm: jarak } : {}),
-        rpe,
-        titikBerat: titik.slice(0, 200),
+        titikBerat,
+        ...(titikBerat === "Berat" ? { titikBeratDetail: titikBeratDetail.slice(0, 300) } : {}),
       },
     };
   }
@@ -76,7 +76,6 @@ function validateStructuredData(kind, data) {
     const set = num(data.set);
     const repetisi = num(data.repetisi);
     const beban = data.bebanKg === "" || data.bebanKg == null ? null : num(data.bebanKg);
-    const rpe = num(data.rpe);
     const titik = String(data.titikGagal || "").trim();
 
     if (!gerakan) return { ok: false, error: "Tulis gerakannya dulu (mis. push-up, squat, bench press)." };
@@ -85,7 +84,6 @@ function validateStructuredData(kind, data) {
     if (repetisi == null || !Number.isInteger(repetisi) || repetisi <= 0) return { ok: false, error: "Repetisi wajib angka bulat lebih dari 0." };
     if (repetisi > 500) return { ok: false, error: "Lebih dari 500 repetisi per set tidak wajar — cek lagi angkanya." };
     if (beban != null && (beban < 0 || beban > 500)) return { ok: false, error: "Beban di luar rentang wajar (0-500 kg) — cek lagi angkanya." };
-    if (rpe == null || !Number.isInteger(rpe) || rpe < 1 || rpe > 10) return { ok: false, error: "Tingkat usaha (RPE) wajib angka bulat 1-10." };
     if (!titik) return { ok: false, error: "Titik gagal/berat wajib diisi (mis. 'set 3 rep 8' atau 'set terakhir')." };
 
     return {
@@ -96,7 +94,6 @@ function validateStructuredData(kind, data) {
         set,
         repetisi,
         ...(beban != null ? { bebanKg: beban } : {}),
-        rpe,
         titikGagal: titik.slice(0, 200),
       },
     };

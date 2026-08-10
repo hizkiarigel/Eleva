@@ -1175,27 +1175,41 @@ function renderAdaptive() {
 // Compact one-line summary of a day's structured completion data - shown on
 // the finished quest card and in history, so the numbers stay visible as the
 // progressive baseline they are.
+// Fokus 0: durasi is typed as MM:SS (mis. "20:01"), not a bare integer -
+// internally still tracked as decimal minutes (durasiMenit) everywhere else
+// (pace calc, target metrics, server validation) so only the input/display
+// layer changes. Accepts a bare number too ("20" -> 20:00) for tolerance.
+function parseDurasiMenit(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{1,3}):([0-5]?\d)$/);
+  if (m) return Number(m[1]) + Number(m[2]) / 60;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function mmss(decimalMinutes) {
+  const m = Math.floor(decimalMinutes);
+  const s = Math.round((decimalMinutes - m) * 60);
+  const mm = s === 60 ? m + 1 : m;
+  const ss = s === 60 ? 0 : s;
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+}
 // Fokus 2.1: pace (min/km) is pure display, derived live from Durasi+Jarak
 // as the user types - not a field of its own, nothing new to fill in or
 // validate, matches what a device like Strava would show while running.
 function paceLabel(durasiMenit, jarakKm) {
   const dur = Number(durasiMenit), jarak = Number(jarakKm);
   if (!dur || !jarak || dur <= 0 || jarak <= 0) return null;
-  const paceMin = dur / jarak;
-  const m = Math.floor(paceMin);
-  const s = Math.round((paceMin - m) * 60);
-  const mm = s === 60 ? m + 1 : m;
-  const ss = s === 60 ? 0 : s;
-  return `${mm}:${String(ss).padStart(2, "0")} /km`;
+  return `${mmss(dur / jarak)} /km`;
 }
 
 function structSummary(sd) {
   if (!sd) return "";
   if (sd.kind === "gym") {
-    return `${sd.gerakan} · ${sd.set}×${sd.repetisi}${sd.bebanKg != null ? ` @ ${sd.bebanKg}kg` : ""} · RPE ${sd.rpe} · berat di ${sd.titikGagal}`;
+    return `${sd.gerakan} · ${sd.set}×${sd.repetisi}${sd.bebanKg != null ? ` @ ${sd.bebanKg}kg` : ""} · titik gagal di ${sd.titikGagal}`;
   }
   const jenis = sd.jenisAktivitas === "Lainnya" ? (sd.jenisLainnya || "Lainnya") : sd.jenisAktivitas;
-  return `${jenis} · ${sd.durasiMenit} menit${sd.jarakKm != null ? ` · ${sd.jarakKm} km` : ""} · RPE ${sd.rpe} · berat di ${sd.titikBerat}`;
+  return `${jenis} · ${mmss(sd.durasiMenit)}${sd.jarakKm != null ? ` · ${sd.jarakKm} km` : ""} · ${sd.titikBerat}${sd.titikBeratDetail ? ` (${sd.titikBeratDetail})` : ""}`;
 }
 
 // Renders one open quest as a card - every card is equally "current" now
@@ -1319,7 +1333,13 @@ function renderDashboard() {
   // just bounce off validation with a confusing "missing field" message.
   const formReady = !showPicker || structKind != null;
   const sf = (k) => esc(structForm[k] ?? "");
-  const rpeSelectHTML = `<select data-sf="rpe">${["", ...Array.from({ length: 10 }, (_, i) => String(i + 1))].map((v) => `<option value="${v}" ${String(structForm.rpe ?? "") === v ? "selected" : ""}>${v || "Pilih..."}</option>`).join("")}</select>`;
+  // Fokus 0 (founder revision, 10 Agustus): RPE removed from both forms -
+  // not used anymore. Cardio's free-text "titik mulai berat" is replaced by
+  // a Ringan/Cukup/Berat picker, with a conditional reflection field that
+  // only appears for "Berat" - Ringan/Cukup need no further explanation,
+  // asking for one anyway would just invite padding. Gym's "titik
+  // gagal/berat" is a different concept (which specific set/rep failed) and
+  // stays free text - the founder's revision only named cardio's field.
   const structFieldsHTML = !showStructFields ? "" : structKind !== "cardio" ? `
       <div class="field">
         <label>Gerakan</label>
@@ -1329,10 +1349,7 @@ function renderDashboard() {
         <div class="field"><label>Set</label><input type="number" min="1" data-sf="set" value="${sf("set")}" placeholder="3" /></div>
         <div class="field"><label>Repetisi / set</label><input type="number" min="1" data-sf="repetisi" value="${sf("repetisi")}" placeholder="12" /></div>
       </div>
-      <div class="struct-grid">
-        ${structKind === "gym-alat" ? `<div class="field"><label>Beban (kg) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.5" data-sf="bebanKg" value="${sf("bebanKg")}" placeholder="20" /></div>` : ""}
-        <div class="field"><label>Tingkat usaha (RPE 1-10)</label>${rpeSelectHTML}</div>
-      </div>
+      ${structKind === "gym-alat" ? `<div class="field"><label>Beban (kg) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.5" data-sf="bebanKg" value="${sf("bebanKg")}" placeholder="20" /></div>` : ""}
       <div class="field">
         <label>Titik gagal/berat</label>
         <input type="text" data-sf="titikGagal" maxlength="200" value="${sf("titikGagal")}" placeholder="mis. set 3 rep 8, atau set terakhir" />
@@ -1347,14 +1364,21 @@ function renderDashboard() {
         <input type="text" data-sf="jenisLainnya" maxlength="200" value="${sf("jenisLainnya")}" placeholder="mis. renang, hiking" />
       </div>` : ""}
       <div class="struct-grid">
-        <div class="field"><label>Durasi (menit)</label><input type="number" min="1" data-sf="durasiMenit" value="${sf("durasiMenit")}" placeholder="30" /></div>
+        <div class="field"><label>Durasi (MM:SS)</label><input type="text" inputmode="numeric" data-sf="durasiMenit" value="${sf("durasiMenit")}" placeholder="20:01" /></div>
         <div class="field"><label>Jarak (km) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.1" data-sf="jarakKm" value="${sf("jarakKm")}" placeholder="5" /></div>
       </div>
-      <p class="mono" id="paceDisplay" style="font-size:12px;color:var(--muted);margin:-8px 0 14px">${(() => { const p = paceLabel(structForm.durasiMenit, structForm.jarakKm); return p ? `Pace: ${p}` : ""; })()}</p>
-      <div class="struct-grid">
-        <div class="field"><label>Tingkat usaha (RPE 1-10)</label>${rpeSelectHTML}</div>
-        <div class="field"><label>Titik mulai berat</label><input type="text" data-sf="titikBerat" maxlength="200" value="${sf("titikBerat")}" placeholder="mis. menit ke-12, atau tengah" /></div>
-      </div>`;
+      <p class="mono" id="paceDisplay" style="font-size:12px;color:var(--muted);margin:-8px 0 14px">${(() => { const p = paceLabel(parseDurasiMenit(structForm.durasiMenit), structForm.jarakKm); return p ? `Pace: ${p}` : ""; })()}</p>
+      <div class="field">
+        <label>Titik mulai berat</label>
+        <div class="status-row">
+          ${["Ringan", "Cukup", "Berat"].map((v) => `<button class="status-btn ${structForm.titikBerat === v ? "active" : ""}" data-tberat="${v}">${v}</button>`).join("")}
+        </div>
+      </div>
+      ${structForm.titikBerat === "Berat" ? `
+      <div class="field">
+        <label>Apa yang bikin berat?</label>
+        <textarea data-sf="titikBeratDetail" rows="2" placeholder="Ceritain singkat...">${sf("titikBeratDetail")}</textarea>
+      </div>` : ""}`;
 
   const kindPickerHTML = !showPicker ? "" : `
       <div class="field">
@@ -1533,6 +1557,15 @@ function renderDashboard() {
     }
   });
   document.querySelectorAll("[data-skind]").forEach((b) => b.addEventListener("click", () => { structKind = b.dataset.skind; reflectError = ""; renderDashboard(); }));
+  // Fokus 0: Ringan/Cukup only need the pick itself; Berat reveals a
+  // conditional reflection field, so unlike plain typed fields this needs a
+  // re-render (new element appearing), not just a live DOM write.
+  document.querySelectorAll("[data-tberat]").forEach((b) => b.addEventListener("click", () => {
+    structForm.titikBerat = b.dataset.tberat;
+    if (structForm.titikBerat !== "Berat") delete structForm.titikBeratDetail;
+    reflectError = "";
+    renderDashboard();
+  }));
   document.getElementById("toggleRecord")?.addEventListener("click", () => { recordMode = !recordMode; structKind = null; reflectError = ""; renderDashboard(); });
   // Bound by data attribute, not the shared .status-btn styling class -
   // the activity-kind picker reuses that class for its look, and a
@@ -1557,7 +1590,7 @@ function renderDashboard() {
       if (el.dataset.sf === "durasiMenit" || el.dataset.sf === "jarakKm") {
         const paceEl = document.getElementById("paceDisplay");
         if (paceEl) {
-          const p = paceLabel(structForm.durasiMenit, structForm.jarakKm);
+          const p = paceLabel(parseDurasiMenit(structForm.durasiMenit), structForm.jarakKm);
           paceEl.textContent = p ? `Pace: ${p}` : "";
         }
       }
@@ -1573,6 +1606,11 @@ function renderDashboard() {
         // never sends a weight, even one left over from switching variants.
         body.structuredData = { ...structForm, kind: structKind === "cardio" ? "cardio" : "gym" };
         if (structKind === "gym-badan") delete body.structuredData.bebanKg;
+        // durasi is typed as MM:SS - convert to decimal minutes here, at the
+        // one edge where it leaves the client, so the server (and every
+        // other consumer: pace calc, target metrics) keeps working with a
+        // plain number same as before.
+        if (structKind === "cardio") body.structuredData.durasiMenit = parseDurasiMenit(structForm.durasiMenit);
       }
       const resp = await api("/api/reflection", { method: "POST", body });
       // The per-goal model regenerates this goal's next quest the instant
