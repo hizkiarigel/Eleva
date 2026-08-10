@@ -183,6 +183,20 @@ async function getActiveDay(userId) {
   };
 }
 
+// Looks up a specific day by its own date key, active or not - the path
+// for reopening a missed quest to actually complete it (founder call:
+// staying visible wasn't enough, it has to still be finishable). Timing
+// plays no role in whether a quest CAN be completed, only in when a new
+// one gets issued (getActiveDay, unchanged) - completing this one late
+// still runs through the identical growth-gate content checks as an
+// on-time submission, so lateness never loosens what counts as real.
+async function getDayByDate(userId, date) {
+  const { rows } = await pool.query(`SELECT * FROM days WHERE user_id = $1 AND date = $2`, [userId, date]);
+  const row = rows[0];
+  if (!row) return null;
+  return { date: row.date, quest: row.quest, insight: row.insight, reflection: row.reflection };
+}
+
 // Issues a quest, always with a fresh clock - even on conflict. The
 // (user_id, date) collision path only fires if a stale row's date label
 // happens to match today's (shouldn't happen in real usage: 24h always
@@ -243,5 +257,5 @@ module.exports = {
   DEFAULT_STATS, init,
   createUser, getUserByEmail, getUserById,
   getState, createState, updateState, activatePathway, resetUser,
-  getActiveDay, createQuest, saveReflection, recentDays, allHistory,
+  getActiveDay, getDayByDate, createQuest, saveReflection, recentDays, allHistory,
 };

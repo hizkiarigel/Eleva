@@ -289,15 +289,17 @@ app.post("/api/profile", requireAuth, async (req, res) => {
 // Submit today's reflection
 app.post("/api/reflection", requireAuth, async (req, res) => {
   try {
-    const { status, text, structuredData } = req.body;
+    const { status, text, structuredData, date } = req.body;
     const state = await db.getState(req.userId);
-    const day = await db.getActiveDay(req.userId);
-    if (!state || !day) return res.status(400).json({ error: "Belum ada quest hari ini." });
-    // Server-side enforcement of the same 24h window the client shows as a
-    // countdown - a client can't be trusted to self-block a late submit
-    // right at the buzzer, and an expired quest already has a successor
-    // waiting behind it (getActiveDay would return that one, not this).
-    if (!day.active) return res.status(400).json({ error: "Waktu 24 jam quest ini sudah habis, sudah nggak bisa direfleksikan lagi." });
+    // date identifies which quest this reflects on - today's active one, or
+    // a missed one reopened from the carousel. Timing no longer gates
+    // whether a quest CAN be completed (founder call: a missed day should
+    // stay finishable, not just visible) - only whether it's already been
+    // completed does, which the reflection check below still enforces
+    // server-side regardless of what the client's button state shows.
+    const day = date ? await db.getDayByDate(req.userId, date) : await db.getActiveDay(req.userId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah direfleksikan." });
 
     const trimmedText = (text || "").trim();
     const inCrisis = safety.detectCrisis(trimmedText);

@@ -338,6 +338,13 @@ let onboardStep = 0;
 let ui = { view: "loading", label: "Membuka Eleva..." };
 let appState = null;
 let reflectOpen = false;
+// null = the reflect flow targets today's active quest; a date string
+// targets a specific missed quest reopened from the carousel (founder
+// call: a missed day should stay completable, not just visible - the
+// growth-gate content checks (specificity, word count, structured-data
+// plausibility) are identical either way, so lateness doesn't loosen
+// anything, it's purely a timing allowance).
+let reflectTarget = null;
 let reflectStatus = "done";
 let reflectText = "";
 // Task 7b: structured-physical quests complete via typed fields instead of
@@ -1197,37 +1204,61 @@ function startCountdown(expiresAtISO) {
   countdownTimer = setInterval(tick, 1000);
 }
 
+// Renders any single day's quest as a card - today's active one (with
+// countdown + the #openReflect id existing tests/handlers rely on) or a
+// missed one reopened from the carousel (TERLEWAT label, data-reflect-date
+// instead, no countdown - a lapsed quest has no meaningful time-remaining).
+// dimmed only applies the muted carousel styling, never to the card
+// currently focused for reflection - once it's the one thing on screen it
+// should read as fully live, not like a passive history glance.
+function questSummaryCard(day, isToday, dimmed) {
+  if (!day) return `<div class="quest-card"><div class="dot pending"></div>${spinnerHTML("AI sedang menyusun quest hari ini...")}</div>`;
+  const hasRefl = Boolean(day.reflection);
+  const label = isToday
+    ? (day.quest.mode === "acting" ? "ACTING METHOD HARI INI" : "QUEST HARI INI")
+    : `TERLEWAT · ${esc(day.date)}`;
+  return `
+    <div class="quest-card ${dimmed ? "missed-card" : ""}">
+      ${isToday ? `<div class="dot ${hasRefl ? "done" : "pending"}"></div>` : ""}
+      <div class="qlabel mono">${label}</div>
+      <h2 class="fr">${esc(day.quest.title)}</h2>
+      <p class="desc">${esc(day.quest.description)}</p>
+      <p class="why">${esc(day.quest.why)}</p>
+      ${!hasRefl ? `
+        ${isToday && day.expiresAt ? `<div class="mono countdown" id="questCountdownRow">⏳ <span id="questCountdown">--:--:--</span> tersisa</div>` : ""}
+        ${isToday
+          ? `<button class="btn-primary" id="openReflect">Tandai & refleksi</button>`
+          : `<button class="btn-primary" data-reflect-date="${esc(day.date)}">Tandai & refleksi</button>`}` : `
+        <div style="border-top:1px solid var(--hair);padding-top:14px;margin-top:4px">
+          <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
+            ${day.reflection.status === "done" ? "SELESAI" : day.reflection.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
+          </div>
+          ${day.reflection.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(day.reflection.structuredData))}</div>` : ""}
+          <p class="fr" style="font-style:italic;font-size:14.5px;margin:0;line-height:1.6">${esc(day.reflection.mentorReply)}</p>
+          ${Object.keys(day.reflection.deltas || {}).length ? `<div class="deltas">${Object.entries(day.reflection.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
+        </div>`}
+    </div>`;
+}
+
 function renderDashboard() {
   const s = appState;
   const today = s.today;
-  const hasReflection = Boolean(today?.reflection);
-
-  const questInner = !today ? spinnerHTML("AI sedang menyusun quest hari ini...") : `
-    <div class="qlabel mono">${today.quest.mode === "acting" ? "ACTING METHOD HARI INI" : "QUEST HARI INI"}</div>
-    <h2 class="fr">${esc(today.quest.title)}</h2>
-    <p class="desc">${esc(today.quest.description)}</p>
-    <p class="why">${esc(today.quest.why)}</p>
-    ${!hasReflection ? `
-      ${today.expiresAt ? `<div class="mono countdown" id="questCountdownRow">⏳ <span id="questCountdown">--:--:--</span> tersisa</div>` : ""}
-      <button class="btn-primary" id="openReflect">Tandai & refleksi</button>` : `
-      <div style="border-top:1px solid var(--hair);padding-top:14px;margin-top:4px">
-        <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
-          ${today.reflection.status === "done" ? "SELESAI" : today.reflection.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
-        </div>
-        ${today.reflection.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(today.reflection.structuredData))}</div>` : ""}
-        <p class="fr" style="font-style:italic;font-size:14.5px;margin:0;line-height:1.6">${esc(today.reflection.mentorReply)}</p>
-        ${Object.keys(today.reflection.deltas || {}).length ? `<div class="deltas">${Object.entries(today.reflection.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
-      </div>`}
-  `;
+  // Which day the (possibly open) reflect flow targets - today by default,
+  // or a specific missed day reopened from the carousel. Looked up fresh
+  // from appState every render, never cached, so a just-refreshed state
+  // after a submit is always the source of truth.
+  const targetIsToday = !reflectTarget || reflectTarget === today?.date;
+  const targetDay = targetIsToday ? today : (s.history || []).find((d) => d.date === reflectTarget) || null;
+  const hasReflection = Boolean(targetDay?.reflection);
 
   // Task 7b: structured-physical quests swap the free reflection box for
   // typed fields (numbers are far harder to fabricate convincingly than a
   // paragraph). Narrative becomes optional there. Skipped = nothing to
   // certify, so the fields hide and no growth applies either way.
-  const isStructuredQuest = today?.quest?.completionType === "structured-physical";
+  const isStructuredQuest = targetDay?.quest?.completionType === "structured-physical";
   const showStructFields = isStructuredQuest && reflectStatus !== "skipped";
   const sf = (k) => esc(structForm[k] ?? "");
-  const structFieldsHTML = !showStructFields ? "" : today.quest.structuredKind === "gym" ? `
+  const structFieldsHTML = !showStructFields ? "" : targetDay.quest.structuredKind === "gym" ? `
       <div class="field">
         <label>Gerakan</label>
         <input type="text" data-sf="gerakan" maxlength="200" value="${sf("gerakan")}" placeholder="mis. push-up, squat, bench press" />
@@ -1284,35 +1315,26 @@ function renderDashboard() {
       <button class="btn-primary full" id="submitReflect">${showStructFields ? "Simpan data & selesaikan quest" : "Simpan refleksi"}</button>
     </div>` : "";
 
-  // Missed days should stay reachable from the main quest-card area, not
-  // just noted in Riwayat below - founder feedback: seeing "terlewat" only
-  // in history read as buried/passive. Read-only (no retroactive
-  // completion - that's a bigger call about growth-gate integrity than
-  // "let me see what I missed"), reachable by swiping past today's card.
+  // Missed days stay reachable from the main quest-card area, not just
+  // noted in Riwayat below - founder feedback: seeing "terlewat" only in
+  // history read as buried/passive. Genuinely completable too (founder
+  // follow-up after seeing the read-only version: "tolong ini dibuka lagi")
+  // via the same reflect flow as today's quest, just targeting a different
+  // date - see questSummaryCard's data-reflect-date buttons below.
   // s.history is already DESC by date, so missed entries come out most-
   // recent-first, continuing naturally backward from today.
   const missedRecent = (s.history || []).filter((d) => !d.reflection);
-  const todayCardHTML = `
-    <div class="quest-card">
-      <div class="dot ${hasReflection ? "done" : "pending"}"></div>
-      ${questInner}
-    </div>`;
-  const missedCardHTML = (d) => `
-    <div class="quest-card missed-card">
-      <div class="qlabel mono">TERLEWAT · ${d.date}</div>
-      <h2 class="fr">${esc(d.quest?.title || "")}</h2>
-      <p class="desc">${esc(d.quest?.description || "")}</p>
-      <p class="missed-note">Hari ini sudah lewat, nggak bisa direfleksikan lagi — tercatat apa adanya.</p>
-    </div>`;
-  // Collapses to the plain single card while actively reflecting (or when
-  // there's nothing missed) so typing a reflection never fights a
-  // horizontal swipe for the same touch gesture.
+  // Collapses to the single card actually being reflected on while
+  // reflectOpen (today's or a reopened missed one - never always today's,
+  // or reopening a missed card would show the wrong quest above its own
+  // form) so typing a reflection never fights a horizontal swipe for the
+  // same touch gesture.
   const questSectionHTML = (!reflectOpen && missedRecent.length) ? `
     <div class="quest-carousel">
-      ${todayCardHTML}
-      ${missedRecent.map(missedCardHTML).join("")}
+      ${questSummaryCard(today, true, false)}
+      ${missedRecent.map((d) => questSummaryCard(d, false, true)).join("")}
     </div>
-    <div class="eyebrow mono swipe-hint">← geser untuk lihat ${missedRecent.length} quest yang terlewat</div>` : todayCardHTML;
+    <div class="eyebrow mono swipe-hint">← geser untuk lihat ${missedRecent.length} quest yang terlewat</div>` : questSummaryCard(targetDay, targetIsToday, false);
 
   root.innerHTML = `
     <div class="shell">
@@ -1366,8 +1388,11 @@ function renderDashboard() {
       </div>
     </div>`;
 
-  startCountdown(today?.expiresAt);
-  document.getElementById("openReflect")?.addEventListener("click", () => { reflectOpen = true; reflectStatus = "done"; reflectText = ""; structForm = {}; reflectError = ""; renderDashboard(); });
+  startCountdown(targetIsToday ? today?.expiresAt : null);
+  document.getElementById("openReflect")?.addEventListener("click", () => { reflectTarget = null; reflectOpen = true; reflectStatus = "done"; reflectText = ""; structForm = {}; reflectError = ""; renderDashboard(); });
+  document.querySelectorAll("[data-reflect-date]").forEach((b) => b.addEventListener("click", () => {
+    reflectTarget = b.dataset.reflectDate; reflectOpen = true; reflectStatus = "done"; reflectText = ""; structForm = {}; reflectError = ""; renderDashboard();
+  }));
   document.querySelectorAll(".status-btn").forEach((b) => b.addEventListener("click", () => { reflectStatus = b.dataset.status; reflectError = ""; renderDashboard(); }));
   const rtxt = document.getElementById("reflectText");
   if (rtxt) rtxt.addEventListener("input", (e) => {
@@ -1387,10 +1412,10 @@ function renderDashboard() {
   document.getElementById("submitReflect")?.addEventListener("click", async () => {
     root.innerHTML = spinnerHTML("Menyimpan refleksi...");
     try {
-      const body = { status: reflectStatus, text: reflectText };
+      const body = { status: reflectStatus, text: reflectText, date: targetDay.date };
       if (isStructuredQuest && reflectStatus !== "skipped") body.structuredData = { ...structForm };
       await api("/api/reflection", { method: "POST", body });
-      reflectOpen = false; reflectText = ""; structForm = {}; reflectError = "";
+      reflectOpen = false; reflectTarget = null; reflectText = ""; structForm = {}; reflectError = "";
       appState = await api("/api/state");
       renderDashboard();
     } catch (e) {
