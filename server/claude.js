@@ -79,7 +79,7 @@ function normalizeCompletionType(quest) {
 async function generateQuest(ctx) {
   if (!hasKey()) return fallbackQuest(ctx);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective", "structuredKind": "cardio"|"gym"|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective. Quest kualitatif/emosional/sosial → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan).` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective", "structuredKind": "cardio"|"gym"|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective. Quest kualitatif/emosional/sosial → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
     const result = await callClaude(user);
     if (!result?.quest?.title) throw new Error("bad shape");
     normalizeCompletionType(result.quest);
@@ -105,6 +105,59 @@ async function processReflection(ctx) {
   } catch (e) {
     console.error("processReflection failed, using fallback:", e.message);
     return fallbackReflection();
+  }
+}
+
+// Fokus 2.2/2.3: "Target Berikutnya" - after a structured-physical quest is
+// saved, offer 2 genuinely different AI progression directions (a 3rd,
+// free-text option is the user's own manual override, handled entirely
+// client/route-side - this function only ever produces A and B). Reuses the
+// same anti-Goodhart principle as everywhere else numeric: the two options
+// must be real numbers a later quest can be checked against
+// (targets.targetReached), not just a vibe.
+const targets = require("./targets");
+
+function fallbackTargetOptions(ctx) {
+  const { kind, actual } = ctx;
+  if (kind === "cardio") {
+    const pace = actual.durasiMenit / actual.jarakKm;
+    const jarakA = Math.round(actual.jarakKm * 10) / 10;
+    const paceA = Math.round(pace * 0.93 * 100) / 100;
+    const jarakB = Math.round(Math.max(actual.jarakKm + 0.5, actual.jarakKm * 1.2) * 10) / 10;
+    const paceB = Math.round(pace * 1.03 * 100) / 100;
+    return {
+      optionA: { label: targets.formatTargetLabel("cardio", { jarakKm: jarakA, paceMinPerKm: paceA }), approach: "Jarak serupa, tapi coba tempo yang sedikit lebih cepat dari biasanya di setiap sesi.", metrics: { jarakKm: jarakA, paceMinPerKm: paceA } },
+      optionB: { label: targets.formatTargetLabel("cardio", { jarakKm: jarakB, paceMinPerKm: paceB }), approach: "Tempo santai seperti biasa, tapi tambah jarak sedikit demi sedikit tiap minggu.", metrics: { jarakKm: jarakB, paceMinPerKm: paceB } },
+    };
+  }
+  // gym
+  const hasBeban = actual.bebanKg != null;
+  const repA = actual.repetisi + Math.max(1, Math.round(actual.repetisi * (hasBeban ? 0.15 : 0.2)));
+  const metricsA = { set: actual.set, repetisi: repA, ...(hasBeban ? { bebanKg: actual.bebanKg } : {}) };
+  const metricsB = hasBeban
+    ? { set: actual.set, repetisi: actual.repetisi, bebanKg: Math.round((actual.bebanKg + Math.max(2.5, actual.bebanKg * 0.1)) * 2) / 2 }
+    : { set: actual.set + 1, repetisi: actual.repetisi };
+  return {
+    optionA: { label: targets.formatTargetLabel("gym", metricsA), approach: hasBeban ? "Beban sama, tambah repetisi tiap set secara bertahap." : "Tambah repetisi tiap set secara bertahap.", metrics: metricsA },
+    optionB: { label: targets.formatTargetLabel("gym", metricsB), approach: hasBeban ? "Repetisi sama, naikkan beban sedikit demi sedikit." : "Repetisi sama, tambah satu set lagi.", metrics: metricsB },
+  };
+}
+
+async function generateTargetOptions(ctx) {
+  if (!hasKey()) return fallbackTargetOptions(ctx);
+  try {
+    const user = `Konteks (JSON):\n${JSON.stringify(ctx)}\n\nPengguna baru saja menyelesaikan quest fisik untuk goal "${ctx.goalText}" dengan angka: ${JSON.stringify(ctx.actual)}. Buatkan 2 opsi "target berikutnya" untuk goal ini - dua ARAH progresi yang BENAR-BENAR BEDA (bukan dua variasi mirip), dihitung dari angka hari ini. Balas JSON persis:\n{"optionA": {"label": string, "approach": string, "metrics": ${ctx.kind === "cardio" ? '{"jarakKm": number, "paceMinPerKm": number}' : '{"set": number, "repetisi": number, "bebanKg": number|null}'}}, "optionB": {sama seperti optionA}}\n\nContoh arah berbeda untuk cardio: opsi A "kejar kecepatan" (jarak serupa, pace lebih cepat), opsi B "kejar jarak" (pace serupa/sedikit lebih santai, jarak nambah). Untuk gym: opsi A tambah repetisi, opsi B tambah beban (atau tambah set kalau bodyweight). "label" singkat format angka (mis. "3km @ 5:50/km" atau "4×15 @ 22kg"). "approach" 1 kalimat pendekatan/latihan buat nyampe ke situ, bukan cuma angka kosong. metrics harus angka nyata yang bisa dibandingkan ke hasil quest berikutnya, jangan dikosongkan.`;
+    const result = await callClaude(user);
+    const a = targets.cleanTargetMetrics(ctx.kind, result?.optionA?.metrics);
+    const b = targets.cleanTargetMetrics(ctx.kind, result?.optionB?.metrics);
+    if (!a || !b || !result.optionA.label || !result.optionB.label) throw new Error("bad shape");
+    return {
+      optionA: { label: String(result.optionA.label).slice(0, 80), approach: String(result.optionA.approach || "").slice(0, 300), metrics: a },
+      optionB: { label: String(result.optionB.label).slice(0, 80), approach: String(result.optionB.approach || "").slice(0, 300), metrics: b },
+    };
+  } catch (e) {
+    console.error("generateTargetOptions failed, using fallback:", e.message);
+    return fallbackTargetOptions(ctx);
   }
 }
 
@@ -427,4 +480,5 @@ function fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks) {
 module.exports = {
   generateQuest, processReflection, hasKey,
   generateScenarioCard, generateChapterAnalysis,
+  generateTargetOptions,
 };

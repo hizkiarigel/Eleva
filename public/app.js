@@ -366,6 +366,11 @@ let reflectError = "";
 // Set right after a successful submit, cleared once the user dismisses the
 // brief "here's what happened" acknowledgment - see completedResultCardHTML.
 let completedResult = null;
+// Fokus 2.2/2.3: "Target Berikutnya" picker state, live only while
+// completedResult.target is present (mode "options") - reset alongside it.
+let targetChoice = null; // null | "A" | "B" | "manual"
+let targetManualForm = {}; // cardio: {jarakKm, durasiMenit} - gym: {set, repetisi, bebanKg}
+let targetError = "";
 let resetArmed = false;
 let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
@@ -1213,6 +1218,58 @@ function questSummaryCard(q, goalLabel) {
     </div>`;
 }
 
+// Fokus 2.2/2.3: manual override ("Opsi C") fields for the target picker -
+// same numbers the auto-computed pace display already teaches the user to
+// think in (durasi+jarak, not raw pace), so the target-setting mental model
+// matches the record-entry mental model instead of introducing a new one.
+function targetManualFormHTML(kind) {
+  const tf = (k) => esc(targetManualForm[k] ?? "");
+  if (kind === "cardio") {
+    return `
+      <div class="struct-grid">
+        <div class="field"><label>Jarak target (km)</label><input type="number" min="0.1" step="0.1" data-tf="jarakKm" value="${tf("jarakKm")}" placeholder="5" /></div>
+        <div class="field"><label>Durasi target (menit)</label><input type="number" min="1" data-tf="durasiMenit" value="${tf("durasiMenit")}" placeholder="28" /></div>
+      </div>`;
+  }
+  return `
+    <div class="struct-grid">
+      <div class="field"><label>Set</label><input type="number" min="1" data-tf="set" value="${tf("set")}" placeholder="4" /></div>
+      <div class="field"><label>Repetisi</label><input type="number" min="1" data-tf="repetisi" value="${tf("repetisi")}" placeholder="15" /></div>
+    </div>
+    <div class="field"><label>Beban (kg) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.5" data-tf="bebanKg" value="${tf("bebanKg")}" placeholder="22" /></div>`;
+}
+
+// Reuses the Pathway-carousel visual pattern (.pathway-carousel/.pathway-card)
+// per the founder spec - same "2 AI directions + 1 manual override" shape as
+// picking a Pathway at onboarding. Only rendered in "options" mode (no target
+// yet, or the existing one was just reached/exceeded); "progress" mode is a
+// quiet one-liner instead, deliberately NOT re-asking every single quest.
+function targetPickerHTML(t) {
+  if (!t) return "";
+  if (t.mode === "progress") {
+    return `<p class="mono" style="font-size:12.5px;color:var(--muted);margin:16px 0 0">Target: ${esc(t.currentTarget.label)} — masih menuju ke sana.</p>`;
+  }
+  const opts = [["A", t.options.optionA], ["B", t.options.optionB]];
+  return `
+    <div style="margin-top:20px">
+      <div class="eyebrow mono" style="margin:0 0 10px">${t.reached ? "TARGET TERCAPAI — TARGET BERIKUTNYA" : "TARGET BERIKUTNYA"}</div>
+      <div class="pathway-carousel">
+        ${opts.map(([key, o]) => `
+          <div class="pathway-card ${targetChoice === key ? "selected" : ""}" data-tkey="${key}">
+            <div class="qlabel mono">OPSI ${key}</div>
+            <h2 class="fr" style="font-size:19px">${esc(o.label)}</h2>
+            <p class="why">${esc(o.approach)}</p>
+          </div>`).join("")}
+        <div class="pathway-card ${targetChoice === "manual" ? "selected" : ""}" data-tkey="manual">
+          <div class="qlabel mono">TULIS SENDIRI</div>
+          ${targetChoice === "manual" ? targetManualFormHTML(t.kind) : `<p class="why">Udah tahu persis target-mu? Tap buat isi sendiri.</p>`}
+        </div>
+      </div>
+      ${targetError ? `<p style="color:var(--rust);font-size:13px;margin:10px 0 0">${esc(targetError)}</p>` : ""}
+      ${targetChoice ? `<button class="btn-primary full" id="saveTarget" style="margin-top:14px">Simpan target</button>` : ""}
+    </div>`;
+}
+
 // Brief acknowledgment shown right after a submit, before the dashboard
 // refreshes - the per-goal model regenerates that goal's next quest the
 // instant this one is marked done (no more "linger a day" grace period a
@@ -1229,7 +1286,8 @@ function completedResultCardHTML(r) {
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
       <p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>
       ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
-      <button class="btn-primary full" id="dismissCompleted">Lanjut</button>
+      ${targetPickerHTML(r.target)}
+      <button class="btn-primary full" id="dismissCompleted" style="margin-top:18px">Lanjut</button>
     </div>`;
 }
 
@@ -1417,9 +1475,62 @@ function renderDashboard() {
   }));
   document.getElementById("dismissCompleted")?.addEventListener("click", async () => {
     completedResult = null;
+    targetChoice = null; targetManualForm = {}; targetError = "";
     root.innerHTML = spinnerHTML("Memuat quest berikutnya...");
     appState = await api("/api/state");
     renderDashboard();
+  });
+  // Fokus 2.2/2.3: target picker - same pathway-carousel click pattern as
+  // onboarding (tap a card to select it), plus a manual-entry variant whose
+  // numbers get validated/derived the same way the record form's numbers do.
+  document.querySelectorAll("[data-tkey]").forEach((card) => card.addEventListener("click", () => {
+    targetChoice = card.dataset.tkey;
+    targetError = "";
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-tf]").forEach((el) => el.addEventListener("input", (e) => {
+    targetManualForm[el.dataset.tf] = e.target.value;
+  }));
+  document.getElementById("saveTarget")?.addEventListener("click", async () => {
+    const t = completedResult?.target;
+    if (!t || !targetChoice) return;
+    let payload;
+    if (targetChoice === "manual") {
+      if (t.kind === "cardio") {
+        const jarakKm = Number(targetManualForm.jarakKm);
+        const durasiMenit = Number(targetManualForm.durasiMenit);
+        if (!jarakKm || jarakKm <= 0 || !durasiMenit || durasiMenit <= 0) {
+          targetError = "Isi jarak dan durasi target dulu, keduanya lebih dari 0.";
+          renderDashboard();
+          return;
+        }
+        payload = { kind: "cardio", metrics: { jarakKm, paceMinPerKm: durasiMenit / jarakKm } };
+      } else {
+        const set = Number(targetManualForm.set);
+        const repetisi = Number(targetManualForm.repetisi);
+        const bebanKg = targetManualForm.bebanKg === "" || targetManualForm.bebanKg == null ? null : Number(targetManualForm.bebanKg);
+        if (!set || set <= 0 || !repetisi || repetisi <= 0) {
+          targetError = "Isi set dan repetisi target dulu, keduanya lebih dari 0.";
+          renderDashboard();
+          return;
+        }
+        payload = { kind: "gym", metrics: { set, repetisi, ...(bebanKg != null ? { bebanKg } : {}) } };
+      }
+      // label/approach omitted - server derives a label from metrics
+      // (targets.formatTargetLabel) when none is sent.
+    } else {
+      const opt = targetChoice === "A" ? t.options.optionA : t.options.optionB;
+      payload = { kind: t.kind, label: opt.label, approach: opt.approach, metrics: opt.metrics };
+    }
+    try {
+      await api("/api/goal-target", { method: "POST", body: { goalIndex: completedResult.goalIndex, source: targetChoice, ...payload } });
+      completedResult.target = null;
+      targetChoice = null; targetManualForm = {}; targetError = "";
+      renderDashboard();
+    } catch (e) {
+      targetError = e.message;
+      renderDashboard();
+    }
   });
   document.querySelectorAll("[data-skind]").forEach((b) => b.addEventListener("click", () => { structKind = b.dataset.skind; reflectError = ""; renderDashboard(); }));
   document.getElementById("toggleRecord")?.addEventListener("click", () => { recordMode = !recordMode; structKind = null; reflectError = ""; renderDashboard(); });
@@ -1471,11 +1582,13 @@ function renderDashboard() {
       // immediately (which could otherwise swap this card out from under
       // them before they ever read it).
       completedResult = {
-        questTitle: targetDay.quest.title, status: reflectStatus,
+        questTitle: targetDay.quest.title, status: reflectStatus, goalIndex: targetDay.goalIndex,
         mentorReply: resp.mentorReply, deltas: resp.deltas, structuredData: resp.structuredData,
+        target: resp.targetScreen || null,
       };
       reflectOpen = false; reflectTarget = null; reflectText = ""; structForm = {}; reflectError = "";
       recordMode = false; structKind = null;
+      targetChoice = null; targetManualForm = {}; targetError = "";
       renderDashboard();
     } catch (e) {
       // Validation errors (implausible numbers, missing fields) come back as

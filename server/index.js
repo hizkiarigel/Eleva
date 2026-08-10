@@ -7,6 +7,7 @@ const auth = require("./auth");
 const ai = require("./claude");
 const safety = require("./safety");
 const structured = require("./structured");
+const targets = require("./targets");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -152,6 +153,11 @@ app.get("/api/state", requireAuth, async (req, res) => {
           // stays the constant HOW). activeGoal = the one THIS quest targets.
           goals: goals.length ? goals : undefined,
           activeGoal: goalIndex != null ? goals[goalIndex] : undefined,
+          // Fokus 2.2/2.3: once a goal has a persistent target, its next
+          // quest is a step TOWARD that target, not a fresh assumption it's
+          // already met - generateQuest's prompt references this instead of
+          // treating every quest as a clean slate.
+          currentTarget: goalIndex != null ? state.goalTargets?.[String(goalIndex)] : undefined,
           stats: state.stats,
           chapterNumber: state.chapterNumber,
           chapterTitle: state.chapterTitle,
@@ -188,6 +194,7 @@ app.get("/api/state", requireAuth, async (req, res) => {
       pathwayNoun: fresh.pathwayNoun,
       pathwayStatus: fresh.pathwayStatus,
       goals: fresh.goals,
+      goalTargets: fresh.goalTargets,
       openQuests,
       history: await db.allHistory(req.userId, 8),
       aiActive: ai.hasKey(),
@@ -314,6 +321,8 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     let mentorReply;
     let chapterAdvance = false;
     let newChapterTitle = null;
+    // Shared with the "Target Berikutnya" baseline below - one query, not two.
+    const recentGoalDays = structuredClean ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined;
 
     if (inCrisis) {
       // Defense in depth: skip the AI mentor entirely and reply with a fixed
@@ -335,7 +344,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
         // Recent days give the AI the progressive baseline ("last time 15
         // reps") for its mentorReply on structured quests - scoped to this
         // SAME goal, so a different goal's numbers never bleed into it.
-        recentDays: structuredClean ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined,
+        recentDays: recentGoalDays,
         stats: state.stats,
         growthSessions: state.growthSessions,
       };
@@ -378,14 +387,69 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       pathwayNoun: state.pathwayNoun,
     });
 
+    // Fokus 2.2/2.3: "Target Berikutnya" - only for structured-physical
+    // completions tied to an actual goal (targets are a per-goal concept,
+    // legacy ungoaled quests don't get one), and only when there's actually
+    // a comparable number to target (targets.canTarget - e.g. a distance
+    // activity with no jarakKm has no pace to aim for). Shown either as a
+    // fresh A/B/C pick (no target yet, or the existing one was just reached/
+    // exceeded) or as a quiet progress line toward the target already in
+    // flight - never both, and never on every single quest once a target is
+    // active (that's the exact ambiguity the founder's spec calls out).
+    let targetScreen = null;
+    if (structuredClean && day.goalIndex != null && !inCrisis && targets.canTarget(structuredClean.kind, structuredClean)) {
+      const kind = structuredClean.kind;
+      const existing = state.goalTargets?.[String(day.goalIndex)] || null;
+      const reached = existing ? targets.targetReached(kind, existing.metrics, structuredClean) : false;
+      if (!existing || reached) {
+        const options = await ai.generateTargetOptions({
+          kind, goalText: state.goals[day.goalIndex], actual: structuredClean,
+          recentDays: recentGoalDays, pathway: state.pathway,
+        });
+        targetScreen = { mode: "options", reached: Boolean(existing && reached), kind, options };
+      } else {
+        targetScreen = { mode: "progress", kind, currentTarget: existing };
+      }
+    }
+
     // Client holds this in a "completedResult" acknowledgment card before
     // swapping to the next quest - under the per-goal model a completed
     // goal is instantly eligible for a new quest, so without this the
     // mentor's reply/deltas would flash away before the user could read them.
-    res.json({ ok: true, status, mentorReply, deltas, structuredData: structuredClean || undefined });
+    res.json({ ok: true, status, mentorReply, deltas, structuredData: structuredClean || undefined, targetScreen });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan refleksi." });
+  }
+});
+
+// Fokus 2.2/2.3: persist the user's pick from the "Target Berikutnya"
+// screen (option A/B as generated, or "manual" as free-entered numbers -
+// same validation either way, source is just a label for where it came
+// from). Overwrites whatever target the goal had before, if any - by the
+// time this is callable the client only shows the screen when the old
+// target (if any) was already reached/exceeded, see POST /api/reflection.
+app.post("/api/goal-target", requireAuth, async (req, res) => {
+  try {
+    const { goalIndex, source, label, approach, kind } = req.body;
+    const state = await db.getState(req.userId);
+    const gi = Number(goalIndex);
+    if (!state || !Number.isInteger(gi) || gi < 0 || gi >= (state.goals || []).length) {
+      return res.status(400).json({ error: "Goal tidak ditemukan." });
+    }
+    const metrics = targets.cleanTargetMetrics(kind, req.body.metrics);
+    if (!metrics) return res.status(400).json({ error: "Angka target tidak valid — cek lagi." });
+    const target = {
+      kind, label: String(label || targets.formatTargetLabel(kind, metrics)).slice(0, 80),
+      approach: String(approach || "").slice(0, 300),
+      metrics, source: ["A", "B", "manual"].includes(source) ? source : "manual",
+      createdAt: new Date().toISOString(),
+    };
+    await db.setGoalTarget(req.userId, gi, target);
+    res.json({ ok: true, target });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan target." });
   }
 });
 

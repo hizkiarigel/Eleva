@@ -447,3 +447,29 @@ Dari `UPDATE_PROMPT.pdf` founder (10 Agustus), prioritas tertinggi sesi ini, dil
 - [x] Submit quest yang sama dua kali (id sudah punya refleksi) ditolak 400
 - [x] Riwayat bertambah tepat 1 entri per refleksi tersimpan
 - [x] UI: carousel render 3 kartu dengan label goal berbeda-beda, submit → kartu "Lanjut" tampil `mentorReply`, dismiss → carousel 3 kartu lagi (termasuk quest baru goal yang baru selesai)
+
+## 15. Task 10 — Fokus 2.1 & 2.2/2.3: Pace otomatis + "Target Berikutnya" (SELESAI)
+
+Dari `UPDATE_PROMPT.pdf` founder (10 Agustus), Fokus 2 — dua sub-item dikerjakan bersamaan karena saling terkait (keduanya di area form record cardio/gym).
+
+**2.1 — Pace (min/km) otomatis**: murni tampilan turunan di bawah field Durasi+Jarak form cardio, dihitung `Durasi ÷ Jarak` (`paceLabel`, `public/app.js`) — BUKAN kolom input baru, tidak ada skema tambahan. Ditulis langsung ke DOM tiap keystroke (pola sama seperti hitungan kata refleksi), bukan lewat re-render penuh, supaya fokus input tidak hilang saat mengetik.
+
+**2.2/2.3 — "Target Berikutnya" (revisi jadi 3 opsi A/B/C)**: setelah quest fisik tersimpan (structured-physical, ada angka yang bisa ditarget — `targets.canTarget`, server/targets.js modul baru), layar hasil (kartu `completedResult` yang sama dengan Fokus 1) menampilkan ringkasan angka dulu, baru picker "Target Berikutnya" di bawahnya — reuse `.pathway-carousel`/`.pathway-card` yang sama persis dengan carousel Pathway onboarding, sesuai instruksi eksplisit founder ("pakai ulang pola yang sama dengan Pathway carousel").
+
+- **Opsi A & B**: dua ARAH progresi AI yang benar-benar beda (`generateTargetOptions`, server/claude.js) — cardio: A "kejar kecepatan" (jarak serupa, pace lebih cepat), B "kejar jarak" (pace serupa, jarak nambah); gym: A tambah repetisi, B tambah beban (atau tambah set untuk bodyweight). Fallback tanpa API key dihitung deterministik dari angka hari ini (bukan placeholder) — hasil ujinya persis mendekati contoh founder di PRD ("3.21km @ 6:13/km" → fallback A "3.2km @ 5:47/km", B "3.9km @ 6:25/km"). Tiap opsi disertai "approach" 1 kalimat pendekatan, bukan cuma angka kosong.
+- **Opsi C**: tulis sendiri, tapi field-nya numerik (durasi+jarak untuk cardio — sama gaya dengan form record, bukan input pace langsung; set/repetisi/beban untuk gym) supaya "tercapai belum" tetap bisa dicek deterministik seperti A/B, bukan cuma label teks bebas. Ini deviasi kecil dari "tulis sendiri" murni (yang secara harfiah berarti teks bebas) — sengaja, karena tanpa angka nyata sistem tidak bisa pernah tahu kapan harus menawarkan target baru lagi.
+- **Target itu ANGKA, bukan cuma label** (`server/targets.js`): tiap target tersimpan sebagai `metrics` numerik (`{jarakKm, paceMinPerKm}` cardio, `{set, repetisi, bebanKg?}` gym) supaya `targetReached` bisa mengecek DETERMINISTIK di kode (toleransi pace 2% buat pembulatan), bukan tanya AI ulang tiap kali.
+- **Target PERSISTEN per goal** (`character_state.goal_targets JSONB`, keyed goalIndex — kolom baru, `db.setGoalTarget` merge tanpa menimpa goal lain): quest berikutnya untuk goal itu digenerate sebagai LANGKAH MENUJU target (`ctx.currentTarget` masuk prompt `generateQuest`), layar hasil quest berikutnya HANYA tampil progres 1 baris ("Target: 3.2km @ 5:47/km — masih menuju ke sana") — **picker A/B/C TIDAK muncul lagi sampai target tercapai/terlampaui**. Endpoint baru `POST /api/goal-target` menyimpan pilihan; `GET /api/state` ikut balikin `goalTargets`.
+
+**Definition of done:**
+- [x] Pace tampil live saat Durasi+Jarak diisi, hilang lagi kalau salah satu kosong, tidak mengganggu fokus input saat mengetik
+- [x] Layar hasil muncul SETELAH quest disimpan (bukan sebelum) — ringkasan angka dulu, baru 3 opsi
+- [x] Opsi A & B benar-benar beda arah secara numerik (bukan dua angka mirip)
+- [x] Tiap opsi A/B disertai pendekatan/latihan singkat, bukan cuma angka
+- [x] Opsi C (tulis sendiri) berfungsi dan tersimpan sama seperti A/B, termasuk validasi inline kalau kosong
+- [x] Layar A/B/C HANYA muncul saat goal belum punya `current_target` ATAU target lama baru tercapai — TIDAK muncul tiap kali quest selesai kalau target masih dalam proses dikejar
+- [x] Quest untuk goal dengan `current_target` aktif digenerate sebagai langkah menuju target, disertai tampilan progres — bukan asumsi target langsung tercapai
+- [x] Simulasi 3 quest berturut-turut untuk goal yang sama dengan target belum tercapai — target TIDAK berubah/ke-reset di tengah jalan
+- [x] Target yang dipilih muncul sebagai konteks nyata di prompt quest berikutnya untuk goal yang sama
+- [x] Refleksi tetap terpisah, tidak digabung/dihapus
+- [x] Berlaku untuk kedua tipe goal terstruktur (cardio dan gym), bukan cuma lari

@@ -53,6 +53,7 @@ async function init() {
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_snapshot JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_raw JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS goals JSONB;
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS goal_targets JSONB DEFAULT '{}'::jsonb;
   `);
 
   // Per-goal quest model (founder-reported regression: a goal's quest was
@@ -131,6 +132,11 @@ async function getState(userId) {
     // confirmation (the WHAT; pathway is the constant HOW). Array of strings.
     // Pre-v13 accounts have null - callers treat that as [].
     goals: row.goals || [],
+    // Fokus 2.2/2.3: persistent "Target Berikutnya" per goal, keyed by
+    // goalIndex as a string (jsonb object keys are always strings). Empty
+    // object for every account until a target is first picked - never null,
+    // callers index into it directly without an extra guard.
+    goalTargets: row.goal_targets || {},
   };
 }
 
@@ -170,6 +176,16 @@ async function updateState(userId, { stats, chapterNumber, chapterTitle, growthS
     `UPDATE character_state SET stats = $2, chapter_number = $3, chapter_title = $4, growth_sessions = $5, pathway_noun = $6
      WHERE user_id = $1`,
     [userId, stats, chapterNumber, chapterTitle, growthSessions, pathwayNoun || null]
+  );
+}
+
+// Fokus 2.2/2.3: sets (or replaces) the persistent target for one goal.
+// jsonb_build_object + `||` merge so this never clobbers other goals'
+// targets already stored in the same column.
+async function setGoalTarget(userId, goalIndex, target) {
+  await pool.query(
+    `UPDATE character_state SET goal_targets = COALESCE(goal_targets, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb) WHERE user_id = $1`,
+    [userId, String(goalIndex), JSON.stringify(target)]
   );
 }
 
@@ -267,6 +283,6 @@ async function allHistory(userId, limit = 8) {
 module.exports = {
   DEFAULT_STATS, init,
   createUser, getUserByEmail, getUserById,
-  getState, createState, updateState, activatePathway, resetUser,
+  getState, createState, updateState, setGoalTarget, activatePathway, resetUser,
   getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
 };
