@@ -81,6 +81,25 @@ const HELP_TEXT = {
   goals: "Tulis 1-3 hal yang mau kamu capai selama 14 hari ke depan — boleh dari area mana pun (badan, belajar, kerjaan, relasi). Tugas harianmu nanti diarahkan ke sini, gantian tiap harinya.",
   dashboard: "Quest hari ini dari Eleva, disesuaikan sama fokusmu. Kerjakan, lalu tap Mulai — aktivitas fisik dicatat sebagai record singkat (pilih jenisnya: cardio atau gym), sisanya lewat refleksi teks.",
 };
+// Founder feedback (10 Agustus, live screenshot dari layar radar): "orang
+// awam" nggak otomatis tahu apa arti nama sumbu ini secara istilah - butuh
+// keterangan konkret per elemen, bukan cuma nama. Teks persis dari founder,
+// dipasang di sheet bantuan yang sudah ada (radar + dashboard - dua-duanya
+// menampilkan ketujuh nama sumbu/stat yang sama) daripada menumpuk teks di
+// chart itu sendiri, yang sudah padat dengan titik+angka+garis.
+const AXIS_DEFINITIONS = {
+  body: "Kondisi fisik dan energi harianmu (tidur, olahraga, stamina).",
+  growth: "Seberapa aktif kamu belajar dan berkembang (skill baru, wawasan, rasa ingin tahu).",
+  livelihood: "Arah karier dan kestabilan keuanganmu (pekerjaan, penghasilan, tabungan).",
+  emotional: "Seberapa tenang kamu menghadapi tekanan (kontrol emosi, ketenangan, daya tahan).",
+  social: "Kualitas hubunganmu dengan orang lain (teman, keluarga, koneksi berarti).",
+  purpose: "Seberapa jelas alasan di balik yang kamu jalani (makna, arah hidup, tujuan).",
+  autonomy: "Seberapa besar hidupmu dijalani dengan caramu sendiri (kebebasan, kemandirian, kontrol atas keputusan).",
+};
+function axisDefinitionsHTML() {
+  return `<div class="axis-defs">${STAT_ORDER.map(([k, label]) => `
+    <div class="axis-def"><span class="axis-def-name">${esc(label)}</span><span class="axis-def-text">${esc(AXIS_DEFINITIONS[k] || "")}</span></div>`).join("")}</div>`;
+}
 let helpOpen = null; // screen key whose help sheet is showing, or null
 function helpBtnHTML(key) {
   return `<button class="help-btn" data-help="${key}" aria-label="Bantuan layar ini">?</button>`;
@@ -91,6 +110,7 @@ function helpSheetHTML(key) {
     <div class="help-overlay" id="helpOverlay">
       <div class="help-sheet fadeUp">
         <p>${esc(HELP_TEXT[key] || "")}</p>
+        ${key === "radar" || key === "dashboard" ? axisDefinitionsHTML() : ""}
         <button class="btn-primary full" id="closeHelp">Oke, ngerti</button>
       </div>
     </div>`;
