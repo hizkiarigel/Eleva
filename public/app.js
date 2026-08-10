@@ -1170,6 +1170,20 @@ function renderAdaptive() {
 // Compact one-line summary of a day's structured completion data - shown on
 // the finished quest card and in history, so the numbers stay visible as the
 // progressive baseline they are.
+// Fokus 2.1: pace (min/km) is pure display, derived live from Durasi+Jarak
+// as the user types - not a field of its own, nothing new to fill in or
+// validate, matches what a device like Strava would show while running.
+function paceLabel(durasiMenit, jarakKm) {
+  const dur = Number(durasiMenit), jarak = Number(jarakKm);
+  if (!dur || !jarak || dur <= 0 || jarak <= 0) return null;
+  const paceMin = dur / jarak;
+  const m = Math.floor(paceMin);
+  const s = Math.round((paceMin - m) * 60);
+  const mm = s === 60 ? m + 1 : m;
+  const ss = s === 60 ? 0 : s;
+  return `${mm}:${String(ss).padStart(2, "0")} /km`;
+}
+
 function structSummary(sd) {
   if (!sd) return "";
   if (sd.kind === "gym") {
@@ -1278,6 +1292,7 @@ function renderDashboard() {
         <div class="field"><label>Durasi (menit)</label><input type="number" min="1" data-sf="durasiMenit" value="${sf("durasiMenit")}" placeholder="30" /></div>
         <div class="field"><label>Jarak (km) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.1" data-sf="jarakKm" value="${sf("jarakKm")}" placeholder="5" /></div>
       </div>
+      <p class="mono" id="paceDisplay" style="font-size:12px;color:var(--muted);margin:-8px 0 14px">${(() => { const p = paceLabel(structForm.durasiMenit, structForm.jarakKm); return p ? `Pace: ${p}` : ""; })()}</p>
       <div class="struct-grid">
         <div class="field"><label>Tingkat usaha (RPE 1-10)</label>${rpeSelectHTML}</div>
         <div class="field"><label>Titik mulai berat</label><input type="text" data-sf="titikBerat" maxlength="200" value="${sf("titikBerat")}" placeholder="mis. menit ke-12, atau tengah" /></div>
@@ -1424,8 +1439,17 @@ function renderDashboard() {
     el.addEventListener(evt, (e) => {
       structForm[el.dataset.sf] = e.target.value;
       // Only the "Lainnya" toggle needs a re-render (it adds/removes a field);
-      // plain typing must NOT re-render or the input would lose focus.
+      // plain typing must NOT re-render or the input would lose focus. Pace
+      // is a derived read of the same two fields, so it updates the same
+      // way word count does - write straight to the DOM, no render.
       if (el.dataset.sf === "jenisAktivitas") renderDashboard();
+      if (el.dataset.sf === "durasiMenit" || el.dataset.sf === "jarakKm") {
+        const paceEl = document.getElementById("paceDisplay");
+        if (paceEl) {
+          const p = paceLabel(structForm.durasiMenit, structForm.jarakKm);
+          paceEl.textContent = p ? `Pace: ${p}` : "";
+        }
+      }
     });
   });
   document.getElementById("submitReflect")?.addEventListener("click", async () => {
