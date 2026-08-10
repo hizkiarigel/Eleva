@@ -1284,10 +1284,10 @@ function renderDashboard() {
       <div style="margin-bottom:28px">
         <div class="eyebrow mono">RIWAYAT</div>
         ${s.history.map((d) => `
-          <div class="history-item ${d.reflection ? "done" : ""}">
+          <div class="history-item ${d.reflection ? "done" : "missed"}">
             <div class="date mono">${d.date}</div>
             <div class="title">${esc(d.quest?.title || "")}</div>
-            ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : d.reflection?.structuredData ? `<div class="snippet mono">${esc(structSummary(d.reflection.structuredData))}</div>` : ""}
+            ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : d.reflection?.structuredData ? `<div class="snippet mono">${esc(structSummary(d.reflection.structuredData))}</div>` : `<div class="snippet missed-tag">Terlewat — belum dikerjakan</div>`}
           </div>`).join("")}
       </div>` : ""}
       <div class="footer-bar">

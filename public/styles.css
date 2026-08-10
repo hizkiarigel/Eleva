@@ -95,9 +95,11 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 
 .history-item { border-left: 2px solid var(--hair); padding-left: 12px; margin-bottom: 10px; }
 .history-item.done { border-left-color: var(--growth); }
+.history-item.missed { border-left-color: var(--rust); opacity: .72; }
 .history-item .date { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); }
 .history-item .title { font-size: 13.5px; }
 .history-item .snippet { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.history-item .snippet.missed-tag { color: var(--rust); font-style: italic; }
 
 .deltas { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
 .delta-chip { font-family: "IBM Plex Mono", monospace; font-size: 11px; background: #7fa98f22; color: var(--growth); padding: 3px 8px; border-radius: 20px; }
