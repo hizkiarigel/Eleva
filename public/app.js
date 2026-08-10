@@ -1224,7 +1224,7 @@ function questSummaryCard(q, goalLabel) {
   return `
     <div class="quest-card">
       <div class="dot pending"></div>
-      <div class="qlabel mono">${label}${goalLabel ? ` · ${esc(goalLabel)}` : ""}</div>
+      <div class="qlabel mono">${label}${goalLabel ? ` · ${esc(goalLabel)}` : ""}${q.quest.statFocus ? ` · ${esc(statLabel(q.quest.statFocus))}` : ""}</div>
       <h2 class="fr">${esc(q.quest.title)}</h2>
       <p class="desc">${esc(q.quest.description)}</p>
       <p class="why">${esc(q.quest.why)}</p>
@@ -1486,14 +1486,23 @@ function renderDashboard() {
     </div>`;
 
   // recordMode starts on for AI-tagged physical quests (record required
-  // server-side), off otherwise; structKind always starts unpicked - the
-  // user declares what they actually did each time, never inherited.
+  // server-side, mustRecord) - also defaulted on for untagged Body-focus
+  // quests (founder feedback 10 Agustus, live screenshot: a quest whose
+  // description explicitly asked for reps/jarak/titik-menyerah still opened
+  // into the reflection box, record picker hidden behind a secondary tap -
+  // the AI's completionType tag isn't perfectly reliable, statFocus is a
+  // cheap deterministic backstop for the same "this is obviously physical"
+  // signal). NOT folded into mustRecord itself - this is a smarter DEFAULT,
+  // not a requirement, so the "← Balik ke refleksi teks aja" toggle still
+  // renders and can back out of it if the guess is wrong for a given quest.
+  // structKind always starts unpicked - the user declares what they
+  // actually did each time, never inherited.
   document.querySelectorAll("[data-reflect-id]").forEach((b) => b.addEventListener("click", () => {
     const id = Number(b.dataset.reflectId);
     const quest = openQuests.find((q) => q.id === id)?.quest;
     reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
     structForm = {}; reflectError = "";
-    recordMode = quest?.completionType === "structured-physical";
+    recordMode = quest?.completionType === "structured-physical" || quest?.statFocus === "body";
     structKind = null;
     renderDashboard();
   }));
