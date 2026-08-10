@@ -1243,6 +1243,36 @@ function renderDashboard() {
       <button class="btn-primary full" id="submitReflect">${showStructFields ? "Simpan data & selesaikan quest" : "Simpan refleksi"}</button>
     </div>` : "";
 
+  // Missed days should stay reachable from the main quest-card area, not
+  // just noted in Riwayat below - founder feedback: seeing "terlewat" only
+  // in history read as buried/passive. Read-only (no retroactive
+  // completion - that's a bigger call about growth-gate integrity than
+  // "let me see what I missed"), reachable by swiping past today's card.
+  // s.history is already DESC by date, so missed entries come out most-
+  // recent-first, continuing naturally backward from today.
+  const missedRecent = (s.history || []).filter((d) => !d.reflection);
+  const todayCardHTML = `
+    <div class="quest-card">
+      <div class="dot ${hasReflection ? "done" : "pending"}"></div>
+      ${questInner}
+    </div>`;
+  const missedCardHTML = (d) => `
+    <div class="quest-card missed-card">
+      <div class="qlabel mono">TERLEWAT · ${d.date}</div>
+      <h2 class="fr">${esc(d.quest?.title || "")}</h2>
+      <p class="desc">${esc(d.quest?.description || "")}</p>
+      <p class="missed-note">Hari ini sudah lewat, nggak bisa direfleksikan lagi — tercatat apa adanya.</p>
+    </div>`;
+  // Collapses to the plain single card while actively reflecting (or when
+  // there's nothing missed) so typing a reflection never fights a
+  // horizontal swipe for the same touch gesture.
+  const questSectionHTML = (!reflectOpen && missedRecent.length) ? `
+    <div class="quest-carousel">
+      ${todayCardHTML}
+      ${missedRecent.map(missedCardHTML).join("")}
+    </div>
+    <div class="eyebrow mono swipe-hint">← geser untuk lihat ${missedRecent.length} quest yang terlewat</div>` : todayCardHTML;
+
   root.innerHTML = `
     <div class="shell">
       ${helpBtnHTML("dashboard")}${helpSheetHTML("dashboard")}
@@ -1258,10 +1288,7 @@ function renderDashboard() {
         ${s.pathwayNoun ? `<div class="pathway-badge mono">${esc(maturityTier(s.growthSessions))} ${esc(s.pathwayNoun)}${s.pathwayStatus === "trial" ? ` <span class="trial-tag">(hipotesis — First Trial)</span>` : ""}</div>` : ""}
         ${today?.insight ? `<p class="insight fr">${esc(today.insight)}</p>` : ""}
       </div>
-      <div class="quest-card">
-        <div class="dot ${hasReflection ? "done" : "pending"}"></div>
-        ${questInner}
-      </div>
+      ${questSectionHTML}
       ${reflectFormHTML}
       <div style="margin-bottom:28px">
         <div class="eyebrow mono">CHARACTER STATS</div>
