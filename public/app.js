@@ -1158,6 +1158,45 @@ function structSummary(sd) {
   return `${jenis} · ${sd.durasiMenit} menit${sd.jarakKm != null ? ` · ${sd.jarakKm} km` : ""} · RPE ${sd.rpe} · berat di ${sd.titikBerat}`;
 }
 
+let countdownTimer = null;
+
+function formatCountdown(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+  const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+  const sec = String(totalSec % 60).padStart(2, "0");
+  return `${h}:${m}:${sec}`;
+}
+
+// Ticks the quest card's 24h countdown by writing straight to the DOM node
+// (never calling renderDashboard() from the tick itself) so a reflection
+// draft mid-typing elsewhere on the page is never disturbed by this timer.
+// Reads the absolute expiresAt on every tick rather than counting down a
+// local duration, so re-renders triggered by something else (a status-
+// button click, etc.) can restart this and stay perfectly in sync instead
+// of drifting. When it actually hits zero, today's quest has expired
+// server-side too - refetch so the app picks up whatever quest is next.
+function startCountdown(expiresAtISO) {
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+  if (!expiresAtISO) return;
+  const expiresAt = new Date(expiresAtISO).getTime();
+  const tick = () => {
+    const el = document.getElementById("questCountdown");
+    if (!el) { clearInterval(countdownTimer); countdownTimer = null; return; }
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+      boot();
+      return;
+    }
+    el.textContent = formatCountdown(remaining);
+    document.getElementById("questCountdownRow")?.classList.toggle("urgent", remaining < 60 * 60 * 1000);
+  };
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
+
 function renderDashboard() {
   const s = appState;
   const today = s.today;
@@ -1168,7 +1207,9 @@ function renderDashboard() {
     <h2 class="fr">${esc(today.quest.title)}</h2>
     <p class="desc">${esc(today.quest.description)}</p>
     <p class="why">${esc(today.quest.why)}</p>
-    ${!hasReflection ? `<button class="btn-primary" id="openReflect">Tandai & refleksi</button>` : `
+    ${!hasReflection ? `
+      ${today.expiresAt ? `<div class="mono countdown" id="questCountdownRow">⏳ <span id="questCountdown">--:--:--</span> tersisa</div>` : ""}
+      <button class="btn-primary" id="openReflect">Tandai & refleksi</button>` : `
       <div style="border-top:1px solid var(--hair);padding-top:14px;margin-top:4px">
         <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
           ${today.reflection.status === "done" ? "SELESAI" : today.reflection.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
@@ -1325,6 +1366,7 @@ function renderDashboard() {
       </div>
     </div>`;
 
+  startCountdown(today?.expiresAt);
   document.getElementById("openReflect")?.addEventListener("click", () => { reflectOpen = true; reflectStatus = "done"; reflectText = ""; structForm = {}; reflectError = ""; renderDashboard(); });
   document.querySelectorAll(".status-btn").forEach((b) => b.addEventListener("click", () => { reflectStatus = b.dataset.status; reflectError = ""; renderDashboard(); }));
   const rtxt = document.getElementById("reflectText");

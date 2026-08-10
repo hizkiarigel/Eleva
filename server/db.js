@@ -53,6 +53,7 @@ async function init() {
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_snapshot JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_raw JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS goals JSONB;
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ NOT NULL DEFAULT now();
   `);
 }
 
@@ -158,21 +159,54 @@ async function resetUser(userId) {
 
 // --- days (per user) ---
 
-async function getDay(userId, date) {
-  const { rows } = await pool.query(`SELECT * FROM days WHERE user_id = $1 AND date = $2`, [userId, date]);
+// The user's currently live quest is whichever row was issued most recently
+// - completable for a full rolling 24h from issuance, not "until local
+// midnight" (founder call: a quest issued at 11pm shouldn't evaporate at
+// 00:00 just because the calendar flipped). date DESC is a tiebreaker for
+// legacy rows that all share one issued_at (the moment this column was
+// backfilled) - without it, "most recent" would be ambiguous among them.
+async function getActiveDay(userId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM days WHERE user_id = $1 ORDER BY issued_at DESC, date DESC LIMIT 1`,
+    [userId]
+  );
   const row = rows[0];
   if (!row) return null;
-  return { quest: row.quest, insight: row.insight, reflection: row.reflection };
+  const expiresAt = new Date(row.issued_at.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    date: row.date,
+    quest: row.quest,
+    insight: row.insight,
+    reflection: row.reflection,
+    expiresAt,
+    active: expiresAt.getTime() > Date.now(),
+  };
 }
 
-async function upsertDay(userId, date, { quest, insight, reflection }) {
+// Issues a quest, always with a fresh clock - even on conflict. The
+// (user_id, date) collision path only fires if a stale row's date label
+// happens to match today's (shouldn't happen in real usage: 24h always
+// crosses at least one calendar date, so a regenerated quest is always
+// dated later than whatever it's replacing) - but if it ever did fire
+// without forcing issued_at here, the "new" quest would silently inherit
+// the old expired timestamp, read as already-expired itself, and send
+// getActiveDay's caller straight back into regeneration forever.
+async function createQuest(userId, date, { quest, insight }) {
   await pool.query(
-    `INSERT INTO days (user_id, date, quest, insight, reflection)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO days (user_id, date, quest, insight, reflection, issued_at)
+     VALUES ($1, $2, $3, $4, NULL, now())
      ON CONFLICT (user_id, date) DO UPDATE SET
-       quest = EXCLUDED.quest, insight = EXCLUDED.insight, reflection = EXCLUDED.reflection`,
-    [userId, date, quest, insight, reflection || null]
+       quest = EXCLUDED.quest, insight = EXCLUDED.insight, reflection = NULL, issued_at = now()`,
+    [userId, date, quest, insight]
   );
+}
+
+// Attaches a reflection to an already-issued quest - deliberately leaves
+// issued_at untouched so completing early doesn't reset the 24h window
+// (the next quest still arrives a full rolling day after this one was
+// issued, not a full day after whenever the user happened to finish it).
+async function saveReflection(userId, date, reflection) {
+  await pool.query(`UPDATE days SET reflection = $3 WHERE user_id = $1 AND date = $2`, [userId, date, reflection]);
 }
 
 async function recentDays(userId, excludeDate, limit = 3) {
@@ -209,5 +243,5 @@ module.exports = {
   DEFAULT_STATS, init,
   createUser, getUserByEmail, getUserById,
   getState, createState, updateState, activatePathway, resetUser,
-  getDay, upsertDay, recentDays, allHistory,
+  getActiveDay, createQuest, saveReflection, recentDays, allHistory,
 };

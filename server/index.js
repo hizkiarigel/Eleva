@@ -141,9 +141,12 @@ app.get("/api/state", requireAuth, async (req, res) => {
       }
     }
 
-    const tk = todayKey();
-    let today = await db.getDay(req.userId, tk);
-    if (!today) {
+    // The active quest is keyed by issuance time (rolling 24h), not by
+    // today's calendar date - a quest issued last night is still today's
+    // quest until its own 24h is up, even after midnight has passed.
+    let today = await db.getActiveDay(req.userId);
+    if (!today || !today.active) {
+      const tk = todayKey();
       // One 14-day fetch serves both goal rotation (needs the fuller window
       // to know which goal has waited longest) and the 3-day AI context.
       const recent = await db.recentDays(req.userId, tk, 14);
@@ -180,8 +183,8 @@ app.get("/api/state", requireAuth, async (req, res) => {
         growthSessions: state.growthSessions,
         pathwayNoun: state.pathwayNoun || result.pathwayNoun || null,
       });
-      await db.upsertDay(req.userId, tk, { quest: result.quest, insight: result.insight, reflection: null });
-      today = await db.getDay(req.userId, tk);
+      await db.createQuest(req.userId, tk, { quest: result.quest, insight: result.insight });
+      today = await db.getActiveDay(req.userId);
     }
 
     const fresh = await db.getState(req.userId);
@@ -193,8 +196,8 @@ app.get("/api/state", requireAuth, async (req, res) => {
       growthSessions: fresh.growthSessions,
       pathwayNoun: fresh.pathwayNoun,
       pathwayStatus: fresh.pathwayStatus,
-      today: { date: tk, ...today },
-      history: (await db.allHistory(req.userId, tk)).slice(0, 8),
+      today,
+      history: (await db.allHistory(req.userId, today.date)).slice(0, 8),
       aiActive: ai.hasKey(),
     });
   } catch (e) {
@@ -274,7 +277,7 @@ app.post("/api/profile", requireAuth, async (req, res) => {
       secondaryTrait: secondaryTrait || null,
       goals,
     });
-    await db.upsertDay(req.userId, todayKey(), { quest: result.quest, insight: result.insight, reflection: null });
+    await db.createQuest(req.userId, todayKey(), { quest: result.quest, insight: result.insight });
 
     res.json({ ok: true });
   } catch (e) {
@@ -287,10 +290,14 @@ app.post("/api/profile", requireAuth, async (req, res) => {
 app.post("/api/reflection", requireAuth, async (req, res) => {
   try {
     const { status, text, structuredData } = req.body;
-    const tk = todayKey();
     const state = await db.getState(req.userId);
-    const day = await db.getDay(req.userId, tk);
+    const day = await db.getActiveDay(req.userId);
     if (!state || !day) return res.status(400).json({ error: "Belum ada quest hari ini." });
+    // Server-side enforcement of the same 24h window the client shows as a
+    // countdown - a client can't be trusted to self-block a late submit
+    // right at the buzzer, and an expired quest already has a successor
+    // waiting behind it (getActiveDay would return that one, not this).
+    if (!day.active) return res.status(400).json({ error: "Waktu 24 jam quest ini sudah habis, sudah nggak bisa direfleksikan lagi." });
 
     const trimmedText = (text || "").trim();
     const inCrisis = safety.detectCrisis(trimmedText);
@@ -333,7 +340,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
         structuredData: structuredClean || undefined,
         // Recent days give the AI the progressive baseline ("last time 15
         // reps") for its mentorReply on structured quests.
-        recentDays: structuredClean ? await db.recentDays(req.userId, tk, 7) : undefined,
+        recentDays: structuredClean ? await db.recentDays(req.userId, day.date, 7) : undefined,
         stats: state.stats,
         growthSessions: state.growthSessions,
       };
@@ -367,7 +374,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       mentorReply,
       timestamp: new Date().toISOString(),
     };
-    await db.upsertDay(req.userId, tk, { quest: day.quest, insight: day.insight, reflection });
+    await db.saveReflection(req.userId, day.date, reflection);
     await db.updateState(req.userId, {
       stats: newStats,
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
