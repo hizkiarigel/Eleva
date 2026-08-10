@@ -1218,9 +1218,25 @@ function structSummary(sd) {
 // vs-missed distinction to style differently. goalLabel names which of the
 // user's (up to 3) goals this specific card is working toward - essential
 // once more than one card can be on screen at once.
+// Provisional 24h countdown (founder request, 10 Agustus - explicitly
+// "sementara" while the real next solution gets figured out later): unlike
+// the old rolling-window countdown this fix's Fokus 1 removed, this one
+// NEVER causes the quest to be silently replaced/regenerated - the quest
+// stays exactly where it is, only the "Mulai" button locks out past 24h.
+// A goal whose only open quest locks out this way has no automatic
+// recovery yet (known, accepted gap per the founder's own words).
+function formatCountdown(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 function questSummaryCard(q, goalLabel) {
   if (!q) return `<div class="quest-card"><div class="dot pending"></div>${spinnerHTML("AI sedang menyusun quest...")}</div>`;
   const label = q.quest.mode === "acting" ? "ACTING METHOD" : "QUEST";
+  const remaining = q.createdAt ? new Date(q.createdAt).getTime() + 24 * 60 * 60 * 1000 - Date.now() : null;
+  const expired = remaining != null && remaining <= 0;
   return `
     <div class="quest-card">
       <div class="dot pending"></div>
@@ -1228,8 +1244,37 @@ function questSummaryCard(q, goalLabel) {
       <h2 class="fr">${esc(q.quest.title)}</h2>
       <p class="desc">${esc(q.quest.description)}</p>
       <p class="why">${esc(q.quest.why)}</p>
-      <button class="btn-primary" data-reflect-id="${q.id}">Mulai</button>
+      ${remaining != null ? `<p class="countdown mono${expired ? " urgent" : ""}" data-quest-countdown="${q.id}" data-created="${esc(q.createdAt)}">${expired ? "⏳ Waktu buat mulai quest ini udah lewat 24 jam." : `⏳ ${formatCountdown(remaining)}`}</p>` : ""}
+      <button class="btn-primary" data-reflect-id="${q.id}" ${expired ? "disabled" : ""}>${expired ? "Waktu habis" : "Mulai"}</button>
     </div>`;
+}
+// Single ticker shared across every visible countdown - writes straight to
+// the DOM every second, deliberately NOT through renderDashboard() (same
+// reasoning as the pace/word-count live displays: a full re-render would
+// interrupt a reflection draft being typed elsewhere on the same screen).
+// Re-queries [data-quest-countdown] fresh each tick, so it stays correct
+// across renders without needing to be re-armed.
+let countdownTimer = null;
+function tickCountdowns() {
+  const now = Date.now();
+  document.querySelectorAll("[data-quest-countdown]").forEach((el) => {
+    const created = new Date(el.dataset.created).getTime();
+    const remaining = created + 24 * 60 * 60 * 1000 - now;
+    const btn = document.querySelector(`[data-reflect-id="${el.dataset.questCountdown}"]`);
+    if (remaining <= 0) {
+      el.textContent = "⏳ Waktu buat mulai quest ini udah lewat 24 jam.";
+      el.classList.add("urgent");
+      if (btn && !btn.disabled) { btn.disabled = true; btn.textContent = "Waktu habis"; }
+    } else {
+      el.textContent = `⏳ ${formatCountdown(remaining)}`;
+      el.classList.toggle("urgent", remaining < 60 * 60 * 1000);
+    }
+  });
+}
+function ensureCountdownTicking() {
+  tickCountdowns();
+  if (countdownTimer) return;
+  countdownTimer = setInterval(tickCountdowns, 1000);
 }
 
 // Fokus 2.2/2.3: manual override ("Opsi C") fields for the target picker -
@@ -1657,6 +1702,7 @@ function renderDashboard() {
     resetOnboardState();
     await boot();
   });
+  ensureCountdownTicking();
 }
 
 function render() {

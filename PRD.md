@@ -493,3 +493,18 @@ Dari `UPDATE_PROMPT.pdf` susulan founder (10 Agustus, prioritas tertinggi sesi i
 - [x] Pilih Berat — field detail muncul; submit dengan field itu kosong ditolak inline (bukan crash/silent fail); submit dengan field terisi tersimpan dan tampil di kartu hasil + Riwayat
 - [x] Form gym: RPE hilang, "Titik gagal/berat" tetap teks bebas seperti semula
 - [x] Regresi penuh: carousel per-goal (Fokus 1), pace display (Fokus 2.1), Target Berikutnya A/B/C + manual override (Fokus 2.2/2.3) semua tetap hijau dengan payload yang disesuaikan skema field baru
+
+## 17. Feedback langsung founder dari produksi (10 Agustus, setelah Task 11) — dua item kecil
+
+**1. Record picker tidak auto-terbuka untuk quest Body yang salah tag (SELESAI).** Screenshot produksi: quest "Audit Titik Mula Tubuhmu" (jelas minta angka) masih kebuka ke kotak refleksi dulu — tag AI `completionType` ternyata `reflective`, bukan `structured-physical`, walau isinya jelas fisik/terukur. `recordMode` (`public/app.js`) sekarang default nyala juga kalau `quest.statFocus === "body"`, sebagai lapisan cadangan deterministik di samping tag AI yang terbukti tidak selalu benar — tetap cuma DEFAULT (toggle balik ke refleksi teks tetap tersedia), bukan requirement baru yang memaksa. Sekalian ditambah label stat di kartu quest (`qlabel`, mis. "QUEST · nama goal · Body") sesuai permintaan founder.
+
+**2. Countdown 24 jam diminta balik, TAPI cuma versi visual+lockout (SELESAI, dengan gap yang diketahui).** Diklarifikasi dulu lewat pertanyaan eksplisit (potensi konflik langsung dengan hasil Fokus 1 hari yang sama — countdown lama punya efek FUNGSIONAL yaitu quest diam-diam diganti, persis regresi yang baru diperbaiki): founder menjawab mau versi baru yang beda — tombol "Mulai" jadi disabled/hilang begitu lewat 24 jam, TAPI quest-nya sendiri TIDAK diganti/dihilangkan (invariant Fokus 1 tetap utuh), dan solusi jangka panjang ("terus gimana kalau kejadian ini beneran ke goal-nya") sengaja ditunda ("next solusi kita pikirkan nanti" — kata founder sendiri). Implementasi: `days.created_at` (kolom baru, `TIMESTAMPTZ DEFAULT now()`) murni timestamp tampilan, tidak pernah dibaca oleh logic penggantian quest mana pun. Client: countdown ⏳ HH:MM:SS live per kartu quest (satu `setInterval` bersama, nulis langsung ke DOM tiap kartu — bukan lewat `renderDashboard()`, biar draft refleksi di kartu lain tidak keganggu, pola sama dengan pace/word-count). Begitu lewat 24 jam: tombol jadi `disabled` + teks "Waktu habis", kartu tetap ada di carousel. **Gap yang diketahui, sengaja dibiarkan sesuai instruksi founder**: goal yang satu-satunya quest terbukanya locked-out begini untuk sementara tidak punya jalan maju otomatis — solusinya belum diputuskan. Server TIDAK menegakkan batas ini (submit lewat API langsung tetap diterima meski tombol client-nya disabled) — sengaja, supaya tidak menambah dead-end kedua di lapisan lain sebelum solusi jangka panjangnya jelas.
+
+**DoD**:
+- [x] Quest Body-focus yang salah tag tetap auto-buka record picker (dites lewat quest yang di-tag `reflective` + `statFocus: body` langsung via SQL)
+- [x] Toggle balik-ke-refleksi tetap berfungsi (default baru, bukan paksaan)
+- [x] Label stat tampil di kartu quest
+- [x] Countdown quest baru mulai dari ~24:00:00, turun tiap detik secara live
+- [x] Quest yang `created_at`-nya dimundurkan 25 jam menampilkan pesan lewat-waktu + tombol disabled
+- [x] Quest yang locked-out TETAP ada di `openQuests` dengan id yang sama — tidak diganti/dihilangkan (invariant inti Fokus 1 terjaga)
+- [x] Regresi penuh (Fokus 1 carousel, Fokus 0 form) tetap hijau

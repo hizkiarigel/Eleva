@@ -81,6 +81,16 @@ async function init() {
     UPDATE days SET goal_index = (quest->>'goalIndex')::integer
       WHERE goal_index IS NULL AND quest->>'goalIndex' ~ '^[0-9]+$';
   `);
+
+  // Provisional 24h countdown (founder request, 10 Agustus, explicitly
+  // "sementara" while a real next solution gets figured out later): unlike
+  // the old issued_at, this column NEVER triggers replacing/regenerating a
+  // quest - it's read-only display + client-side button lockout past 24h.
+  // A goal whose quest locks out this way has no automatic recovery yet
+  // (known, accepted gap - the founder deferred that decision).
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+  `);
 }
 
 // --- users ---
@@ -203,7 +213,7 @@ async function resetUser(userId) {
 // so several rows can legitimately share the same date) ---
 
 function rowToQuest(r) {
-  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: r.reflection };
+  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: r.reflection, createdAt: r.created_at };
 }
 
 // Every quest still open (not yet marked done) across the user's goals -
