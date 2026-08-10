@@ -338,12 +338,10 @@ let onboardStep = 0;
 let ui = { view: "loading", label: "Membuka Eleva..." };
 let appState = null;
 let reflectOpen = false;
-// null = the reflect flow targets today's active quest; a date string
-// targets a specific missed quest reopened from the carousel (founder
-// call: a missed day should stay completable, not just visible - the
-// growth-gate content checks (specificity, word count, structured-data
-// plausibility) are identical either way, so lateness doesn't loosen
-// anything, it's purely a timing allowance).
+// Which open quest (by id) the reflect flow targets - there's no single
+// implicit "today's quest" anymore under the per-goal model (up to 3
+// quests, one per active goal, can be open at once), so this is always
+// set explicitly when a card's own button is tapped, never defaulted.
 let reflectTarget = null;
 let reflectStatus = "done";
 let reflectText = "";
@@ -365,6 +363,9 @@ let structForm = {};
 let recordMode = false;
 let structKind = null;
 let reflectError = "";
+// Set right after a successful submit, cleared once the user dismisses the
+// brief "here's what happened" acknowledgment - see completedResultCardHTML.
+let completedResult = null;
 let resetArmed = false;
 let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
@@ -1178,90 +1179,57 @@ function structSummary(sd) {
   return `${jenis} · ${sd.durasiMenit} menit${sd.jarakKm != null ? ` · ${sd.jarakKm} km` : ""} · RPE ${sd.rpe} · berat di ${sd.titikBerat}`;
 }
 
-let countdownTimer = null;
-
-function formatCountdown(ms) {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
-  const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
-  const sec = String(totalSec % 60).padStart(2, "0");
-  return `${h}:${m}:${sec}`;
-}
-
-// Ticks the quest card's 24h countdown by writing straight to the DOM node
-// (never calling renderDashboard() from the tick itself) so a reflection
-// draft mid-typing elsewhere on the page is never disturbed by this timer.
-// Reads the absolute expiresAt on every tick rather than counting down a
-// local duration, so re-renders triggered by something else (a status-
-// button click, etc.) can restart this and stay perfectly in sync instead
-// of drifting. When it actually hits zero, today's quest has expired
-// server-side too - refetch so the app picks up whatever quest is next.
-function startCountdown(expiresAtISO) {
-  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
-  if (!expiresAtISO) return;
-  const expiresAt = new Date(expiresAtISO).getTime();
-  const tick = () => {
-    const el = document.getElementById("questCountdown");
-    if (!el) { clearInterval(countdownTimer); countdownTimer = null; return; }
-    const remaining = expiresAt - Date.now();
-    if (remaining <= 0) {
-      clearInterval(countdownTimer);
-      countdownTimer = null;
-      boot();
-      return;
-    }
-    el.textContent = formatCountdown(remaining);
-    document.getElementById("questCountdownRow")?.classList.toggle("urgent", remaining < 60 * 60 * 1000);
-  };
-  tick();
-  countdownTimer = setInterval(tick, 1000);
-}
-
-// Renders any single day's quest as a card - today's active one (with
-// countdown + the #openReflect id existing tests/handlers rely on) or a
-// missed one reopened from the carousel (TERLEWAT label, data-reflect-date
-// instead, no countdown - a lapsed quest has no meaningful time-remaining).
-// dimmed only applies the muted carousel styling, never to the card
-// currently focused for reflection - once it's the one thing on screen it
-// should read as fully live, not like a passive history glance.
-function questSummaryCard(day, isToday, dimmed) {
-  if (!day) return `<div class="quest-card"><div class="dot pending"></div>${spinnerHTML("AI sedang menyusun quest hari ini...")}</div>`;
-  const hasRefl = Boolean(day.reflection);
-  const label = isToday
-    ? (day.quest.mode === "acting" ? "ACTING METHOD HARI INI" : "QUEST HARI INI")
-    : `TERLEWAT · ${esc(day.date)}`;
+// Renders one open quest as a card - every card is equally "current" now
+// (per-goal model: nothing ever expires or goes stale, a quest just sits
+// open until its own goal's button is tapped), so there's no more today-
+// vs-missed distinction to style differently. goalLabel names which of the
+// user's (up to 3) goals this specific card is working toward - essential
+// once more than one card can be on screen at once.
+function questSummaryCard(q, goalLabel) {
+  if (!q) return `<div class="quest-card"><div class="dot pending"></div>${spinnerHTML("AI sedang menyusun quest...")}</div>`;
+  const label = q.quest.mode === "acting" ? "ACTING METHOD" : "QUEST";
   return `
-    <div class="quest-card ${dimmed ? "missed-card" : ""}">
-      ${isToday ? `<div class="dot ${hasRefl ? "done" : "pending"}"></div>` : ""}
-      <div class="qlabel mono">${label}</div>
-      <h2 class="fr">${esc(day.quest.title)}</h2>
-      <p class="desc">${esc(day.quest.description)}</p>
-      <p class="why">${esc(day.quest.why)}</p>
-      ${!hasRefl ? `
-        ${isToday && day.expiresAt ? `<div class="mono countdown" id="questCountdownRow">⏳ <span id="questCountdown">--:--:--</span> tersisa</div>` : ""}
-        ${isToday
-          ? `<button class="btn-primary" id="openReflect">Mulai</button>`
-          : `<button class="btn-primary" data-reflect-date="${esc(day.date)}">Mulai</button>`}` : `
-        <div style="border-top:1px solid var(--hair);padding-top:14px;margin-top:4px">
-          <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
-            ${day.reflection.status === "done" ? "SELESAI" : day.reflection.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
-          </div>
-          ${day.reflection.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(day.reflection.structuredData))}</div>` : ""}
-          <p class="fr" style="font-style:italic;font-size:14.5px;margin:0;line-height:1.6">${esc(day.reflection.mentorReply)}</p>
-          ${Object.keys(day.reflection.deltas || {}).length ? `<div class="deltas">${Object.entries(day.reflection.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
-        </div>`}
+    <div class="quest-card">
+      <div class="dot pending"></div>
+      <div class="qlabel mono">${label}${goalLabel ? ` · ${esc(goalLabel)}` : ""}</div>
+      <h2 class="fr">${esc(q.quest.title)}</h2>
+      <p class="desc">${esc(q.quest.description)}</p>
+      <p class="why">${esc(q.quest.why)}</p>
+      <button class="btn-primary" data-reflect-id="${q.id}">Mulai</button>
+    </div>`;
+}
+
+// Brief acknowledgment shown right after a submit, before the dashboard
+// refreshes - the per-goal model regenerates that goal's next quest the
+// instant this one is marked done (no more "linger a day" grace period a
+// calendar-based or 24h-based model gave for free), so without this the
+// mentor's reply/deltas would flash by and vanish before the user ever
+// saw them.
+function completedResultCardHTML(r) {
+  return `
+    <div class="quest-card fadeUp">
+      <div class="qlabel mono">${esc(r.questTitle)}</div>
+      <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
+        ${r.status === "done" ? "SELESAI" : r.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
+      </div>
+      ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
+      <p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>
+      ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
+      <button class="btn-primary full" id="dismissCompleted">Lanjut</button>
     </div>`;
 }
 
 function renderDashboard() {
   const s = appState;
-  const today = s.today;
-  // Which day the (possibly open) reflect flow targets - today by default,
-  // or a specific missed day reopened from the carousel. Looked up fresh
-  // from appState every render, never cached, so a just-refreshed state
-  // after a submit is always the source of truth.
-  const targetIsToday = !reflectTarget || reflectTarget === today?.date;
-  const targetDay = targetIsToday ? today : (s.history || []).find((d) => d.date === reflectTarget) || null;
+  const openQuests = s.openQuests || [];
+  const goals = s.goals || [];
+  const goalLabel = (goalIndex) => (goalIndex != null && goals[goalIndex] ? goals[goalIndex] : null);
+  // Which open quest the reflect flow targets - looked up fresh from
+  // appState every render (never cached), so a just-refreshed state after
+  // a submit is always the source of truth. No implicit default: every
+  // card's own button sets this explicitly, since there's no longer a
+  // single privileged "today's quest" among up to 3 simultaneously open.
+  const targetDay = openQuests.find((q) => q.id === reflectTarget) || null;
   const hasReflection = Boolean(targetDay?.reflection);
 
   // Task 7b + founder revision: physical quests complete via typed record
@@ -1351,26 +1319,22 @@ function renderDashboard() {
       <button class="btn-ghost" id="toggleRecord" style="margin-top:${formReady ? "10px" : "4px"}">${recordMode ? "← Balik ke refleksi teks aja" : "Aktivitas fisik? Catat sebagai record →"}</button>` : ""}
     </div>` : "";
 
-  // Missed days stay reachable from the main quest-card area, not just
-  // noted in Riwayat below - founder feedback: seeing "terlewat" only in
-  // history read as buried/passive. Genuinely completable too (founder
-  // follow-up after seeing the read-only version: "tolong ini dibuka lagi")
-  // via the same reflect flow as today's quest, just targeting a different
-  // date - see questSummaryCard's data-reflect-date buttons below.
-  // s.history is already DESC by date, so missed entries come out most-
-  // recent-first, continuing naturally backward from today.
-  const missedRecent = (s.history || []).filter((d) => !d.reflection);
+  // Per-goal model: up to 3 quests can be open at once (one per active
+  // goal), none of them ever silently swapped out - the founder-reported
+  // regression this whole rewrite fixes. All shown as a swipeable carousel
+  // so the user can work whichever goal they feel like, in their own order.
   // Collapses to the single card actually being reflected on while
-  // reflectOpen (today's or a reopened missed one - never always today's,
-  // or reopening a missed card would show the wrong quest above its own
-  // form) so typing a reflection never fights a horizontal swipe for the
-  // same touch gesture.
-  const questSectionHTML = (!reflectOpen && missedRecent.length) ? `
+  // reflectOpen, so typing a reflection never fights a horizontal swipe
+  // for the same touch gesture - and to the "just completed" acknowledgment
+  // card when one is pending dismissal.
+  const questSectionHTML = completedResult ? completedResultCardHTML(completedResult)
+    : reflectOpen ? questSummaryCard(targetDay, goalLabel(targetDay?.goalIndex))
+    : openQuests.length > 1 ? `
     <div class="quest-carousel">
-      ${questSummaryCard(today, true, false)}
-      ${missedRecent.map((d) => questSummaryCard(d, false, true)).join("")}
+      ${openQuests.map((q) => questSummaryCard(q, goalLabel(q.goalIndex))).join("")}
     </div>
-    <div class="eyebrow mono swipe-hint">← geser untuk lihat ${missedRecent.length} quest yang terlewat</div>` : questSummaryCard(targetDay, targetIsToday, false);
+    <div class="eyebrow mono swipe-hint">← geser untuk lihat ${openQuests.length} quest yang lagi terbuka</div>`
+    : questSummaryCard(openQuests[0] || null, goalLabel(openQuests[0]?.goalIndex));
 
   root.innerHTML = `
     <div class="shell">
@@ -1385,7 +1349,7 @@ function renderDashboard() {
         <h1 class="fr">${esc(s.chapterTitle)}</h1>
         <div class="rule"></div>
         ${s.pathwayNoun ? `<div class="pathway-badge mono">${esc(maturityTier(s.growthSessions))} ${esc(s.pathwayNoun)}${s.pathwayStatus === "trial" ? ` <span class="trial-tag">(hipotesis — First Trial)</span>` : ""}</div>` : ""}
-        ${today?.insight ? `<p class="insight fr">${esc(today.insight)}</p>` : ""}
+        ${openQuests[0]?.insight ? `<p class="insight fr">${esc(openQuests[0].insight)}</p>` : ""}
       </div>
       ${questSectionHTML}
       ${reflectFormHTML}
@@ -1410,10 +1374,10 @@ function renderDashboard() {
       <div style="margin-bottom:28px">
         <div class="eyebrow mono">RIWAYAT</div>
         ${s.history.map((d) => `
-          <div class="history-item ${d.reflection ? "done" : "missed"}">
+          <div class="history-item done">
             <div class="date mono">${d.date}</div>
             <div class="title">${esc(d.quest?.title || "")}</div>
-            ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : d.reflection?.structuredData ? `<div class="snippet mono">${esc(structSummary(d.reflection.structuredData))}</div>` : `<div class="snippet missed-tag">Terlewat — belum dikerjakan</div>`}
+            ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : d.reflection?.structuredData ? `<div class="snippet mono">${esc(structSummary(d.reflection.structuredData))}</div>` : ""}
           </div>`).join("")}
       </div>` : ""}
       <div class="footer-bar">
@@ -1424,22 +1388,24 @@ function renderDashboard() {
       </div>
     </div>`;
 
-  startCountdown(targetIsToday ? today?.expiresAt : null);
   // recordMode starts on for AI-tagged physical quests (record required
   // server-side), off otherwise; structKind always starts unpicked - the
   // user declares what they actually did each time, never inherited.
-  const openReflectFor = (target, quest) => {
-    reflectTarget = target; reflectOpen = true; reflectStatus = "done"; reflectText = "";
+  document.querySelectorAll("[data-reflect-id]").forEach((b) => b.addEventListener("click", () => {
+    const id = Number(b.dataset.reflectId);
+    const quest = openQuests.find((q) => q.id === id)?.quest;
+    reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
     structForm = {}; reflectError = "";
     recordMode = quest?.completionType === "structured-physical";
     structKind = null;
     renderDashboard();
-  };
-  document.getElementById("openReflect")?.addEventListener("click", () => openReflectFor(null, today?.quest));
-  document.querySelectorAll("[data-reflect-date]").forEach((b) => b.addEventListener("click", () => {
-    const d = b.dataset.reflectDate;
-    openReflectFor(d, (s.history || []).find((h) => h.date === d)?.quest);
   }));
+  document.getElementById("dismissCompleted")?.addEventListener("click", async () => {
+    completedResult = null;
+    root.innerHTML = spinnerHTML("Memuat quest berikutnya...");
+    appState = await api("/api/state");
+    renderDashboard();
+  });
   document.querySelectorAll("[data-skind]").forEach((b) => b.addEventListener("click", () => { structKind = b.dataset.skind; reflectError = ""; renderDashboard(); }));
   document.getElementById("toggleRecord")?.addEventListener("click", () => { recordMode = !recordMode; structKind = null; reflectError = ""; renderDashboard(); });
   // Bound by data attribute, not the shared .status-btn styling class -
@@ -1465,7 +1431,7 @@ function renderDashboard() {
   document.getElementById("submitReflect")?.addEventListener("click", async () => {
     root.innerHTML = spinnerHTML("Menyimpan refleksi...");
     try {
-      const body = { status: reflectStatus, text: reflectText, date: targetDay.date };
+      const body = { status: reflectStatus, text: reflectText, questId: targetDay.id };
       if (recordMode && structKind && reflectStatus !== "skipped") {
         // kind is the user's pick (both gym variants validate as "gym" -
         // they only differ in which fields rendered); a bodyweight session
@@ -1473,9 +1439,19 @@ function renderDashboard() {
         body.structuredData = { ...structForm, kind: structKind === "cardio" ? "cardio" : "gym" };
         if (structKind === "gym-badan") delete body.structuredData.bebanKg;
       }
-      await api("/api/reflection", { method: "POST", body });
+      const resp = await api("/api/reflection", { method: "POST", body });
+      // The per-goal model regenerates this goal's next quest the instant
+      // it's marked done - no more free "linger a day" grace period a
+      // calendar/24h-based model gave the mentor's reply to be seen. Hold
+      // it here until the user dismisses it, instead of refetching state
+      // immediately (which could otherwise swap this card out from under
+      // them before they ever read it).
+      completedResult = {
+        questTitle: targetDay.quest.title, status: reflectStatus,
+        mentorReply: resp.mentorReply, deltas: resp.deltas, structuredData: resp.structuredData,
+      };
       reflectOpen = false; reflectTarget = null; reflectText = ""; structForm = {}; reflectError = "";
-      appState = await api("/api/state");
+      recordMode = false; structKind = null;
       renderDashboard();
     } catch (e) {
       // Validation errors (implausible numbers, missing fields) come back as

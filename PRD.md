@@ -422,3 +422,28 @@ Struktur yang benar — beda di KEDALAMAN/FITUR, bukan di KEASLIAN personalisasi
 - [ ] Reflection normal tidak regresi (growth-gate 12-kata tetap berlaku)
 - [ ] Privacy notice tampil sebelum signup selesai
 - [ ] README diperbarui: cara jalanin lokal dengan Postgres + auth, dan catatan jelas bahwa payment BELUM ada
+
+## 14. Task 9 — Fokus 1: model quest per-goal, menggantikan Rotasi antar-goal v13 (SELESAI)
+
+Dari `UPDATE_PROMPT.pdf` founder (10 Agustus), prioritas tertinggi sesi ini, dilaporkan sebagai bug regresi: quest yang belum dikerjakan masih bisa hilang diganti quest baru, walau perbaikan 24h-rolling-window (v13 lampiran, section 9) sudah jalan. Diagnosis: masalahnya bukan KAPAN quest kedaluwarsa, tapi MODEL rotasinya sendiri — `pickActiveGoalIndex` (deterministik, prioritas goal paling-lama-belum-disentuh) tetap berarti hanya SATU goal yang aktif di satu waktu, jadi goal lain bisa "menang giliran" dan mendorong keluar quest goal yang belum sempat diselesaikan. **`pickActiveGoalIndex` dan seluruh mekanisme rotasi kompetitif di section 9 (v13) resmi digantikan** oleh spec di bawah — bukan disempurnakan, diganti modelnya.
+
+**Aturan inti**: satu goal boleh punya paling banyak SATU quest terbuka (`reflection IS NULL`) di satu waktu. Quest baru untuk goal itu HANYA digenerate begitu quest sebelumnya beres (`done`/`partial`/`skipped` — apa pun status refleksinya, bukan cuma "done"). Dengan hingga 3 goal (goal capture v13 tidak berubah, tetap 1-3 goal), bisa ada hingga 3 quest terbuka bersamaan. Tidak ada lagi "goal yang menang giliran" — semua goal yang butuh quest baru dapat sekaligus dalam satu pass `GET /api/state`.
+
+**Skema**: `days.id` (serial) jadi primary key, bukan lagi komposit `(user_id, date)` — satu goal generate banyak baris `days` dari waktu ke waktu, tidak ada lagi konsep "baris hari ini" per user. Kolom `issued_at` dan seluruh konsep kedaluwarsa dihapus total — sesuai aturan inti, satu-satunya syarat generate ulang adalah refleksi sudah terisi, tidak pernah soal waktu. `goal_index` jadi kolom asli (sebelumnya cuma field di dalam jsonb `quest`).
+
+**Dashboard**: `GET /api/state` mengembalikan `openQuests` (array semua quest terbuka lintas goal, bukan satu `today`) — ditampilkan sebagai `.quest-carousel` yang sama polanya dengan Pathway carousel v7, satu kartu per goal, label nama goal di tiap kartu supaya jelas kartu mana untuk goal yang mana. Akun pra-goal-capture (goals kosong/null) tetap dapat pengalaman quest tunggal normal — 1 slot dengan `goalIndex: null`, bukan error atau kartu kosong.
+
+**Penyelesaian quest**: `POST /api/reflection` dialamatkan lewat `questId` (bukan `date` seperti model lama) — tiap kartu carousel punya tombol sendiri yang menunjuk `id` quest itu spesifik, tidak ada lagi satu "quest hari ini" implisit. Baseline progresif untuk quest fisik (`recentDays`) di-scope per-goal (`goalIndex`) supaya angka goal lari tidak pernah bocor jadi baseline goal gym.
+
+**Konsekuensi UX yang wajib ditangani** (bukan opsional — tanpa ini fitur ini justru regresi baru): karena goal yang baru selesai LANGSUNG generate quest baru tanpa jeda, balasan mentor + `statDeltas` bisa lenyap sebelum sempat dibaca kalau dashboard langsung refresh ke carousel berikutnya. `POST /api/reflection` membalas `mentorReply`/`deltas`/`structuredData` (bukan cuma `{ok:true}`), klien menahannya di kartu pengakuan (`completedResult`, pola sama seperti kartu Pathway) dengan tombol "Lanjut" eksplisit sebelum carousel di-refresh.
+
+**Riwayat**: karena tidak ada lagi kuota harian yang bisa "kelewat" (goal bisa dikerjakan kapan pun, tidak ada jatah harian yang hangus), `allHistory` disederhanakan jadi murni "yang sudah direfleksikan", konsep terlewat di Riwayat (section sebelumnya, bug 10 Agustus pertama) sudah tidak relevan lagi di bawah model ini.
+
+**DoD** (diverifikasi lewat API test langsung ke Postgres lokal + Playwright browser test, mode fallback tanpa API key):
+- [x] 3 goal → 3 quest terbuka simultan setelah onboarding, satu per `goalIndex`
+- [x] Quest ID stabil lintas `GET /api/state` berulang tanpa aksi apa pun (tidak pernah diam-diam diganti)
+- [x] Selesaikan quest goal A → goal B dan C TIDAK terpengaruh (id tetap sama), goal A dapat quest baru dengan id berbeda
+- [x] Akun lawas tanpa goals (`goals: []`) tetap dapat 1 quest, `goalIndex: null`
+- [x] Submit quest yang sama dua kali (id sudah punya refleksi) ditolak 400
+- [x] Riwayat bertambah tepat 1 entri per refleksi tersimpan
+- [x] UI: carousel render 3 kartu dengan label goal berbeda-beda, submit → kartu "Lanjut" tampil `mentorReply`, dismiss → carousel 3 kartu lagi (termasuk quest baru goal yang baru selesai)

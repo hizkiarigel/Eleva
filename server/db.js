@@ -53,7 +53,32 @@ async function init() {
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_snapshot JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_raw JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS goals JSONB;
-    ALTER TABLE days ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ NOT NULL DEFAULT now();
+  `);
+
+  // Per-goal quest model (founder-reported regression: a goal's quest was
+  // being replaced before the user ever marked it done). A goal can now
+  // have its own open quest sitting untouched indefinitely - up to 3
+  // simultaneously (one per active goal) - so the old (user_id, date)
+  // primary key is wrong: it assumed exactly one quest row per calendar
+  // day, but several goals can each get a fresh quest on the same day.
+  // Switched to a plain serial id. Guarded by a column-existence check
+  // since this must run exactly once - re-running ADD COLUMN id SERIAL a
+  // second time would try to create a duplicate sequence and fail.
+  // issued_at (the now-retired 24h-rolling-window timestamp) is dropped:
+  // nothing times a quest out anymore, only completion ever replaces one,
+  // so there's no remaining logic that reads it.
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='days' AND column_name='id') THEN
+        ALTER TABLE days DROP CONSTRAINT IF EXISTS days_pkey;
+        ALTER TABLE days ADD COLUMN id SERIAL PRIMARY KEY;
+      END IF;
+    END $$;
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS goal_index INTEGER;
+    ALTER TABLE days DROP COLUMN IF EXISTS issued_at;
+    UPDATE days SET goal_index = (quest->>'goalIndex')::integer
+      WHERE goal_index IS NULL AND quest->>'goalIndex' ~ '^[0-9]+$';
   `);
 }
 
@@ -157,105 +182,91 @@ async function resetUser(userId) {
   await pool.query(`DELETE FROM days WHERE user_id = $1`, [userId]);
 }
 
-// --- days (per user) ---
+// --- days (per user; one row per QUEST INSTANCE, not one row per calendar
+// day - a user can have up to one open quest per active goal open at once,
+// so several rows can legitimately share the same date) ---
 
-// The user's currently live quest is whichever row was issued most recently
-// - completable for a full rolling 24h from issuance, not "until local
-// midnight" (founder call: a quest issued at 11pm shouldn't evaporate at
-// 00:00 just because the calendar flipped). date DESC is a tiebreaker for
-// legacy rows that all share one issued_at (the moment this column was
-// backfilled) - without it, "most recent" would be ambiguous among them.
-async function getActiveDay(userId) {
+function rowToQuest(r) {
+  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: r.reflection };
+}
+
+// Every quest still open (not yet marked done) across the user's goals -
+// at most one per goal, so at most 3 total. This literally IS the set of
+// quest cards the dashboard shows - nothing here was ever silently
+// replaced (founder-reported regression this whole model exists to fix):
+// a goal only loses its open quest when the user completes it.
+async function getOpenQuests(userId) {
   const { rows } = await pool.query(
-    `SELECT * FROM days WHERE user_id = $1 ORDER BY issued_at DESC, date DESC LIMIT 1`,
+    `SELECT * FROM days WHERE user_id = $1 AND reflection IS NULL ORDER BY goal_index ASC NULLS LAST, id ASC`,
     [userId]
   );
-  const row = rows[0];
-  if (!row) return null;
-  const expiresAt = new Date(row.issued_at.getTime() + 24 * 60 * 60 * 1000);
-  return {
-    date: row.date,
-    quest: row.quest,
-    insight: row.insight,
-    reflection: row.reflection,
-    expiresAt,
-    active: expiresAt.getTime() > Date.now(),
-  };
+  return rows.map(rowToQuest);
 }
 
-// Looks up a specific day by its own date key, active or not - the path
-// for reopening a missed quest to actually complete it (founder call:
-// staying visible wasn't enough, it has to still be finishable). Timing
-// plays no role in whether a quest CAN be completed, only in when a new
-// one gets issued (getActiveDay, unchanged) - completing this one late
-// still runs through the identical growth-gate content checks as an
-// on-time submission, so lateness never loosens what counts as real.
-async function getDayByDate(userId, date) {
-  const { rows } = await pool.query(`SELECT * FROM days WHERE user_id = $1 AND date = $2`, [userId, date]);
-  const row = rows[0];
-  if (!row) return null;
-  return { date: row.date, quest: row.quest, insight: row.insight, reflection: row.reflection };
+// A single quest by id, open or already completed - the path for
+// submitting a reflection to whichever goal's card the user tapped.
+async function getQuestById(userId, id) {
+  const { rows } = await pool.query(`SELECT * FROM days WHERE user_id = $1 AND id = $2`, [userId, id]);
+  return rows[0] ? rowToQuest(rows[0]) : null;
 }
 
-// Issues a quest, always with a fresh clock - even on conflict. The
-// (user_id, date) collision path only fires if a stale row's date label
-// happens to match today's (shouldn't happen in real usage: 24h always
-// crosses at least one calendar date, so a regenerated quest is always
-// dated later than whatever it's replacing) - but if it ever did fire
-// without forcing issued_at here, the "new" quest would silently inherit
-// the old expired timestamp, read as already-expired itself, and send
-// getActiveDay's caller straight back into regeneration forever.
-async function createQuest(userId, date, { quest, insight }) {
-  await pool.query(
-    `INSERT INTO days (user_id, date, quest, insight, reflection, issued_at)
-     VALUES ($1, $2, $3, $4, NULL, now())
-     ON CONFLICT (user_id, date) DO UPDATE SET
-       quest = EXCLUDED.quest, insight = EXCLUDED.insight, reflection = NULL, issued_at = now()`,
-    [userId, date, quest, insight]
-  );
-}
-
-// Attaches a reflection to an already-issued quest - deliberately leaves
-// issued_at untouched so completing early doesn't reset the 24h window
-// (the next quest still arrives a full rolling day after this one was
-// issued, not a full day after whenever the user happened to finish it).
-async function saveReflection(userId, date, reflection) {
-  await pool.query(`UPDATE days SET reflection = $3 WHERE user_id = $1 AND date = $2`, [userId, date, reflection]);
-}
-
-async function recentDays(userId, excludeDate, limit = 3) {
+// Issues a brand-new quest for one goal (goalIndex null for legacy
+// pre-goal-capture accounts, a single ungoaled slot). Always a fresh
+// insert - id is a plain serial, there's nothing to collide with, unlike
+// the old (user_id, date) key that forced awkward upsert/conflict logic.
+async function createQuest(userId, goalIndex, date, { quest, insight }) {
   const { rows } = await pool.query(
-    `SELECT * FROM days WHERE user_id = $1 AND date != $2 ORDER BY date DESC LIMIT $3`,
-    [userId, excludeDate, limit]
+    `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection) VALUES ($1, $2, $3, $4, $5, NULL) RETURNING *`,
+    [userId, goalIndex, date, quest, insight]
   );
-  return rows.map((r) => ({
-    date: r.date,
-    quest: r.quest?.title, // title only - keeps AI context lean
-    // v13: which of the user's goals that day's quest was assigned to -
-    // surfaced as a sibling (quest above is a flattened string) because the
-    // goal-rotation selector in index.js reads it; caught by the multi-day
-    // simulation, where rotation silently stuck on goal #1 without this.
-    goalIndex: r.quest?.goalIndex,
-    reflection: r.reflection,
-  }));
+  return rowToQuest(rows[0]);
 }
 
-async function allHistory(userId, excludeDate) {
+async function saveReflection(userId, id, reflection) {
+  await pool.query(`UPDATE days SET reflection = $3 WHERE user_id = $1 AND id = $2`, [userId, id, reflection]);
+}
+
+// Recent quests for AI context, newest first. Scoped to one goal
+// (goalIndex) for a structured-physical progressive baseline - "last time
+// THIS goal's cardio was 15 reps" shouldn't mix in a different goal's
+// numbers. Omitted for broad cross-goal context (chapter continuity).
+async function recentDays(userId, { goalIndex, excludeId, limit = 3 } = {}) {
+  const conds = ["user_id = $1"];
+  const params = [userId];
+  if (goalIndex !== undefined) {
+    if (goalIndex === null) {
+      conds.push("goal_index IS NULL");
+    } else {
+      params.push(goalIndex);
+      conds.push(`goal_index = $${params.length}`);
+    }
+  }
+  if (excludeId != null) {
+    params.push(excludeId);
+    conds.push(`id != $${params.length}`);
+  }
+  params.push(limit);
   const { rows } = await pool.query(
-    `SELECT * FROM days WHERE user_id = $1 AND date != $2 ORDER BY date DESC`,
-    [userId, excludeDate]
+    `SELECT * FROM days WHERE ${conds.join(" AND ")} ORDER BY id DESC LIMIT $${params.length}`,
+    params
   );
-  return rows.map((r) => ({
-    date: r.date,
-    quest: r.quest,
-    insight: r.insight,
-    reflection: r.reflection,
-  }));
+  return rows.map(rowToQuest);
+}
+
+// Completed quests only, most recent first - Riwayat. There is no more
+// "missed" state to label: a quest that isn't here is still sitting open
+// (see getOpenQuests), however long that takes.
+async function allHistory(userId, limit = 8) {
+  const { rows } = await pool.query(
+    `SELECT * FROM days WHERE user_id = $1 AND reflection IS NOT NULL ORDER BY id DESC LIMIT $2`,
+    [userId, limit]
+  );
+  return rows.map(rowToQuest);
 }
 
 module.exports = {
   DEFAULT_STATS, init,
   createUser, getUserByEmail, getUserById,
   getState, createState, updateState, activatePathway, resetUser,
-  getActiveDay, getDayByDate, createQuest, saveReflection, recentDays, allHistory,
+  getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
 };

@@ -32,31 +32,6 @@ function wordCount(text) {
   return (text || "").trim().split(/\s+/).filter(Boolean).length;
 }
 
-// v13 goal rotation: the AI decides HOW to chase a goal, but WHICH of the
-// user's 1-3 First Trial goals today's quest targets is decided HERE,
-// deterministically - prioritize the goal that has gone LONGEST without a
-// quest (same coverage principle as scenario-card axis selection), never
-// random and never always goal #1. days must be newest-first (recentDays
-// order); a day whose quest carries no goalIndex (pre-v13, or malformed)
-// simply doesn't count as touching any goal.
-function pickActiveGoalIndex(goals, days) {
-  if (!Array.isArray(goals) || goals.length === 0) return null;
-  const lastSeen = goals.map(() => Infinity); // Infinity = never targeted -> highest priority
-  (days || []).forEach((d, i) => {
-    // recentDays flattens quest to its title and lifts goalIndex to a
-    // sibling field; raw day rows carry it inside quest - accept both.
-    const gi = d?.goalIndex ?? d?.quest?.goalIndex;
-    if (Number.isInteger(gi) && gi >= 0 && gi < goals.length && lastSeen[gi] === Infinity) {
-      lastSeen[gi] = i; // i grows with age; smallest i = most recently targeted
-    }
-  });
-  let best = 0;
-  for (let i = 1; i < goals.length; i++) {
-    if (lastSeen[i] > lastSeen[best]) best = i; // strict > keeps lowest index on ties
-  }
-  return best;
-}
-
 function requireAuth(req, res, next) {
   if (!req.session || !req.session.userId) {
     return res.status(401).json({ error: "Belum login." });
@@ -141,50 +116,66 @@ app.get("/api/state", requireAuth, async (req, res) => {
       }
     }
 
-    // The active quest is keyed by issuance time (rolling 24h), not by
-    // today's calendar date - a quest issued last night is still today's
-    // quest until its own 24h is up, even after midnight has passed.
-    let today = await db.getActiveDay(req.userId);
-    if (!today || !today.active) {
-      const tk = todayKey();
-      // One 14-day fetch serves both goal rotation (needs the fuller window
-      // to know which goal has waited longest) and the 3-day AI context.
-      const recent = await db.recentDays(req.userId, tk, 14);
-      const goals = state.goals || [];
-      const activeGoalIndex = pickActiveGoalIndex(goals, recent);
-      const ctx = {
-        profile: state.profile,
-        pathway: state.pathway,
-        pathwayNoun: state.pathwayNoun,
-        // Both passed when present - v3 accounts have radarSnapshot, pre-v3
-        // accounts have growthFocus, MENTOR_SYSTEM knows to use whichever
-        // exists so old accounts don't silently lose their "compass".
-        growthFocus: state.growthFocus || undefined,
-        radarSnapshot: state.radarSnapshot || undefined,
-        // v13: goals = the user's 1-3 First Trial targets (the WHAT; pathway
-        // stays the constant HOW). activeGoal = the one today's quest must
-        // aim at, chosen deterministically above - not left to the model.
-        goals: goals.length ? goals : undefined,
-        activeGoal: activeGoalIndex != null ? goals[activeGoalIndex] : undefined,
+    // Per-goal quest model (founder-reported regression this replaces: a
+    // goal's quest used to get silently swapped out before the user marked
+    // it done - first by a pure calendar-day rotation, then by a 24h
+    // rolling window that was still time-based). Now: a goal's quest is
+    // NEVER replaced by anything except that same goal being marked done.
+    // One open quest per active goal, up to 3 simultaneously (goals.length
+    // is capped at 3 at capture time) - every goal currently missing one
+    // gets a fresh quest generated for it, right here, every state fetch.
+    // Accounts from before goal capture existed (goals.length === 0) get a
+    // single ungoaled slot (goalIndex null) instead, so they're never left
+    // without any quest at all.
+    const goals = state.goals || [];
+    let openQuests = await db.getOpenQuests(req.userId);
+    const goalSlots = goals.length ? goals.map((_, i) => i) : [null];
+    const needySlots = goalSlots.filter((gi) => !openQuests.some((q) => q.goalIndex === gi));
+    if (needySlots.length) {
+      // One shared context snapshot for every goal generated in this pass -
+      // avoids a re-read per goal, and right after onboarding (the only
+      // time more than one slot is typically needy at once) there's no new
+      // reflection data between them anyway for it to miss.
+      const recentAll = await db.recentDays(req.userId, { limit: 5 });
+      const recentCtx = recentAll.map((d) => ({ date: d.date, quest: d.quest?.title, goalIndex: d.goalIndex, reflection: d.reflection }));
+      for (const goalIndex of needySlots) {
+        const ctx = {
+          profile: state.profile,
+          pathway: state.pathway,
+          pathwayNoun: state.pathwayNoun,
+          // Both passed when present - v3 accounts have radarSnapshot, pre-v3
+          // accounts have growthFocus, MENTOR_SYSTEM knows to use whichever
+          // exists so old accounts don't silently lose their "compass".
+          growthFocus: state.growthFocus || undefined,
+          radarSnapshot: state.radarSnapshot || undefined,
+          // v13: goals = the user's 1-3 First Trial targets (the WHAT; pathway
+          // stays the constant HOW). activeGoal = the one THIS quest targets.
+          goals: goals.length ? goals : undefined,
+          activeGoal: goalIndex != null ? goals[goalIndex] : undefined,
+          stats: state.stats,
+          chapterNumber: state.chapterNumber,
+          chapterTitle: state.chapterTitle,
+          recentDays: recentCtx,
+          today: todayKey(),
+        };
+        const result = await ai.generateQuest(ctx);
+        // Stamp which goal this quest belongs to server-side - deterministic,
+        // never trusted from the model.
+        if (goalIndex != null && result.quest) result.quest.goalIndex = goalIndex;
+        state.chapterNumber = result.chapterNumber || state.chapterNumber;
+        state.chapterTitle = result.chapterTitle || state.chapterTitle;
+        state.pathwayNoun = state.pathwayNoun || result.pathwayNoun || null;
+        const created = await db.createQuest(req.userId, goalIndex, todayKey(), { quest: result.quest, insight: result.insight });
+        openQuests.push(created);
+      }
+      await db.updateState(req.userId, {
         stats: state.stats,
         chapterNumber: state.chapterNumber,
         chapterTitle: state.chapterTitle,
-        recentDays: recent.slice(0, 3),
-        today: tk,
-      };
-      const result = await ai.generateQuest(ctx);
-      // Stamp which goal this quest was assigned to server-side (rotation
-      // input for future days) - deterministic, never trusted from the model.
-      if (activeGoalIndex != null && result.quest) result.quest.goalIndex = activeGoalIndex;
-      await db.updateState(req.userId, {
-        stats: state.stats,
-        chapterNumber: result.chapterNumber || state.chapterNumber,
-        chapterTitle: result.chapterTitle || state.chapterTitle,
         growthSessions: state.growthSessions,
-        pathwayNoun: state.pathwayNoun || result.pathwayNoun || null,
+        pathwayNoun: state.pathwayNoun,
       });
-      await db.createQuest(req.userId, tk, { quest: result.quest, insight: result.insight });
-      today = await db.getActiveDay(req.userId);
+      openQuests.sort((a, b) => (a.goalIndex ?? -1) - (b.goalIndex ?? -1));
     }
 
     const fresh = await db.getState(req.userId);
@@ -196,8 +187,9 @@ app.get("/api/state", requireAuth, async (req, res) => {
       growthSessions: fresh.growthSessions,
       pathwayNoun: fresh.pathwayNoun,
       pathwayStatus: fresh.pathwayStatus,
-      today,
-      history: (await db.allHistory(req.userId, today.date)).slice(0, 8),
+      goals: fresh.goals,
+      openQuests,
+      history: await db.allHistory(req.userId, 8),
       aiActive: ai.hasKey(),
     });
   } catch (e) {
@@ -252,32 +244,25 @@ app.post("/api/profile", requireAuth, async (req, res) => {
     // daily quest generation. profile.insight would collide in meaning with
     // days.insight (the daily-rotating quest insight) - originStory avoids that.
     const profile = { name, originStory: originStory || null, createdAt: new Date().toISOString() };
-    // Day one of the First Trial: no history yet, so rotation trivially
-    // starts at the first listed goal (same pickActiveGoalIndex the daily
-    // route uses - one code path for the rule, not two).
-    const activeGoalIndex = pickActiveGoalIndex(goals, []);
-    const ctx = {
-      profile, pathway, pathwayNoun, radarSnapshot,
-      goals: goals.length ? goals : undefined,
-      activeGoal: activeGoalIndex != null ? goals[activeGoalIndex] : undefined,
-      stats: initialStats, chapterNumber: null, chapterTitle: null, recentDays: [], today: todayKey(),
-    };
-    const result = await ai.generateQuest(ctx);
-    if (activeGoalIndex != null && result.quest) result.quest.goalIndex = activeGoalIndex;
 
     await db.createState(req.userId, {
       profile,
       stats: initialStats,
-      chapterNumber: result.chapterNumber || 1,
-      chapterTitle: result.chapterTitle || "Mencari Arah",
+      // No prior history exists yet, so these are exactly what a
+      // generateQuest call would have echoed back anyway ("Jika
+      // ctx.recentDays kosong, chapterNumber mulai dari 1") - quest
+      // generation itself (and with it the first real chapter title/
+      // pathwayNoun refinement) now happens uniformly in GET /api/state,
+      // the single place that ever creates a quest, one goal at a time.
+      chapterNumber: 1,
+      chapterTitle: "Mencari Arah",
       pathway,
-      pathwayNoun: result.pathwayNoun || pathwayNoun,
+      pathwayNoun,
       radarSnapshot,
       radarRaw: Object.keys(radarRaw).length ? radarRaw : null,
       secondaryTrait: secondaryTrait || null,
       goals,
     });
-    await db.createQuest(req.userId, todayKey(), { quest: result.quest, insight: result.insight });
 
     res.json({ ok: true });
   } catch (e) {
@@ -289,15 +274,15 @@ app.post("/api/profile", requireAuth, async (req, res) => {
 // Submit today's reflection
 app.post("/api/reflection", requireAuth, async (req, res) => {
   try {
-    const { status, text, structuredData, date } = req.body;
+    const { status, text, structuredData, questId } = req.body;
     const state = await db.getState(req.userId);
-    // date identifies which quest this reflects on - today's active one, or
-    // a missed one reopened from the carousel. Timing no longer gates
-    // whether a quest CAN be completed (founder call: a missed day should
-    // stay finishable, not just visible) - only whether it's already been
-    // completed does, which the reflection check below still enforces
-    // server-side regardless of what the client's button state shows.
-    const day = date ? await db.getDayByDate(req.userId, date) : await db.getActiveDay(req.userId);
+    // questId identifies which of the user's (up to 3) simultaneously open
+    // quests this reflects on - there's no single implicit "today's quest"
+    // anymore, every goal's card is addressed explicitly. A quest never
+    // expires on its own, so the only thing gating completion is whether
+    // it's already been reflected on (checked below) - never how long it's
+    // been open.
+    const day = await db.getQuestById(req.userId, questId);
     if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
     if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah direfleksikan." });
 
@@ -348,8 +333,9 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
         reflectionText: trimmedText,
         structuredData: structuredClean || undefined,
         // Recent days give the AI the progressive baseline ("last time 15
-        // reps") for its mentorReply on structured quests.
-        recentDays: structuredClean ? await db.recentDays(req.userId, day.date, 7) : undefined,
+        // reps") for its mentorReply on structured quests - scoped to this
+        // SAME goal, so a different goal's numbers never bleed into it.
+        recentDays: structuredClean ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined,
         stats: state.stats,
         growthSessions: state.growthSessions,
       };
@@ -383,7 +369,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       mentorReply,
       timestamp: new Date().toISOString(),
     };
-    await db.saveReflection(req.userId, day.date, reflection);
+    await db.saveReflection(req.userId, day.id, reflection);
     await db.updateState(req.userId, {
       stats: newStats,
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
@@ -392,7 +378,11 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       pathwayNoun: state.pathwayNoun,
     });
 
-    res.json({ ok: true });
+    // Client holds this in a "completedResult" acknowledgment card before
+    // swapping to the next quest - under the per-goal model a completed
+    // goal is instantly eligible for a new quest, so without this the
+    // mentor's reply/deltas would flash away before the user could read them.
+    res.json({ ok: true, status, mentorReply, deltas, structuredData: structuredClean || undefined });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan refleksi." });

@@ -76,7 +76,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .quest-card { background: var(--surface2); border: 1px solid var(--hair); border-radius: 12px; padding: 22px; margin-bottom: 28px; position: relative; }
 .quest-carousel { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 2px 2px 4px; -webkit-overflow-scrolling: touch; }
 .quest-carousel .quest-card { flex: 0 0 92%; scroll-snap-align: center; margin-bottom: 0; }
-.quest-card.missed-card { opacity: .82; }
 .swipe-hint { text-align: center; margin: 0 0 28px; opacity: .75; }
 .quest-card .dot { position: absolute; top: 20px; right: 20px; width: 10px; height: 10px; border-radius: 50%; }
 .quest-card .dot.pending { background: var(--accent); box-shadow: 0 0 0 4px #e8a33d22; }
@@ -85,8 +84,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .quest-card h2 { font-size: 21px; font-weight: 600; margin: 0 0 8px; }
 .quest-card .desc { font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; }
 .quest-card .why { font-size: 13px; color: var(--muted); font-style: italic; margin: 0 0 16px; }
-.countdown { font-size: 12.5px; color: var(--accent); margin: 0 0 14px; }
-.countdown.urgent { color: var(--rust); }
 
 .status-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .status-btn { flex: 1; padding: 10px 8px; border-radius: 8px; font-size: 13px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
@@ -105,7 +102,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .history-item .date { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); }
 .history-item .title { font-size: 13.5px; }
 .history-item .snippet { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-.history-item .snippet.missed-tag { color: var(--rust); font-style: italic; }
 
 .deltas { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
 .delta-chip { font-family: "IBM Plex Mono", monospace; font-size: 11px; background: #7fa98f22; color: var(--growth); padding: 3px 8px; border-radius: 20px; }
