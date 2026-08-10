@@ -79,7 +79,7 @@ const HELP_TEXT = {
   card: "Beberapa skenario singkat. Pilih yang paling & paling nggak kamu banget — dari situ Eleva mulai ngerti pola kamu. Jawab jujur aja, nggak ada jawaban salah.",
   analysis: "3 gaya yang mungkin cocok buat kamu, berdasarkan yang barusan kamu isi. Pilih salah satu, atau tulis sendiri kalau ngerasa nggak ada yang pas — bisa diganti nanti.",
   goals: "Tulis 1-3 hal yang mau kamu capai selama 14 hari ke depan — boleh dari area mana pun (badan, belajar, kerjaan, relasi). Tugas harianmu nanti diarahkan ke sini, gantian tiap harinya.",
-  dashboard: "Quest hari ini dari Eleva, disesuaikan sama fokusmu. Selesaikan lalu tandai/isi datanya buat lihat progresmu.",
+  dashboard: "Quest hari ini dari Eleva, disesuaikan sama fokusmu. Kerjakan, lalu tap Mulai — aktivitas fisik dicatat sebagai record singkat (pilih jenisnya: cardio atau gym), sisanya lewat refleksi teks.",
 };
 let helpOpen = null; // screen key whose help sheet is showing, or null
 function helpBtnHTML(key) {
@@ -351,6 +351,19 @@ let reflectText = "";
 // the free reflection box - values keyed by field name, kept across
 // re-renders; narrative text stays optional for those quests.
 let structForm = {};
+// Founder revision to the record flow: WHICH record form applies is the
+// user's pick at completion time, not the AI's guess at generation time -
+// quests are often open-ended about the activity ("push-up, jalan cepat,
+// atau latihan apapun"), so a single pre-baked structuredKind can't know
+// what the user actually did. recordMode = completing via physical record
+// (auto-on for AI-tagged physical quests, where the server still requires
+// record data; opt-in via a link for everything else - which also covers
+// legacy physical quests that predate tagging). structKind = the user's
+// pick: "cardio" | "gym-badan" (bodyweight) | "gym-alat" (with equipment);
+// the two gym variants share one server validation, they differ only in
+// which fields render.
+let recordMode = false;
+let structKind = null;
 let reflectError = "";
 let resetArmed = false;
 let authMode = "login";
@@ -1227,8 +1240,8 @@ function questSummaryCard(day, isToday, dimmed) {
       ${!hasRefl ? `
         ${isToday && day.expiresAt ? `<div class="mono countdown" id="questCountdownRow">⏳ <span id="questCountdown">--:--:--</span> tersisa</div>` : ""}
         ${isToday
-          ? `<button class="btn-primary" id="openReflect">Tandai & refleksi</button>`
-          : `<button class="btn-primary" data-reflect-date="${esc(day.date)}">Tandai & refleksi</button>`}` : `
+          ? `<button class="btn-primary" id="openReflect">Mulai</button>`
+          : `<button class="btn-primary" data-reflect-date="${esc(day.date)}">Mulai</button>`}` : `
         <div style="border-top:1px solid var(--hair);padding-top:14px;margin-top:4px">
           <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
             ${day.reflection.status === "done" ? "SELESAI" : day.reflection.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
@@ -1251,25 +1264,34 @@ function renderDashboard() {
   const targetDay = targetIsToday ? today : (s.history || []).find((d) => d.date === reflectTarget) || null;
   const hasReflection = Boolean(targetDay?.reflection);
 
-  // Task 7b: structured-physical quests swap the free reflection box for
-  // typed fields (numbers are far harder to fabricate convincingly than a
-  // paragraph). Narrative becomes optional there. Skipped = nothing to
-  // certify, so the fields hide and no growth applies either way.
-  const isStructuredQuest = targetDay?.quest?.completionType === "structured-physical";
-  const showStructFields = isStructuredQuest && reflectStatus !== "skipped";
+  // Task 7b + founder revision: physical quests complete via typed record
+  // fields (numbers are far harder to fabricate convincingly than a
+  // paragraph), and WHICH fields is the user's pick (structKind), not the
+  // AI's structuredKind tag - the tag now only decides that a record is
+  // REQUIRED (mustRecord, still enforced server-side). Untagged quests can
+  // opt in via a toggle link, which is also the path for legacy physical
+  // quests that predate tagging. Skipped = nothing to certify, so picker
+  // and fields hide and no growth applies either way.
+  const mustRecord = targetDay?.quest?.completionType === "structured-physical";
+  const showPicker = recordMode && reflectStatus !== "skipped";
+  const showStructFields = showPicker && structKind != null;
+  // No fields until a kind is picked - submitting a kindless record would
+  // just bounce off validation with a confusing "missing field" message.
+  const formReady = !showPicker || structKind != null;
   const sf = (k) => esc(structForm[k] ?? "");
-  const structFieldsHTML = !showStructFields ? "" : targetDay.quest.structuredKind === "gym" ? `
+  const rpeSelectHTML = `<select data-sf="rpe">${["", ...Array.from({ length: 10 }, (_, i) => String(i + 1))].map((v) => `<option value="${v}" ${String(structForm.rpe ?? "") === v ? "selected" : ""}>${v || "Pilih..."}</option>`).join("")}</select>`;
+  const structFieldsHTML = !showStructFields ? "" : structKind !== "cardio" ? `
       <div class="field">
         <label>Gerakan</label>
-        <input type="text" data-sf="gerakan" maxlength="200" value="${sf("gerakan")}" placeholder="mis. push-up, squat, bench press" />
+        <input type="text" data-sf="gerakan" maxlength="200" value="${sf("gerakan")}" placeholder="${structKind === "gym-alat" ? "mis. bench press, lat pulldown, leg press" : "mis. push-up, squat, plank"}" />
       </div>
       <div class="struct-grid">
         <div class="field"><label>Set</label><input type="number" min="1" data-sf="set" value="${sf("set")}" placeholder="3" /></div>
         <div class="field"><label>Repetisi / set</label><input type="number" min="1" data-sf="repetisi" value="${sf("repetisi")}" placeholder="12" /></div>
       </div>
       <div class="struct-grid">
-        <div class="field"><label>Beban (kg) <span class="opt-note">opsional (bodyweight: kosongkan)</span></label><input type="number" min="0" step="0.5" data-sf="bebanKg" value="${sf("bebanKg")}" placeholder="20" /></div>
-        <div class="field"><label>Tingkat usaha (RPE 1-10)</label><select data-sf="rpe">${["", ...Array.from({ length: 10 }, (_, i) => String(i + 1))].map((v) => `<option value="${v}" ${String(structForm.rpe ?? "") === v ? "selected" : ""}>${v || "Pilih..."}</option>`).join("")}</select></div>
+        ${structKind === "gym-alat" ? `<div class="field"><label>Beban (kg) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.5" data-sf="bebanKg" value="${sf("bebanKg")}" placeholder="20" /></div>` : ""}
+        <div class="field"><label>Tingkat usaha (RPE 1-10)</label>${rpeSelectHTML}</div>
       </div>
       <div class="field">
         <label>Titik gagal/berat</label>
@@ -1289,8 +1311,18 @@ function renderDashboard() {
         <div class="field"><label>Jarak (km) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.1" data-sf="jarakKm" value="${sf("jarakKm")}" placeholder="5" /></div>
       </div>
       <div class="struct-grid">
-        <div class="field"><label>Tingkat usaha (RPE 1-10)</label><select data-sf="rpe">${["", ...Array.from({ length: 10 }, (_, i) => String(i + 1))].map((v) => `<option value="${v}" ${String(structForm.rpe ?? "") === v ? "selected" : ""}>${v || "Pilih..."}</option>`).join("")}</select></div>
+        <div class="field"><label>Tingkat usaha (RPE 1-10)</label>${rpeSelectHTML}</div>
         <div class="field"><label>Titik mulai berat</label><input type="text" data-sf="titikBerat" maxlength="200" value="${sf("titikBerat")}" placeholder="mis. menit ke-12, atau tengah" /></div>
+      </div>`;
+
+  const kindPickerHTML = !showPicker ? "" : `
+      <div class="field">
+        <label>Aktivitasnya jenis apa?</label>
+        <div class="status-row">
+          ${[["cardio", "Cardio"], ["gym-badan", "Gym tanpa alat"], ["gym-alat", "Gym dengan alat"]].map(([k, l]) =>
+            `<button class="status-btn ${structKind === k ? "active" : ""}" data-skind="${k}">${l}</button>`).join("")}
+        </div>
+        ${structKind == null ? `<p style="color:var(--muted);font-size:12.5px;margin:8px 0 0">Pilih satu dulu — form record-nya nyesuain jenis aktivitasmu.</p>` : ""}
       </div>`;
 
   const reflectFormHTML = reflectOpen && !hasReflection ? `
@@ -1302,7 +1334,9 @@ function renderDashboard() {
             `<button class="status-btn ${reflectStatus === k ? "active" : ""}" data-status="${k}">${l}</button>`).join("")}
         </div>
       </div>
+      ${kindPickerHTML}
       ${structFieldsHTML}
+      ${formReady ? `
       <div class="field">
         <label>${showStructFields ? `Refleksi <span class="opt-note">opsional — angka di atas yang jadi bukti utamanya</span>` : `Ceritakan apa yang sebenarnya terjadi
           <span class="mono" style="display:block;font-size:12px;margin-top:2px;color:${wordCount(reflectText) >= 12 ? "var(--growth)" : "var(--muted)"}">
@@ -1312,7 +1346,9 @@ function renderDashboard() {
         <textarea id="reflectText" rows="${showStructFields ? 2 : 4}" placeholder="${showStructFields ? "Ada yang kerasa beda hari ini? (boleh dikosongkan)" : "Apa yang kamu lakukan, apa yang kerasa, apa yang berubah..."}">${esc(reflectText)}</textarea>
       </div>
       ${reflectError ? `<p style="color:var(--rust);font-size:13px;margin:0 0 12px">${esc(reflectError)}</p>` : ""}
-      <button class="btn-primary full" id="submitReflect">${showStructFields ? "Simpan data & selesaikan quest" : "Simpan refleksi"}</button>
+      <button class="btn-primary full" id="submitReflect">${showStructFields ? "Simpan record & selesaikan quest" : "Simpan refleksi"}</button>` : ""}
+      ${!mustRecord && reflectStatus !== "skipped" ? `
+      <button class="btn-ghost" id="toggleRecord" style="margin-top:${formReady ? "10px" : "4px"}">${recordMode ? "← Balik ke refleksi teks aja" : "Aktivitas fisik? Catat sebagai record →"}</button>` : ""}
     </div>` : "";
 
   // Missed days stay reachable from the main quest-card area, not just
@@ -1389,11 +1425,28 @@ function renderDashboard() {
     </div>`;
 
   startCountdown(targetIsToday ? today?.expiresAt : null);
-  document.getElementById("openReflect")?.addEventListener("click", () => { reflectTarget = null; reflectOpen = true; reflectStatus = "done"; reflectText = ""; structForm = {}; reflectError = ""; renderDashboard(); });
+  // recordMode starts on for AI-tagged physical quests (record required
+  // server-side), off otherwise; structKind always starts unpicked - the
+  // user declares what they actually did each time, never inherited.
+  const openReflectFor = (target, quest) => {
+    reflectTarget = target; reflectOpen = true; reflectStatus = "done"; reflectText = "";
+    structForm = {}; reflectError = "";
+    recordMode = quest?.completionType === "structured-physical";
+    structKind = null;
+    renderDashboard();
+  };
+  document.getElementById("openReflect")?.addEventListener("click", () => openReflectFor(null, today?.quest));
   document.querySelectorAll("[data-reflect-date]").forEach((b) => b.addEventListener("click", () => {
-    reflectTarget = b.dataset.reflectDate; reflectOpen = true; reflectStatus = "done"; reflectText = ""; structForm = {}; reflectError = ""; renderDashboard();
+    const d = b.dataset.reflectDate;
+    openReflectFor(d, (s.history || []).find((h) => h.date === d)?.quest);
   }));
-  document.querySelectorAll(".status-btn").forEach((b) => b.addEventListener("click", () => { reflectStatus = b.dataset.status; reflectError = ""; renderDashboard(); }));
+  document.querySelectorAll("[data-skind]").forEach((b) => b.addEventListener("click", () => { structKind = b.dataset.skind; reflectError = ""; renderDashboard(); }));
+  document.getElementById("toggleRecord")?.addEventListener("click", () => { recordMode = !recordMode; structKind = null; reflectError = ""; renderDashboard(); });
+  // Bound by data attribute, not the shared .status-btn styling class -
+  // the activity-kind picker reuses that class for its look, and a
+  // class-bound handler would also fire there, silently blanking
+  // reflectStatus (data-status is undefined on kind buttons).
+  document.querySelectorAll("[data-status]").forEach((b) => b.addEventListener("click", () => { reflectStatus = b.dataset.status; reflectError = ""; renderDashboard(); }));
   const rtxt = document.getElementById("reflectText");
   if (rtxt) rtxt.addEventListener("input", (e) => {
     reflectText = e.target.value;
@@ -1413,7 +1466,13 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyimpan refleksi...");
     try {
       const body = { status: reflectStatus, text: reflectText, date: targetDay.date };
-      if (isStructuredQuest && reflectStatus !== "skipped") body.structuredData = { ...structForm };
+      if (recordMode && structKind && reflectStatus !== "skipped") {
+        // kind is the user's pick (both gym variants validate as "gym" -
+        // they only differ in which fields rendered); a bodyweight session
+        // never sends a weight, even one left over from switching variants.
+        body.structuredData = { ...structForm, kind: structKind === "cardio" ? "cardio" : "gym" };
+        if (structKind === "gym-badan") delete body.structuredData.bebanKg;
+      }
       await api("/api/reflection", { method: "POST", body });
       reflectOpen = false; reflectTarget = null; reflectText = ""; structForm = {}; reflectError = "";
       appState = await api("/api/state");

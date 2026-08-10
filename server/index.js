@@ -304,16 +304,23 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     const trimmedText = (text || "").trim();
     const inCrisis = safety.detectCrisis(trimmedText);
 
-    // Task 7b: structured-physical quests complete via typed fields, not the
-    // free reflection box. Validation (required fields + number plausibility)
-    // is deterministic code (server/structured.js) - a completed structured
-    // quest is growth-eligible WITHOUT the 12-word text gate, because the
-    // narrative is explicitly optional there. Skipped quests validate nothing
-    // (there is nothing to certify, and no growth either way).
+    // Task 7b + founder revision: physical quests complete via typed record
+    // fields, not the free reflection box. Validation (required fields +
+    // number plausibility) is deterministic code (server/structured.js) - a
+    // completed record is growth-eligible WITHOUT the 12-word text gate,
+    // because the narrative is explicitly optional there. WHICH form (kind)
+    // is the user's pick sent in the payload - quests are often open-ended
+    // about the activity, so the AI's structuredKind tag is only a fallback
+    // for clients that don't send one. The tag still makes a record
+    // REQUIRED for tagged quests; untagged quests may opt in by simply
+    // sending structuredData (this is also how legacy physical quests from
+    // before tagging get recorded properly). Skipped quests validate
+    // nothing (there is nothing to certify, and no growth either way).
     const isStructuredQuest = day.quest?.completionType === "structured-physical";
     let structuredClean = null;
-    if (isStructuredQuest && (status === "done" || status === "partial") && !inCrisis) {
-      const check = structured.validateStructuredData(day.quest.structuredKind, structuredData);
+    if ((isStructuredQuest || structuredData) && (status === "done" || status === "partial") && !inCrisis) {
+      const kind = (structuredData && structuredData.kind) || day.quest?.structuredKind;
+      const check = structured.validateStructuredData(kind, structuredData);
       if (!check.ok) return res.status(400).json({ error: check.error });
       structuredClean = check.clean;
     }
