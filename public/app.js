@@ -27,6 +27,16 @@ const PATHWAY_DESC = {
   Specialist: "Menyelam dalam ke satu domain spesifik yang tidak masuk kategori umum.",
 };
 const PATHWAY_NAMES = Object.keys(PATHWAY_DESC);
+// Task 9 (founder spec, 10 Agustus): fixed catalog of 15 sub-pathway
+// archetypes - MUST stay byte-for-byte identical to the copy in
+// server/claude.js (no shared module system between client/server here).
+const SUB_PATHWAY_NAMES = {
+  Architect: ["Engineer of Foundations", "Strategist of Blueprints", "Craftsman of Precision"],
+  Warden: ["Sentinel of Discipline", "Keeper of Boundaries", "Guardian of Consistency"],
+  Weaver: ["Connector of Circles", "Anchor of Belonging", "Bridge of Empathy"],
+  Pilgrim: ["Wanderer of Meaning", "Seeker of Horizons", "Nomad of Discovery"],
+  Specialist: ["Architect of Mastery", "Artisan of Depth", "Virtuoso of Precision"],
+};
 
 // v14 bug fix: the goal-input placeholders were the founder's OWN literal
 // examples from the PRD ("Punya badan sehat", "IELTS band 6.5", ...) -
@@ -405,7 +415,7 @@ let adaptivePhase = "card"; // "loading" | "card" | "thinking" | "analysis" | "g
 let adaptiveCards = []; // [{scenario, options:[{axis,text}], mostPreferred, leastPreferred}, ...] - length also serves as the card counter
 let adaptiveScenario = null; // {scenario, options} for the card currently on screen
 let adaptiveSelection = { mostPreferred: null, leastPreferred: null }; // in-progress picks for the current card
-let chapterAnalysis = null; // {insight, pathway, pathwayNoun, pathwayBlurb, secondaryTrait, significantShifts, lockTension, rawPathwayTop2}
+let chapterAnalysis = null; // {insight, pathway, subPathway, pathwayBlurb, secondaryTrait, significantShifts, lockTension, rawPathwayTop2}
 let pathwayOptions = []; // 3 swipeable candidate cards, computed once when chapterAnalysis loads - see buildPathwayOptions
 let selectedPathwayIndex = null;
 let overrideMode = false;
@@ -922,15 +932,25 @@ async function fetchScenarioCard() {
   }
 }
 
+// Task 9: sub-pathway archetype for a given pathway, from the fixed 15-name
+// catalog - same randomness idiom as the wildcard Pathway pick just below.
+function pickRandomSubPathway(pathway) {
+  const options = SUB_PATHWAY_NAMES[pathway] || [];
+  return options[Math.floor(Math.random() * options.length)] || pathway;
+}
 // 3 candidate Pathway cards (v7, replaces the single fixed recommendation):
 // #1 calibrated (from chapterAnalysis.pathway - the full-context AI pick),
 // #2 raw-radar (from rawPathwayTop2, falling back to the 2nd-strongest if
 // the strongest collides with #1), #3 a random wildcard from whatever's
 // left. Computed ONCE per analysis (not on every re-render) so the wildcard
-// doesn't shuffle out from under the user while they're looking at it.
+// (and, since Task 9, the sub-pathway archetype for #2/#3) doesn't shuffle
+// out from under the user while they're looking at it.
 function buildPathwayOptions(analysis) {
   const option1 = {
-    pathway: analysis.pathway, pathwayNoun: analysis.pathwayNoun,
+    // Task 9: server already validated/patched this to a member of
+    // SUB_PATHWAY_NAMES[analysis.pathway] (normalizeSubPathway) - client
+    // trusts it directly, same as it already trusts analysis.pathway.
+    pathway: analysis.pathway, pathwayNoun: analysis.subPathway,
     blurb: analysis.pathwayBlurb, source: "calibrated",
   };
   const rawTop2 = analysis.rawPathwayTop2 || [];
@@ -939,10 +959,14 @@ function buildPathwayOptions(analysis) {
   if (!rawPick || rawPick.pathway === option1.pathway) {
     rawPick = { pathway: PATHWAY_NAMES.find((p) => p !== option1.pathway) || option1.pathway, blurb: "Berdasarkan radar awal sebelum kalibrasi." };
   }
-  const option2 = { pathway: rawPick.pathway, pathwayNoun: rawPick.pathway, blurb: rawPick.blurb, source: "raw" };
+  // Task 9: #2/#3 never get full-context AI reasoning (raw ignores the
+  // scenario cards; wildcard is pure random), so their archetype is ALSO
+  // client-random - matches the existing levels-of-curation already in this
+  // function (#1 = full AI, #2-3 = lighter-touch), not a new inconsistency.
+  const option2 = { pathway: rawPick.pathway, pathwayNoun: pickRandomSubPathway(rawPick.pathway), blurb: rawPick.blurb, source: "raw" };
   const remaining = PATHWAY_NAMES.filter((p) => p !== option1.pathway && p !== option2.pathway);
   const wildcard = remaining[Math.floor(Math.random() * remaining.length)] || option1.pathway;
-  const option3 = { pathway: wildcard, pathwayNoun: wildcard, blurb: "Coba lihat arah yang beda.", source: "wildcard" };
+  const option3 = { pathway: wildcard, pathwayNoun: pickRandomSubPathway(wildcard), blurb: "Coba lihat arah yang beda.", source: "wildcard" };
   return [option1, option2, option3];
 }
 

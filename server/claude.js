@@ -379,6 +379,34 @@ async function generateScenarioCard(ctx) {
 // was dropped in v1.6 - its territory is already covered by the Growth stat,
 // so it's not carried forward as a Pathway target here either.
 const PATHWAY_NAMES = ["Architect", "Warden", "Weaver", "Pilgrim", "Specialist"];
+
+// Task 9 (founder spec, 10 Agustus): fixed catalog of 15 sub-pathway
+// archetypes (5 Pathway x 3 each), replacing free-text pathwayNoun
+// generation on the carousel path only - manual override stays free text,
+// untouched. English names are intentional (product terminology, same
+// treatment as the Pathway names themselves). MUST stay byte-for-byte
+// identical to the copy in public/app.js - no shared module system between
+// client/server in this codebase, same hand-synced pattern already used for
+// PATHWAY_NAMES/PATHWAY_DESC.
+const SUB_PATHWAY_NAMES = {
+  Architect: ["Engineer of Foundations", "Strategist of Blueprints", "Craftsman of Precision"],
+  Warden: ["Sentinel of Discipline", "Keeper of Boundaries", "Guardian of Consistency"],
+  Weaver: ["Connector of Circles", "Anchor of Belonging", "Bridge of Empathy"],
+  Pilgrim: ["Wanderer of Meaning", "Seeker of Horizons", "Nomad of Discovery"],
+  Specialist: ["Architect of Mastery", "Artisan of Depth", "Virtuoso of Precision"],
+};
+// Same principle as normalizeCompletionType above, but for subPathway: a
+// wrong/malformed pick here is a much smaller mistake than a bad pathway/
+// pathwayBlurb/rawPathwayTop2 (those still fail the whole response, see
+// generateChapterAnalysis below) - so an invalid, out-of-enum, or
+// wrong-pathway subPathway gets PATCHED to that pathway's first archetype
+// instead of discarding an otherwise-good Chapter Analysis. Never throws,
+// never blank.
+function normalizeSubPathway(pathway, subPathway) {
+  const options = SUB_PATHWAY_NAMES[pathway] || [];
+  if (options.includes(subPathway)) return subPathway;
+  return options[0] || null;
+}
 // Cheap, traceable fallback heuristic (no API key) - not meant to approximate
 // real AI judgment, just a reasonable non-random default. Real generateChapterAnalysis
 // below reads the whole conversation, not just the radar shape.
@@ -427,7 +455,16 @@ async function generateChapterAnalysis(ctx) {
     const tensionNote = flaggedTension.length
       ? `\n\nKETEGANGAN LOCK: sumbu berikut dikunci pengguna tapi berulang kali dipilih BERLAWANAN dari nilai kuncinya (mis. dikunci tinggi tapi berulang jadi paling-tidak-disukai, atau dikunci rendah tapi berulang jadi favorit): ${flaggedTension.map((a) => RADAR_AXIS_LABELS[a] || a).join(", ")}.${erodedLocks.length ? ` Angkanya SUDAH BERGESER akibat ini (v12 - kontradiksi berulang mengikis angka locked, bukan cuma dicatat): ${erodedLocks.map((e) => `${RADAR_AXIS_LABELS[e.axis] || e.axis} (${e.from}→${e.to})`).join(", ")}. WAJIB sebutkan pergeseran ANGKA ini secara eksplisit dan konkret di "insight", bukan cuma isyarat samar.` : ""} WAJIB munculkan ini di "insight" sebagai OBSERVASI JUJUR ke pengguna (bukan pernyataan final soal siapa yang benar), mis. "Kamu kunci Body di 10, tapi pilihan-pilihanmu di kartu beberapa kali condong ke arah lain, jadi sekarang turun ke 7 - masih relevan segitu, atau ini layak dipikir ulang?" Kamu TIDAK perlu menyarankan pengguna mengubah apa pun secara manual - sistem sudah menyesuaikan angkanya sendiri berdasarkan pola pilihan mereka; kalau pengguna tidak setuju dengan hasil itu, jalur override manual yang sudah ada tetap tersedia.`
       : "";
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah radar TERKALIBRASI (skala 1-10, total 35: Body, Growth, Livelihood, Emotional Stability, Social, Purpose, Autonomy) - hasil drag manual pengguna (ctx.radarRaw) yang sudah dikoreksi halus berdasarkan reaksi mereka ke Adaptive Scenario Cards (ctx.cards), karena self-report di skala 1-10 rawan bias yang diuji ulang lewat pilihan konkret. ctx.lockedAxes adalah sumbu yang SENGAJA mereka kunci (maksimal 3) dan BOLEH tetap muncul sebagai opsi kartu - angkanya TETAP KEBAL dari pilihan yang MENDUKUNG kuncinya, tapi (v12) BOLEH terkikis kalau pilihan berulang kali BERLAWANAN dari kuncinya (lihat KETEGANGAN LOCK di bawah kalau relevan) - jadi jangan berasumsi nilai di ctx.radarSnapshot untuk sumbu locked itu pasti sama dengan saat pertama dikunci. ctx.cards masing-masing berisi {scenario, options, mostPreferred, leastPreferred} - mostPreferred sumbu yang mereka pilih paling disukai, leastPreferred yang paling tidak disukai dari sisanya; dua sumbu yang tidak dipilih sama sekali di kartu itu netral. Pola pilihan ini + radar terkalibrasi + sumbu terkunci adalah seluruh sinyal yang kamu punya (tidak ada teks bebas dari pengguna). PENTING: kalau ada 2-3 sumbu terkunci di nilai tinggi sekaligus (kombinasi ekstrem, mis. Body dan Social dua-duanya dikunci tinggi), interpretasi kombinasi itu WAJIB dikaitkan ke pola pilihan aktual mereka - jangan mengarang generalisasi sendiri soal apa "arti" kombinasi itu.${shiftNote}${tensionNote}\n\nRangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Architect"|"Warden"|"Weaver"|"Pilgrim"|"Specialist", "pathwayNoun": string, "pathwayBlurb": string, "secondaryTrait": string|null, "rawPathwayTop2": [{"pathway": string, "blurb": string}, {"pathway": string, "blurb": string}]}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali) — ini bagian Chapter, boleh bicara soal fase/masalah hidup yang sedang dijalani. "pathway" satu rekomendasi UTAMA dari 5 nama itu berdasarkan pola dari SELURUH konteks (radar terkalibrasi + pola favorit/tidak-favorit semua kartu, termasuk yang paling-tidak-disukai — penolakan juga informasi), bukan cuma sumbu radar tertinggi. "pathwayNoun" satu kata benda peran spesifik buat pengguna ini (mis. kalau pathway Specialist dan konteksnya soal sales → "Closer"; kalau Architect → "Architect"). "pathwayBlurb" SATU kalimat pendek kenapa "pathway" ini relevan SECARA GAYA PERILAKU (ingat aturan Pathway≠Chapter di system prompt — bukan soal masalah/fase hidup yang sedang dijalani, itu sudah tugas "insight" di atas) - dipakai sebagai label kartu terpisah, jangan mengulang kalimat "insight" persis sama. "rawPathwayTop2": DUA kandidat pathway TERKUAT kalau kamu HANYA melihat ctx.radarRaw (radar SEBELUM kalibrasi) - untuk field ini SAJA, abaikan ctx.cards sepenuhnya, murni bentuk radar mentahnya; urutkan dari paling kuat, masing-masing dengan "blurb" satu kalimat (gaya perilaku, sama aturan dengan pathwayBlurb) kenapa radar mentah itu mengarah ke sana. Ini bukan rekomendasi utama - tujuannya menunjukkan ke pengguna bagaimana radar AWAL saja (sebelum bukti dari pilihan konkret) akan mengarahkan mereka, sebagai pembanding; boleh sama atau beda dengan "pathway". "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
+    // Task 9: pathway and subPathway are decided together in this SAME call,
+    // so the prompt can't pre-filter to "the 3 that match whichever pathway
+    // gets picked" - the model doesn't know its own pick yet. Inject the
+    // full 15-entry catalog (built from SUB_PATHWAY_NAMES itself, never
+    // hand-typed twice so the prompt can't drift from what normalizeSubPathway
+    // actually validates against) and constrain the choice after the fact.
+    const subPathwayCatalogText = Object.entries(SUB_PATHWAY_NAMES)
+      .map(([p, names]) => `${p}: ${names.map((n) => `"${n}"`).join(", ")}`)
+      .join("; ");
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: ini akhir dari onboarding adaptif. ctx.radarSnapshot adalah radar TERKALIBRASI (skala 1-10, total 35: Body, Growth, Livelihood, Emotional Stability, Social, Purpose, Autonomy) - hasil drag manual pengguna (ctx.radarRaw) yang sudah dikoreksi halus berdasarkan reaksi mereka ke Adaptive Scenario Cards (ctx.cards), karena self-report di skala 1-10 rawan bias yang diuji ulang lewat pilihan konkret. ctx.lockedAxes adalah sumbu yang SENGAJA mereka kunci (maksimal 3) dan BOLEH tetap muncul sebagai opsi kartu - angkanya TETAP KEBAL dari pilihan yang MENDUKUNG kuncinya, tapi (v12) BOLEH terkikis kalau pilihan berulang kali BERLAWANAN dari kuncinya (lihat KETEGANGAN LOCK di bawah kalau relevan) - jadi jangan berasumsi nilai di ctx.radarSnapshot untuk sumbu locked itu pasti sama dengan saat pertama dikunci. ctx.cards masing-masing berisi {scenario, options, mostPreferred, leastPreferred} - mostPreferred sumbu yang mereka pilih paling disukai, leastPreferred yang paling tidak disukai dari sisanya; dua sumbu yang tidak dipilih sama sekali di kartu itu netral. Pola pilihan ini + radar terkalibrasi + sumbu terkunci adalah seluruh sinyal yang kamu punya (tidak ada teks bebas dari pengguna). PENTING: kalau ada 2-3 sumbu terkunci di nilai tinggi sekaligus (kombinasi ekstrem, mis. Body dan Social dua-duanya dikunci tinggi), interpretasi kombinasi itu WAJIB dikaitkan ke pola pilihan aktual mereka - jangan mengarang generalisasi sendiri soal apa "arti" kombinasi itu.${shiftNote}${tensionNote}\n\nRangkum semuanya jadi Chapter Analysis. Balas JSON dengan bentuk persis:\n{"insight": string, "pathway": "Architect"|"Warden"|"Weaver"|"Pilgrim"|"Specialist", "subPathway": string, "pathwayBlurb": string, "secondaryTrait": string|null, "rawPathwayTop2": [{"pathway": string, "blurb": string}, {"pathway": string, "blurb": string}]}\n\nAturan: "insight" adalah rangkuman naratif 2-4 kalimat (nilai utama, gesekan/tantangan utama, arah transformasi) — personal, bukan generik, dan harus berdiri sendiri sebagai pemahaman tentang orang ini (akan dipakai sebagai konteks mentor setiap hari setelahnya, bukan cuma ditampilkan sekali) — ini bagian Chapter, boleh bicara soal fase/masalah hidup yang sedang dijalani. "pathway" satu rekomendasi UTAMA dari 5 nama itu berdasarkan pola dari SELURUH konteks (radar terkalibrasi + pola favorit/tidak-favorit semua kartu, termasuk yang paling-tidak-disukai — penolakan juga informasi), bukan cuma sumbu radar tertinggi. "subPathway" WAJIB salah satu dari 3 arketipe TETAP milik "pathway" yang kamu pilih di atas - BUKAN teks bebas, BUKAN mengarang nama baru, BUKAN pilih dari pathway lain. Daftar lengkap 15 arketipe (5 pathway x 3, tulis PERSIS sama termasuk huruf besar/kecil dan spasi): ${subPathwayCatalogText}. Setelah kamu tentukan "pathway", pilih SATU nama dari daftar milik pathway itu saja yang paling cocok dengan pola pengguna ini (dari radar terkalibrasi + pola pilihan kartu skenario). "pathwayBlurb" SATU kalimat pendek kenapa "pathway" ini relevan SECARA GAYA PERILAKU (ingat aturan Pathway≠Chapter di system prompt — bukan soal masalah/fase hidup yang sedang dijalani, itu sudah tugas "insight" di atas) - dipakai sebagai label kartu terpisah, jangan mengulang kalimat "insight" persis sama. "rawPathwayTop2": DUA kandidat pathway TERKUAT kalau kamu HANYA melihat ctx.radarRaw (radar SEBELUM kalibrasi) - untuk field ini SAJA, abaikan ctx.cards sepenuhnya, murni bentuk radar mentahnya; urutkan dari paling kuat, masing-masing dengan "blurb" satu kalimat (gaya perilaku, sama aturan dengan pathwayBlurb) kenapa radar mentah itu mengarah ke sana. Ini bukan rekomendasi utama - tujuannya menunjukkan ke pengguna bagaimana radar AWAL saja (sebelum bukti dari pilihan konkret) akan mengarahkan mereka, sebagai pembanding; boleh sama atau beda dengan "pathway". "secondaryTrait" opsional, satu frasa pendek trait tambahan yang terlihat tapi bukan fokus utama (null kalau tidak ada yang jelas) — informasional saja, bukan pathway kedua. Nada hangat, personal, seperti mentor yang benar-benar mendengarkan.`;
     const result = await callClaude(user);
     if (!result?.pathway || !PATHWAY_NAMES.includes(result.pathway)) throw new Error("bad shape");
     if (typeof result.pathwayBlurb !== "string") throw new Error("bad shape: pathwayBlurb");
@@ -437,6 +474,11 @@ async function generateChapterAnalysis(ctx) {
     ) {
       throw new Error("bad shape: rawPathwayTop2");
     }
+    // Unlike the three checks above (any failure discards the WHOLE
+    // response), an invalid subPathway is patched in place - a good Chapter
+    // Analysis shouldn't be thrown away over one fumbled constrained field.
+    result.subPathway = normalizeSubPathway(result.pathway, result.subPathway);
+    delete result.pathwayNoun; // superseded by subPathway - drop any stray legacy field the model might still emit out of habit
     return { ...result, significantShifts: shifts, lockTension: flaggedTension };
   } catch (e) {
     console.error("generateChapterAnalysis failed, using fallback:", e.message);
@@ -468,7 +510,7 @@ function fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks) {
       ? "Koneksi ke mentor lagi tersendat — tapi dari yang kamu ceritakan, ini arah yang tetap relevan buat dicoba."
       : "Mode tanpa API key: analisis di bawah ini masih berbasis pola sederhana dari radar-mu, belum benar-benar membaca ceritamu. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.") + shiftText + tensionText,
     pathway,
-    pathwayNoun: pathway,
+    subPathway: normalizeSubPathway(pathway, null),
     pathwayBlurb: "Direkomendasikan dari pola radar dan pilihan-pilihanmu selama onboarding.",
     rawPathwayTop2,
     secondaryTrait: null,
@@ -481,4 +523,5 @@ module.exports = {
   generateQuest, processReflection, hasKey,
   generateScenarioCard, generateChapterAnalysis,
   generateTargetOptions,
+  PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
 };
