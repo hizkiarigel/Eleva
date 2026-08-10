@@ -6,6 +6,7 @@ const db = require("./db");
 const auth = require("./auth");
 const ai = require("./claude");
 const safety = require("./safety");
+const structured = require("./structured");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -285,7 +286,7 @@ app.post("/api/profile", requireAuth, async (req, res) => {
 // Submit today's reflection
 app.post("/api/reflection", requireAuth, async (req, res) => {
   try {
-    const { status, text } = req.body;
+    const { status, text, structuredData } = req.body;
     const tk = todayKey();
     const state = await db.getState(req.userId);
     const day = await db.getDay(req.userId, tk);
@@ -293,6 +294,20 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
 
     const trimmedText = (text || "").trim();
     const inCrisis = safety.detectCrisis(trimmedText);
+
+    // Task 7b: structured-physical quests complete via typed fields, not the
+    // free reflection box. Validation (required fields + number plausibility)
+    // is deterministic code (server/structured.js) - a completed structured
+    // quest is growth-eligible WITHOUT the 12-word text gate, because the
+    // narrative is explicitly optional there. Skipped quests validate nothing
+    // (there is nothing to certify, and no growth either way).
+    const isStructuredQuest = day.quest?.completionType === "structured-physical";
+    let structuredClean = null;
+    if (isStructuredQuest && (status === "done" || status === "partial") && !inCrisis) {
+      const check = structured.validateStructuredData(day.quest.structuredKind, structuredData);
+      if (!check.ok) return res.status(400).json({ error: check.error });
+      structuredClean = check.clean;
+    }
 
     let deltas = {};
     let mentorReply;
@@ -305,7 +320,9 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       // (server/claude.js) — that stays in place too, this doesn't replace it.
       mentorReply = safety.CRISIS_RESOURCE_MESSAGE;
     } else {
-      const eligible = (status === "done" || status === "partial") && wordCount(text) >= 12;
+      const eligible = structuredClean
+        ? true // completeness+plausibility already code-verified above
+        : (status === "done" || status === "partial") && wordCount(text) >= 12;
       const ctx = {
         // originStory is v3; situation is the pre-v3 fallback for accounts
         // that onboarded before this field existed.
@@ -313,6 +330,10 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
         quest: day.quest,
         status,
         reflectionText: trimmedText,
+        structuredData: structuredClean || undefined,
+        // Recent days give the AI the progressive baseline ("last time 15
+        // reps") for its mentorReply on structured quests.
+        recentDays: structuredClean ? await db.recentDays(req.userId, tk, 7) : undefined,
         stats: state.stats,
         growthSessions: state.growthSessions,
       };
@@ -337,6 +358,11 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     const reflection = {
       status,
       text: trimmedText,
+      // Stored inside the existing reflection jsonb - the PRD's "smallest
+      // schema change" option (no new column). recentDays returns the full
+      // reflection object, so this automatically reaches future quest
+      // generation as the progressive baseline.
+      ...(structuredClean ? { structuredData: structuredClean } : {}),
       deltas,
       mentorReply,
       timestamp: new Date().toISOString(),

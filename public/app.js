@@ -68,6 +68,42 @@ function goalPlaceholder(pendingPathway) {
   return `mis. ${label}, target konkret 14 hari ke depan`;
 }
 
+// Task 8: contextual help - one small "?" top-right on the four listed
+// onboarding screens + the daily dashboard. Copy is STATIC per screen
+// (written once, plain language, no unexplained RPG jargon) - deliberately
+// not AI-generated: mechanics are the same for everyone, so a fixed human-
+// written text is cheaper and more controllable than a per-call generation.
+// The radar/card/carousel/dashboard texts are the PRD's own examples.
+const HELP_TEXT = {
+  radar: "Ini cara Eleva kenalan sama fokus hidupmu sekarang. Tarik titik-titiknya sesuai porsi yang kamu rasa — nggak ada jawaban benar/salah. Kalau ada sisi yang kamu yakin banget dan nggak mau ikut bergeser, tap titiknya untuk mengunci (maksimal 3).",
+  card: "Beberapa skenario singkat. Pilih yang paling & paling nggak kamu banget — dari situ Eleva mulai ngerti pola kamu. Jawab jujur aja, nggak ada jawaban salah.",
+  analysis: "3 gaya yang mungkin cocok buat kamu, berdasarkan yang barusan kamu isi. Pilih salah satu, atau tulis sendiri kalau ngerasa nggak ada yang pas — bisa diganti nanti.",
+  goals: "Tulis 1-3 hal yang mau kamu capai selama 14 hari ke depan — boleh dari area mana pun (badan, belajar, kerjaan, relasi). Tugas harianmu nanti diarahkan ke sini, gantian tiap harinya.",
+  dashboard: "Quest hari ini dari Eleva, disesuaikan sama fokusmu. Selesaikan lalu tandai/isi datanya buat lihat progresmu.",
+};
+let helpOpen = null; // screen key whose help sheet is showing, or null
+function helpBtnHTML(key) {
+  return `<button class="help-btn" data-help="${key}" aria-label="Bantuan layar ini">?</button>`;
+}
+function helpSheetHTML(key) {
+  if (helpOpen !== key) return "";
+  return `
+    <div class="help-overlay" id="helpOverlay">
+      <div class="help-sheet fadeUp">
+        <p>${esc(HELP_TEXT[key] || "")}</p>
+        <button class="btn-primary full" id="closeHelp">Oke, ngerti</button>
+      </div>
+    </div>`;
+}
+// One delegated listener for open/close - survives every innerHTML re-render,
+// so no per-screen wiring needed. Clicking the dimmed backdrop closes too
+// (light, non-blocking, per the PRD's DoD).
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest?.("[data-help]");
+  if (btn) { helpOpen = btn.dataset.help; render(); return; }
+  if (e.target.id === "helpOverlay" || e.target.id === "closeHelp") { helpOpen = null; render(); }
+});
+
 const MATURITY_TIERS = ["Emerging", "Practicing", "Reliable", "System", "Master"];
 function maturityTier(growthSessions) {
   return MATURITY_TIERS[Math.min(MATURITY_TIERS.length - 1, Math.floor((growthSessions || 0) / 3))];
@@ -304,6 +340,11 @@ let appState = null;
 let reflectOpen = false;
 let reflectStatus = "done";
 let reflectText = "";
+// Task 7b: structured-physical quests complete via typed fields instead of
+// the free reflection box - values keyed by field name, kept across
+// re-renders; narrative text stays optional for those quests.
+let structForm = {};
+let reflectError = "";
 let resetArmed = false;
 let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
@@ -762,6 +803,7 @@ function renderOnboarding() {
 
   root.innerHTML = `
     <div class="shell">
+      ${step.type === "radar" ? helpBtnHTML("radar") + helpSheetHTML("radar") : ""}
       <div class="eyebrow mono">ELEVA · ONBOARDING</div>
       <div class="step-dots">
         ${ONBOARD_STEPS.map((_, i) => `<div class="dot-seg ${i <= onboardStep ? "active" : ""}"></div>`).join("")}
@@ -924,6 +966,7 @@ function renderAdaptive() {
         : "Siap lanjut, atau tap ulang buat ganti pilihan.";
     root.innerHTML = `
       <div class="shell">
+        ${helpBtnHTML("card")}${helpSheetHTML("card")}
         <div class="eyebrow mono">ELEVA · ONBOARDING</div>
         <div class="mono" style="font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:20px">KARTU KE-${adaptiveCards.length + 1}</div>
         ${onboardError ? `<p style="color:var(--rust);font-size:13.5px;margin:0 0 16px">${esc(onboardError)}</p>` : ""}
@@ -991,6 +1034,7 @@ function renderAdaptive() {
     const flaggedLock = chapterAnalysis?.lockTension || [];
     root.innerHTML = `
       <div class="shell">
+        ${helpBtnHTML("analysis")}${helpSheetHTML("analysis")}
         <div class="eyebrow mono">ELEVA · CHAPTER ANALYSIS</div>
         <div style="height:20px"></div>
         <p class="fr" style="font-size:17px;line-height:1.7;margin:0 0 20px">${esc(chapterAnalysis?.insight || "")}</p>
@@ -1064,6 +1108,7 @@ function renderAdaptive() {
     const filled = goalInputs.map((g) => g.trim()).filter(Boolean);
     root.innerHTML = `
       <div class="shell">
+        ${helpBtnHTML("goals")}${helpSheetHTML("goals")}
         <div class="eyebrow mono">ELEVA · FIRST TRIAL</div>
         <div style="height:16px"></div>
         <div class="chapter-header">
@@ -1101,6 +1146,18 @@ function renderAdaptive() {
   }
 }
 
+// Compact one-line summary of a day's structured completion data - shown on
+// the finished quest card and in history, so the numbers stay visible as the
+// progressive baseline they are.
+function structSummary(sd) {
+  if (!sd) return "";
+  if (sd.kind === "gym") {
+    return `${sd.gerakan} · ${sd.set}×${sd.repetisi}${sd.bebanKg != null ? ` @ ${sd.bebanKg}kg` : ""} · RPE ${sd.rpe} · berat di ${sd.titikGagal}`;
+  }
+  const jenis = sd.jenisAktivitas === "Lainnya" ? (sd.jenisLainnya || "Lainnya") : sd.jenisAktivitas;
+  return `${jenis} · ${sd.durasiMenit} menit${sd.jarakKm != null ? ` · ${sd.jarakKm} km` : ""} · RPE ${sd.rpe} · berat di ${sd.titikBerat}`;
+}
+
 function renderDashboard() {
   const s = appState;
   const today = s.today;
@@ -1116,10 +1173,53 @@ function renderDashboard() {
         <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
           ${today.reflection.status === "done" ? "SELESAI" : today.reflection.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
         </div>
+        ${today.reflection.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(today.reflection.structuredData))}</div>` : ""}
         <p class="fr" style="font-style:italic;font-size:14.5px;margin:0;line-height:1.6">${esc(today.reflection.mentorReply)}</p>
         ${Object.keys(today.reflection.deltas || {}).length ? `<div class="deltas">${Object.entries(today.reflection.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
       </div>`}
   `;
+
+  // Task 7b: structured-physical quests swap the free reflection box for
+  // typed fields (numbers are far harder to fabricate convincingly than a
+  // paragraph). Narrative becomes optional there. Skipped = nothing to
+  // certify, so the fields hide and no growth applies either way.
+  const isStructuredQuest = today?.quest?.completionType === "structured-physical";
+  const showStructFields = isStructuredQuest && reflectStatus !== "skipped";
+  const sf = (k) => esc(structForm[k] ?? "");
+  const structFieldsHTML = !showStructFields ? "" : today.quest.structuredKind === "gym" ? `
+      <div class="field">
+        <label>Gerakan</label>
+        <input type="text" data-sf="gerakan" maxlength="200" value="${sf("gerakan")}" placeholder="mis. push-up, squat, bench press" />
+      </div>
+      <div class="struct-grid">
+        <div class="field"><label>Set</label><input type="number" min="1" data-sf="set" value="${sf("set")}" placeholder="3" /></div>
+        <div class="field"><label>Repetisi / set</label><input type="number" min="1" data-sf="repetisi" value="${sf("repetisi")}" placeholder="12" /></div>
+      </div>
+      <div class="struct-grid">
+        <div class="field"><label>Beban (kg) <span class="opt-note">opsional (bodyweight: kosongkan)</span></label><input type="number" min="0" step="0.5" data-sf="bebanKg" value="${sf("bebanKg")}" placeholder="20" /></div>
+        <div class="field"><label>Tingkat usaha (RPE 1-10)</label><select data-sf="rpe">${["", ...Array.from({ length: 10 }, (_, i) => String(i + 1))].map((v) => `<option value="${v}" ${String(structForm.rpe ?? "") === v ? "selected" : ""}>${v || "Pilih..."}</option>`).join("")}</select></div>
+      </div>
+      <div class="field">
+        <label>Titik gagal/berat</label>
+        <input type="text" data-sf="titikGagal" maxlength="200" value="${sf("titikGagal")}" placeholder="mis. set 3 rep 8, atau set terakhir" />
+      </div>` : `
+      <div class="field">
+        <label>Jenis aktivitas</label>
+        <select data-sf="jenisAktivitas">${["", "Lari", "Jalan cepat", "Sepeda", "Lompat tali", "Lainnya"].map((v) => `<option value="${v}" ${String(structForm.jenisAktivitas ?? "") === v ? "selected" : ""}>${v || "Pilih..."}</option>`).join("")}</select>
+      </div>
+      ${structForm.jenisAktivitas === "Lainnya" ? `
+      <div class="field">
+        <label>Aktivitasnya apa?</label>
+        <input type="text" data-sf="jenisLainnya" maxlength="200" value="${sf("jenisLainnya")}" placeholder="mis. renang, hiking" />
+      </div>` : ""}
+      <div class="struct-grid">
+        <div class="field"><label>Durasi (menit)</label><input type="number" min="1" data-sf="durasiMenit" value="${sf("durasiMenit")}" placeholder="30" /></div>
+        <div class="field"><label>Jarak (km) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.1" data-sf="jarakKm" value="${sf("jarakKm")}" placeholder="5" /></div>
+      </div>
+      <div class="struct-grid">
+        <div class="field"><label>Tingkat usaha (RPE 1-10)</label><select data-sf="rpe">${["", ...Array.from({ length: 10 }, (_, i) => String(i + 1))].map((v) => `<option value="${v}" ${String(structForm.rpe ?? "") === v ? "selected" : ""}>${v || "Pilih..."}</option>`).join("")}</select></div>
+        <div class="field"><label>Titik mulai berat</label><input type="text" data-sf="titikBerat" maxlength="200" value="${sf("titikBerat")}" placeholder="mis. menit ke-12, atau tengah" /></div>
+      </div>`;
 
   const reflectFormHTML = reflectOpen && !hasReflection ? `
     <div class="quest-card fadeUp" style="margin-top:-14px">
@@ -1130,20 +1230,23 @@ function renderDashboard() {
             `<button class="status-btn ${reflectStatus === k ? "active" : ""}" data-status="${k}">${l}</button>`).join("")}
         </div>
       </div>
+      ${structFieldsHTML}
       <div class="field">
-        <label>Ceritakan apa yang sebenarnya terjadi
+        <label>${showStructFields ? `Refleksi <span class="opt-note">opsional — angka di atas yang jadi bukti utamanya</span>` : `Ceritakan apa yang sebenarnya terjadi
           <span class="mono" style="display:block;font-size:12px;margin-top:2px;color:${wordCount(reflectText) >= 12 ? "var(--growth)" : "var(--muted)"}">
-            <span id="wc">${wordCount(reflectText)}</span> kata · minimal ~12 kata biar stat bisa naik (bukan checklist)
-          </span>
+            <span id="wc">${wordCount(reflectText)}</span> kata · minimal ~12 kata biar stat bisa naik — dan sebut detail konkret yang diminta quest-nya (bukan checklist)
+          </span>`}
         </label>
-        <textarea id="reflectText" rows="4" placeholder="Apa yang kamu lakukan, apa yang kerasa, apa yang berubah...">${esc(reflectText)}</textarea>
+        <textarea id="reflectText" rows="${showStructFields ? 2 : 4}" placeholder="${showStructFields ? "Ada yang kerasa beda hari ini? (boleh dikosongkan)" : "Apa yang kamu lakukan, apa yang kerasa, apa yang berubah..."}">${esc(reflectText)}</textarea>
       </div>
-      <button class="btn-primary full" id="submitReflect">Simpan refleksi</button>
+      ${reflectError ? `<p style="color:var(--rust);font-size:13px;margin:0 0 12px">${esc(reflectError)}</p>` : ""}
+      <button class="btn-primary full" id="submitReflect">${showStructFields ? "Simpan data & selesaikan quest" : "Simpan refleksi"}</button>
     </div>` : "";
 
   root.innerHTML = `
     <div class="shell">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+      ${helpBtnHTML("dashboard")}${helpSheetHTML("dashboard")}
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;padding-right:34px">
         <div class="eyebrow mono" style="margin:0">ELEVA</div>
         <div class="mono" style="color:var(--muted);font-size:12px">${todayLabel()}</div>
       </div>
@@ -1184,7 +1287,7 @@ function renderDashboard() {
           <div class="history-item ${d.reflection ? "done" : ""}">
             <div class="date mono">${d.date}</div>
             <div class="title">${esc(d.quest?.title || "")}</div>
-            ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : ""}
+            ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : d.reflection?.structuredData ? `<div class="snippet mono">${esc(structSummary(d.reflection.structuredData))}</div>` : ""}
           </div>`).join("")}
       </div>` : ""}
       <div class="footer-bar">
@@ -1195,23 +1298,38 @@ function renderDashboard() {
       </div>
     </div>`;
 
-  document.getElementById("openReflect")?.addEventListener("click", () => { reflectOpen = true; reflectStatus = "done"; reflectText = ""; renderDashboard(); });
-  document.querySelectorAll(".status-btn").forEach((b) => b.addEventListener("click", () => { reflectStatus = b.dataset.status; renderDashboard(); }));
+  document.getElementById("openReflect")?.addEventListener("click", () => { reflectOpen = true; reflectStatus = "done"; reflectText = ""; structForm = {}; reflectError = ""; renderDashboard(); });
+  document.querySelectorAll(".status-btn").forEach((b) => b.addEventListener("click", () => { reflectStatus = b.dataset.status; reflectError = ""; renderDashboard(); }));
   const rtxt = document.getElementById("reflectText");
   if (rtxt) rtxt.addEventListener("input", (e) => {
     reflectText = e.target.value;
-    document.getElementById("wc").textContent = wordCount(reflectText);
+    const wc = document.getElementById("wc");
+    if (wc) wc.textContent = wordCount(reflectText);
+  });
+  document.querySelectorAll("[data-sf]").forEach((el) => {
+    const evt = el.tagName === "SELECT" ? "change" : "input";
+    el.addEventListener(evt, (e) => {
+      structForm[el.dataset.sf] = e.target.value;
+      // Only the "Lainnya" toggle needs a re-render (it adds/removes a field);
+      // plain typing must NOT re-render or the input would lose focus.
+      if (el.dataset.sf === "jenisAktivitas") renderDashboard();
+    });
   });
   document.getElementById("submitReflect")?.addEventListener("click", async () => {
     root.innerHTML = spinnerHTML("Menyimpan refleksi...");
     try {
-      await api("/api/reflection", { method: "POST", body: { status: reflectStatus, text: reflectText } });
-      reflectOpen = false; reflectText = "";
+      const body = { status: reflectStatus, text: reflectText };
+      if (isStructuredQuest && reflectStatus !== "skipped") body.structuredData = { ...structForm };
+      await api("/api/reflection", { method: "POST", body });
+      reflectOpen = false; reflectText = ""; structForm = {}; reflectError = "";
       appState = await api("/api/state");
       renderDashboard();
     } catch (e) {
-      ui = { view: "error", message: e.message };
-      render();
+      // Validation errors (implausible numbers, missing fields) come back as
+      // 400s with a concrete message - show them inline with the entered
+      // values intact, never a dead-end error screen.
+      reflectError = e.message;
+      renderDashboard();
     }
   });
   document.getElementById("armReset")?.addEventListener("click", () => { resetArmed = true; renderDashboard(); });

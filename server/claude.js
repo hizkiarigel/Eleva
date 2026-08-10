@@ -61,12 +61,28 @@ async function callClaude(userContent) {
   return JSON.parse(clean);
 }
 
+// Task 7b: the model self-reports which completion flow a quest uses, but
+// the pair is normalized here in code (defense in depth, same principle as
+// every other AI-shaped field): structured-physical REQUIRES a valid
+// structuredKind, anything malformed downgrades to the safe "reflective"
+// path rather than rendering a broken form.
+function normalizeCompletionType(quest) {
+  if (!quest) return quest;
+  if (quest.completionType === "structured-physical" && ["cardio", "gym"].includes(quest.structuredKind)) {
+    return quest;
+  }
+  quest.completionType = "reflective";
+  delete quest.structuredKind;
+  return quest;
+}
+
 async function generateQuest(ctx) {
   if (!hasKey()) return fallbackQuest(ctx);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "quest": {"mode": "quest"|"acting", "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective", "structuredKind": "cardio"|"gym"|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective. Quest kualitatif/emosional/sosial → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
     const result = await callClaude(user);
     if (!result?.quest?.title) throw new Error("bad shape");
+    normalizeCompletionType(result.quest);
     return result;
   } catch (e) {
     console.error("generateQuest failed, using fallback:", e.message);
@@ -77,7 +93,14 @@ async function generateQuest(ctx) {
 async function processReflection(ctx) {
   if (!hasKey()) return fallbackReflection();
   try {
-    const user = `Konteks (JSON):\n${JSON.stringify(ctx)}\n\nPengguna baru saja merefleksikan quest hari ini. Balas JSON dengan bentuk persis:\n{"statDeltas": {"<stat>": number}, "mentorReply": string, "chapterAdvance": boolean, "newChapterTitle": string|null}\n\nAturan: statDeltas hanya untuk stat yang benar-benar tersentuh oleh refleksi ini, nilai integer 1-5, JANGAN beri nilai jika refleksinya kosong/dangkal. mentorReply singkat (1-3 kalimat), merespons ISI refleksi mereka secara spesifik. chapterAdvance hanya true jika refleksi ini menunjukkan pergeseran pola hidup yang nyata dan signifikan.`;
+    // Task 7 (specificity gate) / Task 7b (structured path): two evaluation
+    // modes, chosen by whether ctx.structuredData exists. Both feed the same
+    // response shape - the route still hard-gates deltas independently
+    // (defense in depth), this prompt is the semantic layer on top.
+    const evaluationRules = ctx.structuredData
+      ? `Quest hari ini bertipe TERSTRUKTUR-FISIK: pengguna mengisi ctx.structuredData (field angka/pilihan yang kelengkapan & kewajarannya SUDAH divalidasi kode sebelum sampai ke kamu — jangan menolak karena format). Nilai statDeltas dari data terstruktur itu (plus ctx.reflectionText kalau diisi — itu OPSIONAL, ketiadaannya BUKAN alasan menolak growth). mentorReply: komentari angkanya secara spesifik (durasi/jarak/RPE/titik berat atau set×rep×beban), dan kalau ctx.recentDays punya structuredData sebelumnya, sebut baseline progresnya secara konkret (mis. "minggu lalu 15 repetisi, sekarang 18").`
+      : `GROWTH-GATE KESPESIFIKAN (WAJIB, Task 7 - ini alasan gate panjang-kata saja tidak cukup): bandingkan ctx.reflectionText dengan ctx.quest.description/title. KALAU deskripsi quest hari ini secara eksplisit meminta detail konkret (angka, ukuran, jumlah, durasi, nama orang/tempat, observasi spesifik - mis. "catat repetisi, jarak, dan titik menyerah"), maka refleksi yang TIDAK menyebut SATU PUN detail yang diminta itu WAJIB ditolak growth-nya (statDeltas = {} kosong), TIDAK PEDULI seberapa panjang teksnya - refleksi generik panjang ("udah olahraga tadi, capek tapi enak, seneng bisa konsisten") adalah persis celah Goodhart yang gate ini tutup, dan mentorReply-nya menyebutkan dengan hangat detail spesifik apa yang kurang supaya besok bisa diterima. Sebaliknya, refleksi SINGKAT tapi menyebut detail spesifik yang diminta = SAH, beri growth yang pantas. KALAU quest hari ini bertipe kualitatif/emosional dan deskripsinya TIDAK meminta detail terukur apa pun, JANGAN memaksakan standar angka - refleksi jujur yang wajar dan menyentuh isi quest-nya tetap layak growth (gate ini soal kespesifikan YANG DIMINTA, bukan soal semua refleksi harus berisi angka).`;
+    const user = `Konteks (JSON):\n${JSON.stringify(ctx)}\n\nPengguna baru saja merefleksikan quest hari ini. Balas JSON dengan bentuk persis:\n{"statDeltas": {"<stat>": number}, "mentorReply": string, "chapterAdvance": boolean, "newChapterTitle": string|null}\n\n${evaluationRules}\n\nAturan umum: statDeltas hanya untuk stat yang benar-benar tersentuh, nilai integer 1-5, JANGAN beri nilai jika kosong/dangkal. mentorReply singkat (1-3 kalimat), merespons ISI konkret mereka secara spesifik. chapterAdvance hanya true jika ada pergeseran pola hidup yang nyata dan signifikan.`;
     return await callClaude(user);
   } catch (e) {
     console.error("processReflection failed, using fallback:", e.message);
@@ -94,7 +117,9 @@ function fallbackQuest(ctx) {
       ? "Koneksi ke mentor lagi tersendat — tapi ini quest yang tetap relevan buat kebanyakan orang di fase seperti ini."
       : "Mode tanpa API key: quest di bawah ini generik dulu. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran membaca konteksmu.",
     pathwayNoun: ctx.pathwayNoun || (ctx.pathway ? ctx.pathway : null),
-    quest: { mode: "quest", ...q },
+    // Fallback quests are qualitative by construction - always the
+    // reflective completion flow, never the structured-physical form.
+    quest: { mode: "quest", completionType: "reflective", ...q },
   };
 }
 
