@@ -1,1 +1,21 @@
-{"0": "Server Bootstrap & Core Wiring", "1": "Frontend App Logic (app.js)", "2": "Claude AI Integration & Fallbacks", "3": "Graphify Skill Documentation", "4": "Database Layer (db.js)", "5": "Core Product Mechanics (PRD)", "6": "Frontend HTML View Helpers", "7": "React Prototype Components", "8": "NPM Package Dependencies", "9": "Frontend API & Render Orchestration", "10": "Radar Chart SVG Visualization", "11": "Authentication Module (auth.js)", "12": "Practice Test Grading", "13": "Quest Countdown & Summary UI", "14": "Job Match & Artifacts Feature", "15": "Root CLAUDE.md Graphify Rules", "16": "Privacy Notice Task", "17": "Prompt Caching Task"}
+{
+  "0": "index.js",
+  "1": "app.js",
+  "2": "claude.js",
+  "3": "graphify Skill Definition (SKILL.md)",
+  "4": "db.js",
+  "5": "Task 5: Adaptive Pathway Onboarding",
+  "6": "renderDashboard",
+  "7": "Eleva_Prototype.jsx",
+  "8": "package.json",
+  "9": "renderAdaptive",
+  "10": "renderOnboarding",
+  "11": "auth.js",
+  "12": "practiceTest.js",
+  "13": "questSummaryCard",
+  "14": "Job Match Analysis (Task 10b)",
+  "15": "Eleva Root CLAUDE.md — graphify Integration Rules",
+  "16": "Task 4: Privacy Notice (minimal)",
+  "17": "Task 6: Prompt Caching",
+  "18": "completedResultCardHTML"
+}

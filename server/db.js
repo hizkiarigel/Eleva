@@ -181,6 +181,20 @@ async function init() {
     ALTER TABLE days ADD COLUMN IF NOT EXISTS is_side_quest BOOLEAN NOT NULL DEFAULT false;
   `);
 
+  // Task 12 (META tab): a standalone session started on-demand from the META
+  // grid, not part of the daily per-goal rotation - always goal_index NULL
+  // (never competes for a goal's one-open-quest slot) and explicitly flagged
+  // (not just inferred from goal_index NULL, which legacy ungoaled accounts
+  // also use - same reasoning as is_side_quest above) so GET /api/state's
+  // needySlots check and the dashboard's Primary Quest carousel both know to
+  // ignore it. Evidence from a META session still counts toward growth-gate
+  // longitudinal evaluation and stat_activity (Decay) normally - only the
+  // Milestone/current_target update in POST /api/reflection is skipped,
+  // which it already is for any goal_index-NULL row.
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS is_meta BOOLEAN NOT NULL DEFAULT false;
+  `);
+
   // Kisahmu screen: full narrative per Chapter, chronological. Chapters are
   // archived HERE the moment chapter_number advances (before character_state
   // is overwritten with the new title/narrative) - see index.js's advance
@@ -464,7 +478,7 @@ async function resetUser(userId) {
 // so several rows can legitimately share the same date) ---
 
 function rowToQuest(r) {
-  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: r.reflection, createdAt: r.created_at, isSideQuest: r.is_side_quest };
+  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: r.reflection, createdAt: r.created_at, isSideQuest: r.is_side_quest, isMeta: r.is_meta };
 }
 
 // Every quest still open (not yet marked done) across the user's goals -
@@ -493,10 +507,10 @@ async function getQuestById(userId, id) {
 // fresh insert - id is a plain serial, there's nothing to collide with,
 // unlike the old (user_id, date) key that forced awkward upsert/conflict
 // logic.
-async function createQuest(userId, goalIndex, date, { quest, insight }, isSideQuest = false) {
+async function createQuest(userId, goalIndex, date, { quest, insight }, isSideQuest = false, isMeta = false) {
   const { rows } = await pool.query(
-    `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest) VALUES ($1, $2, $3, $4, $5, NULL, $6) RETURNING *`,
-    [userId, goalIndex, date, quest, insight, isSideQuest]
+    `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest, is_meta) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7) RETURNING *`,
+    [userId, goalIndex, date, quest, insight, isSideQuest, isMeta]
   );
   return rowToQuest(rows[0]);
 }

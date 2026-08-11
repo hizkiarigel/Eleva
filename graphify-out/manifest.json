@@ -1,8 +1,8 @@
 {
   ".claude/settings.json": {
     "mtime": 1786464183.847447,
-    "ast_hash": "8e354e95633a2e8f9b91523377f1968c",
-    "semantic_hash": "8e354e95633a2e8f9b91523377f1968c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "package.json": {
     "mtime": 1786461864.3997664,
@@ -10,9 +10,9 @@
     "semantic_hash": "37fcdb16bacd40695d6a25a92f5b0b2f"
   },
   "public/app.js": {
-    "mtime": 1786461864.4037666,
-    "ast_hash": "44af9fd99c6eefbc0cdecc8216f031a6",
-    "semantic_hash": "44af9fd99c6eefbc0cdecc8216f031a6"
+    "mtime": 1786470530.1323037,
+    "ast_hash": "9375bd8602425d69ff0524d09688f831",
+    "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
     "mtime": 1786461864.409907,
@@ -30,14 +30,14 @@
     "semantic_hash": "75cee197ec0f4a68de97fe4c5f0e5b3d"
   },
   "server/db.js": {
-    "mtime": 1786461864.4157665,
-    "ast_hash": "a47444540c7c01395d1f13ff97db394d",
-    "semantic_hash": "a47444540c7c01395d1f13ff97db394d"
+    "mtime": 1786470396.256296,
+    "ast_hash": "0c15019573ae27cade696403cde3ce63",
+    "semantic_hash": ""
   },
   "server/index.js": {
-    "mtime": 1786461864.4157665,
-    "ast_hash": "7a2f7fa24729f2c80834ea3c8a7dfd7e",
-    "semantic_hash": "7a2f7fa24729f2c80834ea3c8a7dfd7e"
+    "mtime": 1786470435.9322982,
+    "ast_hash": "4cdc10663fc9db515cc2134512e5f794",
+    "semantic_hash": ""
   },
   "server/jobMatch.js": {
     "mtime": 1786461864.4157665,

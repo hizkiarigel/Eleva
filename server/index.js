@@ -208,7 +208,11 @@ app.get("/api/state", requireAuth, async (req, res) => {
     const goals = state.goals || [];
     let openQuests = await db.getOpenQuests(req.userId);
     const goalSlots = goals.length ? goals.map((_, i) => i) : [null];
-    const needySlots = goalSlots.filter((gi) => !openQuests.some((q) => q.goalIndex === gi));
+    // Task 12 (META): a META row must never count as "this slot has an open
+    // quest" - a goal_index-null META session would otherwise satisfy a
+    // legacy ungoaled account's single slot check (both use goal_index NULL)
+    // and silently block that account's real daily quest from generating.
+    const needySlots = goalSlots.filter((gi) => !openQuests.some((q) => q.goalIndex === gi && !q.isMeta));
     if (needySlots.length) {
       // One shared context snapshot for every goal generated in this pass -
       // avoids a re-read per goal, and right after onboarding (the only
@@ -891,6 +895,61 @@ app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menganalisis kecocokan lowongan." });
+  }
+});
+
+// Task 12 (META tab): on-demand access to the 3 structured tools (form
+// evidence fisik/lari, Practice Test, Job Match) outside the daily
+// per-goal rotation - "sesi bebas", not tied to any goal, never generated
+// by generateQuest. Always goal_index NULL + is_meta true (see the column
+// comment in db.js's init()), so it never competes for a goal's one-open-
+// quest slot and POST /api/reflection's Milestone/current_target update
+// (gated on day.goalIndex != null) never fires for it. The 3 completion
+// routes below (/api/reflection, /api/practice-test/*, /api/job-match/
+// analyze) are otherwise completely unmodified - a META quest completes
+// through the exact same code as a Today's Trial quest of the same
+// completionType, so growth-gate/Decay/Riwayat all apply identically.
+app.post("/api/meta/start", requireAuth, async (req, res) => {
+  try {
+    const { tool, kind } = req.body;
+    let quest;
+    if (tool === "body") {
+      if (!["cardio", "gym", "recovery"].includes(kind)) {
+        return res.status(400).json({ error: "Pilih jenis aktivitas dulu." });
+      }
+      quest = {
+        completionType: "structured-physical",
+        structuredKind: kind,
+        evidenceSchema: null, // no Milestone target to compare against - a free session
+        statFocus: "body",
+        title: "Latihan Mandiri",
+        description: "Sesi latihan bebas dari META — catat aktivitasmu, tidak terikat ke goal atau Milestone manapun.",
+        why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
+      };
+    } else if (tool === "practice-test") {
+      quest = {
+        completionType: "practice-test",
+        statFocus: "growth",
+        title: "Practice Test Mandiri",
+        description: "Latihan soal bebas dari META, di luar rotasi goal harian.",
+        why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
+      };
+    } else if (tool === "job-match") {
+      quest = {
+        completionType: "job-match-analysis",
+        statFocus: "livelihood",
+        title: "Job Match Analysis Mandiri",
+        description: "Cek kecocokan lowongan bebas dari META, di luar rotasi goal harian.",
+        why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
+      };
+    } else {
+      return res.status(400).json({ error: "Tools tidak dikenal." });
+    }
+    const created = await db.createQuest(req.userId, null, todayKey(), { quest, insight: null }, false, true);
+    res.json({ ok: true, quest: created });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal memulai sesi META." });
   }
 });
 

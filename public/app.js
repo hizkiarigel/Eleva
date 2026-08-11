@@ -130,6 +130,7 @@ const HELP_TEXT = {
   analysis: "3 gaya yang mungkin cocok buat kamu, berdasarkan yang barusan kamu isi. Pilih salah satu, atau tulis sendiri kalau ngerasa nggak ada yang pas — bisa diganti nanti.",
   goals: "Tulis 1-3 hal yang mau kamu capai selama 14 hari ke depan — boleh dari area mana pun (badan, belajar, kerjaan, relasi). Tugas harianmu nanti diarahkan ke sini, gantian tiap harinya.",
   dashboard: "Quest hari ini dari Eleva, disesuaikan sama fokusmu. Kerjakan, lalu tap Mulai — aktivitas fisik dicatat sebagai record singkat (pilih jenisnya: cardio atau gym), sisanya lewat refleksi teks.",
+  meta: "Latihan mandiri, kapan aja — nggak perlu nunggu Eleva kasih quest-nya. Sesi di sini tetap dihitung sebagai bukti pertumbuhan, tapi nggak menggerakkan Milestone goal manapun.",
 };
 // Founder feedback (10 Agustus, live screenshot dari layar radar): "orang
 // awam" nggak otomatis tahu apa arti nama sumbu ini secara istilah - butuh
@@ -463,6 +464,11 @@ let practiceTestFlow = null;
 // step: "upload-cv" (skipped straight to "upload-job" if a CV artifact
 // already exists in the library) -> "upload-job".
 let jobMatchFlow = null;
+// Task 12 (META): true while the inline Cardio/Gym/Recovery picker for the
+// "Body" META box is showing (tapped but no kind chosen yet). Reset after
+// /api/meta/start succeeds or the user backs out.
+let metaBodyPicking = false;
+let metaError = "";
 // Task 10a (Artifacts library): sheet state, independent of any quest flow -
 // reachable any time via its own icon, not just from job-match-analysis.
 let artifactsOpen = false;
@@ -1885,10 +1891,12 @@ function appHeaderHTML(s, extraIconsHTML) {
       </div>
     </div>`;
 }
+// Task 12: 5th tab, extensible grid of on-demand tools - see metaScreenHTML.
 const TAB_ITEMS = [
   { key: "home", icon: "◆", label: "Home" },
   { key: "kisahmu", icon: "📖", label: "Kisahmu" },
   { key: "character", icon: "◈", label: "Character" },
+  { key: "meta", icon: "▦", label: "META" },
   { key: "settings", icon: "⚙", label: "Settings" },
 ];
 function tabBarHTML() {
@@ -2035,6 +2043,45 @@ function settingsScreenHTML() {
     </div>`;
 }
 
+// Task 12 (META tab): grid of 3 on-demand tools, reusing the exact same
+// completion flows a Today's Trial quest of that completionType already
+// uses (structured-physical form, Practice Test, Job Match Analysis) - see
+// the data-meta-tool/data-meta-body-kind handlers in renderDashboard for how
+// a tap here starts a session via POST /api/meta/start and hands off into
+// those unmodified flows. Extensible: a future 4th tool is just one more
+// entry in META_TOOLS, no structural change needed (per the PRD's explicit
+// "JANGAN di-hardcode ke 3 selamanya").
+const META_TOOLS = [
+  { tool: "body", icon: "🏃", label: "Fisik / Lari", desc: "Catat latihan cardio, gym, atau pemulihan — bebas, tanpa target." },
+  { tool: "practice-test", icon: "📝", label: "Practice Test", desc: "Latihan soal Reading/Listening, di luar rotasi goal harian." },
+  { tool: "job-match", icon: "🗎", label: "Job Match", desc: "Cek kecocokan CV-mu ke lowongan mana pun, kapan aja." },
+];
+function metaScreenHTML() {
+  return `
+    <div class="eyebrow mono">META</div>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 18px">Latihan mandiri — nggak menggerakkan Milestone goal manapun, tapi tetap dihitung sebagai bukti pertumbuhan.</p>
+    ${metaError ? `<p style="color:var(--rust);font-size:13px;margin:0 0 14px">${esc(metaError)}</p>` : ""}
+    <div class="meta-grid">
+      ${META_TOOLS.map((t) => `
+        <button class="meta-tool-card" data-meta-tool="${t.tool}">
+          <span class="meta-tool-icon">${t.icon}</span>
+          <span class="meta-tool-label">${esc(t.label)}</span>
+          <span class="meta-tool-desc">${esc(t.desc)}</span>
+        </button>`).join("")}
+    </div>
+    ${metaBodyPicking ? `
+    <div class="quest-card fadeUp" style="margin-top:16px">
+      <div class="field">
+        <label>Jenis latihannya apa?</label>
+        <div class="status-row">
+          ${[["cardio", "Cardio"], ["gym", "Gym"], ["recovery", "Recovery"]].map(([k, l]) =>
+            `<button class="status-btn" data-meta-body-kind="${k}">${l}</button>`).join("")}
+        </div>
+      </div>
+      <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
+    </div>` : ""}`;
+}
+
 function renderDashboard() {
   const s = appState;
   // Task 11c: server now mixes real Side Quests into openQuests (flagged
@@ -2042,7 +2089,11 @@ function renderDashboard() {
   // carousel/reflect-target logic below only ever sees Primary Quests, and
   // Side Quests render separately via sideQuestRowHTML.
   const allOpenQuests = s.openQuests || [];
-  const openQuests = allOpenQuests.filter((q) => !q.isSideQuest);
+  // Task 12: META rows stay findable in allOpenQuests (so the reflect form
+  // can look one up by id while a META session is in progress via
+  // targetDay/reflectTarget below), but never join the Primary Quest
+  // carousel - see the is_meta column comment in db.js's init().
+  const openQuests = allOpenQuests.filter((q) => !q.isSideQuest && !q.isMeta);
   const sideQuests = allOpenQuests.filter((q) => q.isSideQuest);
   const goals = s.goals || [];
   const goalLabel = (goalIndex) => (goalIndex != null && goals[goalIndex] ? goals[goalIndex] : null);
@@ -2254,6 +2305,7 @@ function renderDashboard() {
   const screenBodyHTML = activeScreen === "kisahmu" ? kisahmuScreenHTML(s)
     : activeScreen === "character" ? characterScreenHTML(s)
     : activeScreen === "settings" ? settingsScreenHTML()
+    : activeScreen === "meta" ? metaScreenHTML()
     : homeBodyHTML;
 
   // Help "?" and Artifacts icons now sit INLINE in the header's icon row
@@ -2262,12 +2314,14 @@ function renderDashboard() {
   // Home's content grew taller than the fixed offset assumed.
   const homeExtraIconsHTML = activeScreen === "home"
     ? `<button class="header-icon-btn" id="openArtifacts" aria-label="Artifacts">🗎</button>${helpBtnHTML("dashboard")}`
+    : activeScreen === "meta" ? helpBtnHTML("meta")
     : "";
 
   root.innerHTML = `
     <div class="shell app-shell">
       ${appHeaderHTML(s, homeExtraIconsHTML)}
       ${activeScreen === "home" ? `${helpSheetHTML("dashboard")}${artifactsSheetHTML()}` : ""}
+      ${activeScreen === "meta" ? helpSheetHTML("meta") : ""}
       <div class="screen-body">${screenBodyHTML}</div>
       ${tabBarHTML()}
     </div>`;
@@ -2347,6 +2401,60 @@ function renderDashboard() {
     }
     renderDashboard();
   }));
+  // Task 12 (META): tapping a tool card starts a standalone session via
+  // POST /api/meta/start, then hands off into the EXACT SAME flow state a
+  // Today's Trial quest of that completionType would use (practiceTestFlow/
+  // jobMatchFlow/reflectTarget - see the [data-reflect-id] handler above and
+  // the job-match CV-check it does) - no duplicated UI, just a different
+  // entry point. Body needs a kind picked first (cardio/gym/recovery, no AI
+  // tag to infer from since there's no quest generation for a free session).
+  document.querySelectorAll("[data-meta-tool]").forEach((b) => b.addEventListener("click", async () => {
+    const tool = b.dataset.metaTool;
+    metaError = "";
+    if (tool === "body") {
+      metaBodyPicking = true;
+      renderDashboard();
+      return;
+    }
+    root.innerHTML = spinnerHTML("Menyiapkan sesi...");
+    try {
+      const { quest } = await api("/api/meta/start", { method: "POST", body: { tool } });
+      if (tool === "practice-test") {
+        practiceTestFlow = { questId: quest.id, step: "kind", answers: {} };
+      } else if (tool === "job-match") {
+        let cv = null;
+        try {
+          const { artifacts } = await api("/api/artifacts");
+          cv = artifacts.find((a) => a.type === "cv") || null;
+        } catch (e) { /* fall through to upload-cv either way */ }
+        jobMatchFlow = { questId: quest.id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
+      }
+      activeScreen = "home";
+    } catch (e) {
+      metaError = e.message;
+    }
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-meta-body-kind]").forEach((b) => b.addEventListener("click", async () => {
+    const kind = b.dataset.metaBodyKind;
+    root.innerHTML = spinnerHTML("Menyiapkan sesi...");
+    try {
+      const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "body", kind } });
+      reflectTarget = quest.id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
+      structForm = {}; reflectError = ""; unableQuestId = null;
+      recordMode = true;
+      // Mirrors the [data-reflect-id] handler's structuredKind fallback cascade.
+      structKind = kind === "gym" ? "gym-alat" : kind;
+      structKindAuto = true;
+      metaBodyPicking = false;
+      activeScreen = "home";
+    } catch (e) {
+      metaBodyPicking = false;
+      metaError = e.message;
+    }
+    renderDashboard();
+  }));
+  document.getElementById("metaBodyCancel")?.addEventListener("click", () => { metaBodyPicking = false; renderDashboard(); });
   document.querySelectorAll("[data-pt-kind]").forEach((b) => b.addEventListener("click", () => {
     practiceTestFlow.kind = b.dataset.ptKind;
     practiceTestFlow.step = "track";

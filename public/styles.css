@@ -397,4 +397,20 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   padding: 14px 0; border-bottom: 1px solid var(--hair); font-size: 14.5px;
 }
 .settings-row.disabled { color: var(--muted); }
+
+/* Task 12 (META tab) */
+.meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.meta-tool-card {
+  background: var(--surface2); border: 1px solid var(--hair); border-radius: 12px;
+  padding: 18px 12px; display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 6px; cursor: pointer;
+}
+.meta-tool-card:active { border-color: var(--accent-bright); }
+.meta-tool-icon { font-size: 24px; }
+.meta-tool-label { font-size: 13px; font-weight: 600; }
+.meta-tool-desc { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+@media (max-width: 420px) {
+  .meta-grid { grid-template-columns: 1fr; }
+  .meta-tool-card { flex-direction: row; text-align: left; padding: 14px; }
+}
 .settings-soon { font-size: 11px; color: var(--muted-dim); }
