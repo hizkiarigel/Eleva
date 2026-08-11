@@ -31,11 +31,29 @@ app.use(
 
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-function todayKey() {
-  return new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD, server local time
+function todayKey(d) {
+  return (d ? new Date(d) : new Date()).toLocaleDateString("en-CA"); // YYYY-MM-DD, server local time
 }
 function wordCount(text) {
   return (text || "").trim().split(/\s+/).filter(Boolean).length;
+}
+
+// Homepage redesign (Kisahmu): a real 6-chip enum, mirrored client-side in
+// public/app.js (same hand-sync pattern as SUB_PATHWAY_NAMES - no shared
+// module system between client/server here).
+const KONDISI_LABELS = ["Capek", "Sakit/cedera", "Sibuk berat", "Traveling", "Mentally drained", "Energi lebih"];
+
+// Kisahmu: archives the chapter that's about to be superseded, BEFORE the
+// caller overwrites character_state with the new one - shared by both
+// completion routes that can trigger a chapter advance (POST /api/reflection,
+// POST /api/practice-test/submit). No-op when not actually advancing.
+async function archiveChapterIfAdvancing(userId, state, allowAdvance) {
+  if (!allowAdvance) return;
+  await db.archiveChapter(userId, {
+    chapterNumber: state.chapterNumber,
+    chapterTitle: state.chapterTitle,
+    narrative: state.chapterNarrative,
+  });
 }
 
 function requireAuth(req, res, next) {
@@ -122,6 +140,14 @@ app.get("/api/state", requireAuth, async (req, res) => {
       }
     }
 
+    // Homepage redesign: "Kondisi Hari Ini" is scoped to TODAY - lazy reset
+    // back to Normal the first time a new calendar day is seen, same idiom
+    // as the resonance-check above (no cron job, just checked on read).
+    if (state.kondisiStatus !== "Normal" && todayKey(state.kondisiUpdatedAt) !== todayKey()) {
+      await db.resetKondisiToNormal(req.userId);
+      state.kondisiStatus = "Normal";
+    }
+
     // Per-goal quest model (founder-reported regression this replaces: a
     // goal's quest used to get silently swapped out before the user marked
     // it done - first by a pure calendar-day rotation, then by a 24h
@@ -176,6 +202,11 @@ app.get("/api/state", requireAuth, async (req, res) => {
         state.chapterNumber = result.chapterNumber || state.chapterNumber;
         state.chapterTitle = result.chapterTitle || state.chapterTitle;
         state.pathwayNoun = state.pathwayNoun || result.pathwayNoun || null;
+        // Homepage redesign "Eleva Observed" card - refreshed whenever a new
+        // quest generates. If several goals are needy in the same pass (only
+        // really happens right after onboarding), last one wins; they'd all
+        // describe roughly the same recentDays anyway.
+        if (result.observed) state.observed = result.observed;
         const created = await db.createQuest(req.userId, goalIndex, todayKey(), { quest: result.quest, insight: result.insight });
         openQuests.push(created);
       }
@@ -185,22 +216,60 @@ app.get("/api/state", requireAuth, async (req, res) => {
         chapterTitle: state.chapterTitle,
         growthSessions: state.growthSessions,
         pathwayNoun: state.pathwayNoun,
+        observed: state.observed,
       });
       openQuests.sort((a, b) => (a.goalIndex ?? -1) - (b.goalIndex ?? -1));
     }
 
     const fresh = await db.getState(req.userId);
+
+    // Homepage redesign, Character screen: "trending down" is COSMETIC,
+    // derived from real history - NOT an automatic stat decrease (stats here
+    // only ever move via real reflection, that principle doesn't change).
+    // Flagged only when a stat grew in the PRIOR 7 days but grew less (or not
+    // at all) in the most RECENT 7 days - avoids flagging a stat that simply
+    // hasn't had a chance to move yet.
+    const recentForTrend = await db.allHistory(req.userId, 40);
+    const now = Date.now();
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const recentSum = {}, priorSum = {};
+    recentForTrend.forEach((d) => {
+      const ts = d.reflection?.timestamp ? new Date(d.reflection.timestamp).getTime() : null;
+      if (!ts) return;
+      const age = now - ts;
+      const bucket = age <= WEEK_MS ? recentSum : age <= WEEK_MS * 2 ? priorSum : null;
+      if (!bucket) return;
+      Object.entries(d.reflection?.deltas || {}).forEach(([k, v]) => { bucket[k] = (bucket[k] || 0) + (Number(v) || 0); });
+    });
+    const statTrends = {};
+    Object.keys(fresh.stats || {}).forEach((k) => {
+      statTrends[k] = (priorSum[k] || 0) > 0 && (recentSum[k] || 0) < (priorSum[k] || 0);
+    });
+
+    // Kisahmu: archived chapters (already-superseded) + the current
+    // in-progress one appended at the end (never archived until IT gets
+    // superseded), so the screen always shows the full autobiography.
+    const chapters = [
+      ...(await db.listChapters(req.userId)),
+      { chapterNumber: fresh.chapterNumber, chapterTitle: fresh.chapterTitle, narrative: fresh.chapterNarrative, createdAt: null },
+    ];
+
     res.json({
       profile: fresh.profile,
       stats: fresh.stats,
+      statTrends,
       chapterNumber: fresh.chapterNumber,
       chapterTitle: fresh.chapterTitle,
+      chapterNarrative: fresh.chapterNarrative,
+      chapters,
       growthSessions: fresh.growthSessions,
       pathwayNoun: fresh.pathwayNoun,
       pathwayStatus: fresh.pathwayStatus,
       goals: fresh.goals,
       goalTargets: fresh.goalTargets,
       openQuests,
+      observed: fresh.observed,
+      kondisiStatus: fresh.kondisiStatus,
       history: await db.allHistory(req.userId, 8),
       aiActive: ai.hasKey(),
     });
@@ -326,6 +395,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     let mentorReply;
     let chapterAdvance = false;
     let newChapterTitle = null;
+    let newChapterNarrative = null;
     // Shared with the "Target Berikutnya" baseline below - one query, not two.
     const recentGoalDays = structuredClean ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined;
 
@@ -360,6 +430,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
         : "Coba ceritain lebih banyak apa yang sebenarnya terjadi — segelintir kata belum cukup buat pertumbuhan kelihatan nyata (dan itu memang sengaja begitu).";
       chapterAdvance = result.chapterAdvance;
       newChapterTitle = result.newChapterTitle;
+      newChapterNarrative = result.newChapterNarrative;
     }
 
     const newStats = { ...state.stats };
@@ -369,7 +440,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       }
     });
     const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
-    const allowAdvance = chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0;
+    const allowAdvance = chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0 && Boolean(newChapterTitle && newChapterNarrative);
 
     const reflection = {
       status,
@@ -384,10 +455,12 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
+    await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
     await db.updateState(req.userId, {
       stats: newStats,
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
-      chapterTitle: allowAdvance && newChapterTitle ? newChapterTitle : state.chapterTitle,
+      chapterTitle: allowAdvance ? newChapterTitle : state.chapterTitle,
+      chapterNarrative: allowAdvance ? newChapterNarrative : undefined,
       growthSessions: newGrowthSessions,
       pathwayNoun: state.pathwayNoun,
     });
@@ -455,6 +528,23 @@ app.post("/api/goal-target", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan target." });
+  }
+});
+
+// Homepage redesign: "Kondisi Hari Ini" - light, not a quest, not mandatory.
+// Single current value, reset lazily back to Normal by GET /api/state once a
+// new calendar day starts (see the lazy-reset check there).
+app.post("/api/kondisi", requireAuth, async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (status !== "Normal" && !KONDISI_LABELS.includes(status)) {
+      return res.status(400).json({ error: "Status kondisi tidak dikenal." });
+    }
+    await db.updateKondisi(req.userId, status);
+    res.json({ ok: true, kondisiStatus: status });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan kondisi." });
   }
 });
 
@@ -534,7 +624,7 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
       }
     });
     const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
-    const allowAdvance = result.chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0;
+    const allowAdvance = result.chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0 && Boolean(result.newChapterTitle && result.newChapterNarrative);
 
     const reflection = {
       status: "done", text: "",
@@ -542,10 +632,12 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
       deltas, mentorReply: result.mentorReply, timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
+    await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
     await db.updateState(req.userId, {
       stats: newStats,
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
-      chapterTitle: allowAdvance && result.newChapterTitle ? result.newChapterTitle : state.chapterTitle,
+      chapterTitle: allowAdvance ? result.newChapterTitle : state.chapterTitle,
+      chapterNarrative: allowAdvance ? result.newChapterNarrative : undefined,
       growthSessions: newGrowthSessions,
       pathwayNoun: state.pathwayNoun,
     });

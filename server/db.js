@@ -125,6 +125,38 @@ async function init() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+
+  // Homepage redesign (design handoff, 11 Agustus): "Kondisi Hari Ini" is a
+  // real feature (not a placeholder) - a single current value per user,
+  // reset back to "Normal" lazily whenever a NEW calendar day is first seen
+  // (see getState below), same lazy-check idiom as the pathway resonance-
+  // check. chapter_narrative is the CURRENT chapter's paragraph body (Kisahmu
+  // screen needs more than the short chapterTitle already had) - seeded with
+  // a static Chapter-1 default at signup, same spirit as the static default
+  // chapterTitle "Mencari Arah" already gets.
+  await pool.query(`
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS kondisi_status TEXT NOT NULL DEFAULT 'Normal';
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS kondisi_updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS chapter_narrative TEXT NOT NULL DEFAULT 'Awal dari First Trial-mu — belum banyak pola yang kelihatan, tapi ini titik mulainya.';
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS observed JSONB;
+  `);
+
+  // Kisahmu screen: full narrative per Chapter, chronological. Chapters are
+  // archived HERE the moment chapter_number advances (before character_state
+  // is overwritten with the new title/narrative) - see index.js's advance
+  // logic. The row for the user's CURRENT (not-yet-archived) chapter always
+  // lives only in character_state, never duplicated here until it's actually
+  // superseded.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chapters (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      chapter_number INTEGER NOT NULL,
+      chapter_title TEXT NOT NULL,
+      narrative TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
 }
 
 // --- users ---
@@ -185,6 +217,17 @@ async function getState(userId) {
     // string like goalTargets - {level, history: [{ts,testKind,track,score,total}]}.
     // Empty object until a goal's first Practice Test is submitted.
     practiceTest: row.practice_test || {},
+    // Homepage redesign: current chapter's full narrative paragraph (Kisahmu
+    // screen), and "Kondisi Hari Ini" - a single current value, reset to
+    // Normal lazily by index.js whenever a new calendar day is first seen
+    // (kondisiUpdatedAt is what that check compares against).
+    chapterNarrative: row.chapter_narrative,
+    kondisiStatus: row.kondisi_status,
+    kondisiUpdatedAt: row.kondisi_updated_at,
+    // "Eleva Observed" card content, refreshed whenever a new quest is
+    // generated (see index.js) - null until the first quest with real
+    // recentDays context to reason about exists.
+    observed: row.observed,
   };
 }
 
@@ -219,12 +262,41 @@ async function createState(userId, {
 // Every field here is written unconditionally, including pathwayNoun - callers
 // must pass the existing value through (e.g. state.pathwayNoun) if unchanged,
 // or it gets cleared.
-async function updateState(userId, { stats, chapterNumber, chapterTitle, growthSessions, pathwayNoun }) {
+async function updateState(userId, { stats, chapterNumber, chapterTitle, growthSessions, pathwayNoun, chapterNarrative, observed }) {
   await pool.query(
-    `UPDATE character_state SET stats = $2, chapter_number = $3, chapter_title = $4, growth_sessions = $5, pathway_noun = $6
+    `UPDATE character_state SET stats = $2, chapter_number = $3, chapter_title = $4, growth_sessions = $5, pathway_noun = $6,
+       chapter_narrative = COALESCE($7, chapter_narrative), observed = COALESCE($8, observed)
      WHERE user_id = $1`,
-    [userId, stats, chapterNumber, chapterTitle, growthSessions, pathwayNoun || null]
+    [userId, stats, chapterNumber, chapterTitle, growthSessions, pathwayNoun || null, chapterNarrative || null, observed || null]
   );
+}
+
+// Homepage redesign: "Kondisi Hari Ini" - a single current value, no history
+// kept (the design only ever shows "today's" condition). Bumps
+// kondisi_updated_at so index.js's lazy daily-reset check has something to
+// compare against.
+async function updateKondisi(userId, status) {
+  await pool.query(`UPDATE character_state SET kondisi_status = $2, kondisi_updated_at = now() WHERE user_id = $1`, [userId, status]);
+}
+// Called ONLY by the lazy daily-reset check (index.js) - resets back to
+// Normal without bumping kondisi_updated_at to "now" a second time
+// unnecessarily; the check already knows the date rolled over.
+async function resetKondisiToNormal(userId) {
+  await pool.query(`UPDATE character_state SET kondisi_status = 'Normal', kondisi_updated_at = now() WHERE user_id = $1`, [userId]);
+}
+
+// Kisahmu: archives the OUTGOING chapter (current title+narrative, about to
+// be overwritten) before character_state moves on to the new one - called
+// from index.js's advance logic, never on its own.
+async function archiveChapter(userId, { chapterNumber, chapterTitle, narrative }) {
+  await pool.query(
+    `INSERT INTO chapters (user_id, chapter_number, chapter_title, narrative) VALUES ($1, $2, $3, $4)`,
+    [userId, chapterNumber, chapterTitle, narrative]
+  );
+}
+async function listChapters(userId) {
+  const { rows } = await pool.query(`SELECT chapter_number, chapter_title, narrative, created_at FROM chapters WHERE user_id = $1 ORDER BY chapter_number ASC`, [userId]);
+  return rows.map((r) => ({ chapterNumber: r.chapter_number, chapterTitle: r.chapter_title, narrative: r.narrative, createdAt: r.created_at }));
 }
 
 // Fokus 2.2/2.3: sets (or replaces) the persistent target for one goal.
@@ -409,4 +481,5 @@ module.exports = {
   getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
   listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
+  updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
 };

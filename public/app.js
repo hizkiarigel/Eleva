@@ -7,6 +7,27 @@ const STAT_ORDER = [
   ["body", "Body"], ["growth", "Growth"], ["livelihood", "Livelihood"],
   ["emotional", "Emotional Stability"], ["social", "Social"], ["purpose", "Purpose"], ["autonomy", "Autonomy"],
 ];
+
+// Homepage redesign: mirrors server's KONDISI_LABELS exactly (same hand-sync
+// pattern as SUB_PATHWAY_NAMES - no shared module system client/server here).
+const KONDISI_LABELS = ["Capek", "Sakit/cedera", "Sibuk berat", "Traveling", "Mentally drained", "Energi lebih"];
+
+// Character screen: 5-tier naming per stat level, "Vigil" set (the
+// handoff's own prototype default) - the other two drafted sets (Ember,
+// Depth) are recorded in PRD.md but not wired up, picking one was explicitly
+// left to implementation.
+const TIER_NAMES = ["Initiate", "Wanderer", "Adept", "Sentinel", "Sovereign"];
+// Stats are stored 0-100 (see DEFAULT_STATS) - 5 levels of 20 points each.
+// Level N's progress bar fills with how far INTO that level the stat is
+// (not raw 0-100), which is the whole point of the redesign: "how close to
+// leveling" instead of "% of some absolute total".
+function statLevelInfo(value) {
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const level = Math.min(5, Math.floor(v / 20) + 1);
+  const intoLevel = v - (level - 1) * 20;
+  const progressPct = level === 5 ? Math.min(100, (intoLevel / 20) * 100) : (intoLevel / 20) * 100;
+  return { level, tierName: TIER_NAMES[level - 1], progressPct };
+}
 // Pre-MECE accounts (8-element era) keep their stored stats keys until they
 // reset & re-onboard - display labels only, deliberately NOT a data
 // migration (per PRD: founder resets, nobody else has real data).
@@ -437,6 +458,17 @@ let jobMatchFlow = null;
 let artifactsOpen = false;
 let artifactsList = null; // fetched lazily on first open, refetched after add/replace
 let artifactsError = "";
+// Homepage redesign (design handoff, 11 Agustus): persistent nav shell +
+// restructured Home. activeScreen drives which screen body renders inside
+// the shared header/tab-bar shell (renderDashboard stays the single entry
+// point - it just branches on this now instead of always rendering Home).
+let activeScreen = "home"; // "home" | "kisahmu" | "character" | "settings"
+// Per-Primary-Quest-card progressive disclosure ("Kenapa Eleva kasih quest
+// ini →") - keyed by quest id, independent per card per spec.
+let reasonOpenIds = new Set();
+let sideQuestsOpen = false;
+let kondisiOpen = false;
+let kondisiError = "";
 let resetArmed = false;
 let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
@@ -1625,18 +1657,26 @@ function formatCountdown(ms) {
 }
 function questSummaryCard(q, goalLabel) {
   if (!q) return `<div class="quest-card"><div class="dot pending"></div>${spinnerHTML("AI sedang menyusun quest...")}</div>`;
-  const label = q.quest.mode === "acting" ? "ACTING METHOD" : "QUEST";
+  // Homepage redesign: "PRIMARY QUEST" (was "QUEST") - every active goal's
+  // card is a Primary Quest now, none demoted, per the handoff's core rule.
+  const label = q.quest.mode === "acting" ? "ACTING METHOD" : "PRIMARY QUEST";
   const remaining = q.createdAt ? new Date(q.createdAt).getTime() + 24 * 60 * 60 * 1000 - Date.now() : null;
   const expired = remaining != null && remaining <= 0;
+  // "Kenapa Eleva kasih quest ini →" progressive disclosure - independent
+  // per card (reasonOpenIds keyed by quest id), replaces the old always-
+  // visible `why` paragraph so the card leads with the instruction, not the
+  // reasoning behind it.
+  const reasonOpen = reasonOpenIds.has(q.id);
   return `
     <div class="quest-card">
       <div class="dot pending"></div>
       <div class="qlabel mono">${label}${goalLabel ? ` · ${esc(goalLabel)}` : ""}${q.quest.statFocus ? ` · ${esc(statLabel(q.quest.statFocus))}` : ""}</div>
       <h2 class="fr">${esc(q.quest.title)}</h2>
       <p class="desc">${esc(q.quest.description)}</p>
-      <p class="why">${esc(q.quest.why)}</p>
       ${remaining != null ? `<p class="countdown mono${expired ? " urgent" : ""}" data-quest-countdown="${q.id}" data-created="${esc(q.createdAt)}">${expired ? "⏳ Waktu buat mulai quest ini udah lewat 24 jam." : `⏳ ${formatCountdown(remaining)}`}</p>` : ""}
       <button class="btn-primary" data-reflect-id="${q.id}" ${expired ? "disabled" : ""}>${expired ? "Waktu habis" : "Mulai"}</button>
+      <button class="reason-toggle" data-reason-toggle="${q.id}">${reasonOpen ? "Sembunyikan alasan" : "Kenapa Eleva kasih quest ini →"}</button>
+      ${reasonOpen ? `<p class="why fadeUp">${esc(q.quest.why)}</p>` : ""}
     </div>`;
 }
 // Single ticker shared across every visible countdown - writes straight to
@@ -1740,6 +1780,148 @@ function completedResultCardHTML(r) {
       ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
       ${targetPickerHTML(r.target)}
       <button class="btn-primary full" id="dismissCompleted" style="margin-top:18px">Lanjut</button>
+    </div>`;
+}
+
+// Homepage redesign: persistent header (date + avatar + settings gear) and
+// bottom tab bar, shared across all 4 screens (Home/Kisahmu/Character/
+// Settings). Avatar and gear both route to Settings, per the handoff
+// ("Both currently route to Settings in the prototype; profile may get its
+// own screen later").
+function appHeaderHTML(s, extraIconsHTML) {
+  const initial = (s.profile?.name || "?").trim().charAt(0).toUpperCase() || "?";
+  return `
+    <div class="app-header">
+      <div class="mono header-date">${todayLabel().toUpperCase()}</div>
+      <div class="header-icons">
+        ${extraIconsHTML || ""}
+        <button class="header-icon-btn" id="headerAvatar" aria-label="Profil">${esc(initial)}</button>
+        <button class="header-icon-btn" id="headerSettings" aria-label="Settings">⚙</button>
+      </div>
+    </div>`;
+}
+const TAB_ITEMS = [
+  { key: "home", icon: "◆", label: "Home" },
+  { key: "kisahmu", icon: "📖", label: "Kisahmu" },
+  { key: "character", icon: "◈", label: "Character" },
+  { key: "settings", icon: "⚙", label: "Settings" },
+];
+function tabBarHTML() {
+  return `
+    <div class="tab-bar">
+      ${TAB_ITEMS.map((t) => `
+        <button class="tab-item ${activeScreen === t.key ? "active" : ""}" data-tab="${t.key}">
+          <span class="tab-icon">${t.icon}</span>
+          <span class="tab-label">${t.label}</span>
+        </button>`).join("")}
+    </div>`;
+}
+
+// "Eleva Observed" reasoning-trace card - null when there's nothing yet to
+// observe (very first quest ever, or keyless fallback mode - see claude.js).
+function observedCardHTML(observed) {
+  if (!observed) return "";
+  return `
+    <div class="observed-card">
+      <div class="eyebrow mono" style="color:var(--accent);margin:0 0 8px">ELEVA OBSERVED</div>
+      <p class="observed-line">${esc(observed.yesterday)}</p>
+      <p class="observed-line dim">↓ Diamati: ${esc(observed.noticed)}</p>
+      <p class="observed-line">↓ Hari ini: ${esc(observed.today)}</p>
+    </div>`;
+}
+
+// Side Quests: PLACEHOLDER ONLY this round (founder decision) - shows how
+// many empty slots exist (3 - active goal count) but never generates real
+// bonus quests. Tapping it says so plainly instead of pretending to expand
+// into something real.
+function sideQuestRowHTML(goalCount) {
+  const slots = Math.max(0, 3 - goalCount);
+  if (!slots) return "";
+  return sideQuestsOpen
+    ? `<div class="side-quest-row open">
+        <button class="side-quest-toggle" data-toggle-sidequest>↑ Sembunyikan side quest</button>
+        <div class="side-quest-placeholder">Side Quest belum tersedia di versi ini — segera hadir.</div>
+      </div>`
+    : `<button class="side-quest-row" data-toggle-sidequest>→ ${slots} Side Quest tersedia</button>`;
+}
+
+// Kondisi Hari Ini: light, not a quest, not mandatory - single tap on a chip
+// commits immediately (no separate confirm step) and closes back to summary.
+function kondisiRowHTML(status) {
+  const isNormal = status === "Normal";
+  return `
+    <div class="kondisi-block">
+      ${kondisiOpen ? `
+        <div class="kondisi-label mono">GIMANA KONDISIMU HARI INI?</div>
+        <div class="kondisi-chips">
+          ${KONDISI_LABELS.map((l) => `<button class="kondisi-chip ${status === l ? "selected" : ""}" data-kondisi="${esc(l)}">${esc(l)}</button>`).join("")}
+        </div>
+        ${kondisiError ? `<p style="color:var(--rust);font-size:12.5px;margin:8px 0 0">${esc(kondisiError)}</p>` : ""}
+        <button class="kondisi-done" id="kondisiDone">Selesai</button>
+      ` : `
+        <div class="kondisi-summary">
+          <span><span class="kondisi-dot" style="color:${isNormal ? "var(--growth)" : "var(--accent)"}">●</span> Kondisi hari ini: <span class="kondisi-value">${esc(status)}</span></span>
+          <button class="kondisi-update" id="kondisiUpdateBtn">Update</button>
+        </div>`}
+    </div>`;
+}
+
+// Character screen: 7 stat rows with level/tier progress (not raw 0-100),
+// a cosmetic trend-down tag, and a Decay-paused banner while Kondisi Hari
+// Ini isn't Normal. No stat here ever decreases automatically - see PRD.md
+// bagian 22 for why (founder decision: cosmetic-derived, not real decay).
+function characterScreenHTML(s) {
+  const keys = STAT_ORDER.map(([k]) => k).filter((k) => k in (s.stats || {}));
+  Object.keys(s.stats || {}).forEach((k) => { if (!keys.includes(k)) keys.push(k); });
+  const decayPaused = s.kondisiStatus && s.kondisiStatus !== "Normal";
+  return `
+    <div class="eyebrow mono" style="margin:0 0 18px">CHARACTER DEVELOPMENT</div>
+    ${decayPaused ? `<div class="decay-banner">⏸ Decay dijeda — kamu lagi ${esc(s.kondisiStatus.toLowerCase())}</div>` : ""}
+    ${keys.map((k) => {
+      const { level, tierName, progressPct } = statLevelInfo(s.stats[k]);
+      const trendDown = s.statTrends?.[k];
+      return `
+      <div class="level-row">
+        <div class="row-top">
+          <span class="label">${statLabel(k)}${trendDown ? ` <span class="trend-down">↘ menurun</span>` : ""}</span>
+          <span class="mono level-tag">Lv.${level} · ${tierName}</span>
+        </div>
+        <div class="track"><div class="fill" style="width:${progressPct}%"></div></div>
+      </div>`;
+    }).join("")}`;
+}
+
+// Kisahmu: full autobiography, chronological, one entry per Chapter (archived
+// ones + the current in-progress one appended by GET /api/state).
+function kisahmuScreenHTML(s) {
+  const chapters = s.chapters || [];
+  if (!chapters.length) return `<p class="why">Belum ada Chapter tercatat.</p>`;
+  return chapters.map((c) => `
+    <div class="kisah-entry">
+      <div class="mono kisah-tag">BAB ${c.chapterNumber} · ${esc(c.chapterTitle).toUpperCase()}</div>
+      <p class="kisah-body">${esc(c.narrative)}</p>
+    </div>`).join("");
+}
+
+// Settings: minimal placeholder per handoff ("not fully specced") - Profil/
+// Notifikasi/Privasi are honest non-interactive rows (no fake destination),
+// Reset data + Keluar are the real account actions relocated here from
+// Home's old footer-bar.
+function settingsScreenHTML() {
+  return `
+    <div class="eyebrow mono" style="margin:0 0 18px">SETTINGS</div>
+    ${["Profil", "Notifikasi", "Privasi & Data"].map((label) => `
+      <div class="settings-row disabled">
+        <span>${label}</span>
+        <span class="mono settings-soon">segera hadir</span>
+      </div>`).join("")}
+    <div class="settings-row" id="doLogout" style="cursor:pointer">
+      <span>Keluar</span><span>→</span>
+    </div>
+    <div style="margin-top:24px">
+      ${resetArmed
+        ? `<button class="btn-ghost rust" id="doReset">Yakin? Tap sekali lagi buat reset semua data</button>`
+        : `<button class="btn-ghost" id="armReset">↺ Reset data</button>`}
     </div>`;
 }
 
@@ -1873,58 +2055,55 @@ function renderDashboard() {
     <div class="eyebrow mono swipe-hint">← geser untuk lihat ${openQuests.length} quest yang lagi terbuka</div>`
     : questSummaryCard(openQuests[0] || null, goalLabel(openQuests[0]?.goalIndex));
 
+  // Homepage redesign: Home body is everything that used to be the whole
+  // dashboard (minus Character Stats, which moved to its own screen) -
+  // compact chapter context, Eleva Observed, quests, Side Quest placeholder,
+  // Kondisi Hari Ini, Riwayat. Kept as a local const (not a top-level
+  // function) since it closes over a dozen already-computed locals above
+  // (questSectionHTML, reflectFormHTML, goals, openQuests, etc.) that aren't
+  // worth threading through a separate function signature.
+  const homeBodyHTML = `
+    ${s.aiActive ? "" : `<div class="banner-warn">Mode tanpa API key — quest masih generik. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.</div>`}
+    <div class="chapter-header compact">
+      <div class="bab mono">BAB ${s.chapterNumber} · ${esc(s.chapterTitle).toUpperCase()}</div>
+      <div class="rule"></div>
+      ${s.pathwayNoun ? `<div class="pathway-badge mono">${esc(maturityTier(s.growthSessions))} ${esc(s.pathwayNoun)}${s.pathwayStatus === "trial" ? ` <span class="trial-tag">(hipotesis — First Trial)</span>` : ""}</div>` : ""}
+    </div>
+    ${observedCardHTML(s.observed)}
+    ${questSectionHTML}
+    ${reflectFormHTML}
+    ${sideQuestRowHTML(goals.length)}
+    ${kondisiRowHTML(s.kondisiStatus || "Normal")}
+    ${s.history?.length ? `
+    <div style="margin:20px 0 28px">
+      <div class="eyebrow mono">RIWAYAT</div>
+      ${s.history.map((d) => `
+        <div class="history-item done">
+          <div class="date mono">${d.date}</div>
+          <div class="title">${esc(d.quest?.title || "")}</div>
+          ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : d.reflection?.structuredData ? `<div class="snippet mono">${esc(structSummary(d.reflection.structuredData))}</div>` : ""}
+        </div>`).join("")}
+    </div>` : ""}`;
+
+  const screenBodyHTML = activeScreen === "kisahmu" ? kisahmuScreenHTML(s)
+    : activeScreen === "character" ? characterScreenHTML(s)
+    : activeScreen === "settings" ? settingsScreenHTML()
+    : homeBodyHTML;
+
+  // Help "?" and Artifacts icons now sit INLINE in the header's icon row
+  // (not absolute-positioned floating over the body anymore) - the old
+  // top:96px placement started overlapping .banner-warn/.observed-card once
+  // Home's content grew taller than the fixed offset assumed.
+  const homeExtraIconsHTML = activeScreen === "home"
+    ? `<button class="header-icon-btn" id="openArtifacts" aria-label="Artifacts">🗎</button>${helpBtnHTML("dashboard")}`
+    : "";
+
   root.innerHTML = `
-    <div class="shell">
-      ${helpBtnHTML("dashboard")}${helpSheetHTML("dashboard")}
-      <button class="artifacts-btn" id="openArtifacts" aria-label="Artifacts">🗎</button>
-      ${artifactsSheetHTML()}
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;padding-right:34px">
-        <div class="eyebrow mono" style="margin:0">ELEVA</div>
-        <div class="mono" style="color:var(--muted);font-size:12px">${todayLabel()}</div>
-      </div>
-      ${s.aiActive ? "" : `<div class="banner-warn">Mode tanpa API key — quest masih generik. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.</div>`}
-      <div class="chapter-header">
-        <div class="bab mono">BAB ${s.chapterNumber}</div>
-        <h1 class="fr">${esc(s.chapterTitle)}</h1>
-        <div class="rule"></div>
-        ${s.pathwayNoun ? `<div class="pathway-badge mono">${esc(maturityTier(s.growthSessions))} ${esc(s.pathwayNoun)}${s.pathwayStatus === "trial" ? ` <span class="trial-tag">(hipotesis — First Trial)</span>` : ""}</div>` : ""}
-        ${openQuests[0]?.insight ? `<p class="insight fr">${esc(openQuests[0].insight)}</p>` : ""}
-      </div>
-      ${questSectionHTML}
-      ${reflectFormHTML}
-      <div style="margin-bottom:28px">
-        <div class="eyebrow mono">CHARACTER STATS</div>
-        ${(() => {
-          // Render whatever stats this account actually has: new accounts get
-          // the 7 MECE keys in STAT_ORDER order; pre-MECE accounts (8-element
-          // era) keep showing their stored keys with legacy labels until they
-          // reset & re-onboard - display tolerance, deliberately not a data
-          // migration.
-          const keys = STAT_ORDER.map(([k]) => k).filter((k) => k in (s.stats || {}));
-          Object.keys(s.stats || {}).forEach((k) => { if (!keys.includes(k)) keys.push(k); });
-          return keys.map((k) => `
-          <div class="stat-bar">
-            <div class="row-top"><span class="label">${statLabel(k)}</span><span class="mono">${s.stats[k]}</span></div>
-            <div class="track"><div class="fill" style="width:${s.stats[k]}%"></div></div>
-          </div>`).join("");
-        })()}
-      </div>
-      ${s.history?.length ? `
-      <div style="margin-bottom:28px">
-        <div class="eyebrow mono">RIWAYAT</div>
-        ${s.history.map((d) => `
-          <div class="history-item done">
-            <div class="date mono">${d.date}</div>
-            <div class="title">${esc(d.quest?.title || "")}</div>
-            ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : d.reflection?.structuredData ? `<div class="snippet mono">${esc(structSummary(d.reflection.structuredData))}</div>` : ""}
-          </div>`).join("")}
-      </div>` : ""}
-      <div class="footer-bar">
-        ${resetArmed
-          ? `<button class="btn-ghost rust" id="doReset">Yakin? Tap sekali lagi buat reset semua data</button>`
-          : `<button class="btn-ghost" id="armReset">↺ Reset data</button>`}
-        <button class="btn-ghost" id="doLogout">Keluar</button>
-      </div>
+    <div class="shell app-shell">
+      ${appHeaderHTML(s, homeExtraIconsHTML)}
+      ${activeScreen === "home" ? `${helpSheetHTML("dashboard")}${artifactsSheetHTML()}` : ""}
+      <div class="screen-body">${screenBodyHTML}</div>
+      ${tabBarHTML()}
     </div>`;
 
   // recordMode starts on for AI-tagged physical quests (record required
@@ -2283,6 +2462,38 @@ function renderDashboard() {
     resetOnboardState();
     await boot();
   });
+  // Homepage redesign: nav shell + Home-specific new interactions.
+  document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => {
+    activeScreen = b.dataset.tab;
+    renderDashboard();
+  }));
+  document.getElementById("headerAvatar")?.addEventListener("click", () => { activeScreen = "settings"; renderDashboard(); });
+  document.getElementById("headerSettings")?.addEventListener("click", () => { activeScreen = "settings"; renderDashboard(); });
+  document.querySelectorAll("[data-reason-toggle]").forEach((b) => b.addEventListener("click", () => {
+    const id = Number(b.dataset.reasonToggle);
+    if (reasonOpenIds.has(id)) reasonOpenIds.delete(id); else reasonOpenIds.add(id);
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-toggle-sidequest]").forEach((b) => b.addEventListener("click", () => {
+    sideQuestsOpen = !sideQuestsOpen;
+    renderDashboard();
+  }));
+  document.getElementById("kondisiUpdateBtn")?.addEventListener("click", () => { kondisiOpen = true; kondisiError = ""; renderDashboard(); });
+  document.getElementById("kondisiDone")?.addEventListener("click", () => { kondisiOpen = false; renderDashboard(); });
+  // Single tap on a chip = commit immediately, no separate confirm step
+  // (per handoff interaction spec) - closes back to the summary row itself.
+  document.querySelectorAll("[data-kondisi]").forEach((b) => b.addEventListener("click", async () => {
+    const status = b.dataset.kondisi;
+    try {
+      await api("/api/kondisi", { method: "POST", body: { status } });
+      appState.kondisiStatus = status;
+      kondisiOpen = false;
+      kondisiError = "";
+    } catch (e) {
+      kondisiError = e.message;
+    }
+    renderDashboard();
+  }));
   ensureCountdownTicking();
 }
 
