@@ -8,9 +8,11 @@ const STAT_ORDER = [
   ["emotional", "Emotional Stability"], ["social", "Social"], ["purpose", "Purpose"], ["autonomy", "Autonomy"],
 ];
 
-// Homepage redesign: mirrors server's KONDISI_LABELS exactly (same hand-sync
-// pattern as SUB_PATHWAY_NAMES - no shared module system client/server here).
-const KONDISI_LABELS = ["Capek", "Sakit/cedera", "Sibuk berat", "Traveling", "Mentally drained", "Energi lebih"];
+// Task 11f (Context Update, formalized wording/emoji from Eleva_PRD.pdf):
+// mirrors server's KONDISI_LABELS exactly (same hand-sync pattern as
+// SUB_PATHWAY_NAMES - no shared module system client/server here).
+const KONDISI_LABELS = ["Capek/energi rendah", "Sakit/cedera", "Beban kerja tinggi", "Traveling", "Mentally drained", "Energi lebih"];
+const KONDISI_EMOJI = { "Capek/energi rendah": "🥵", "Sakit/cedera": "😷", "Beban kerja tinggi": "💼", "Traveling": "✈️", "Mentally drained": "🧠", "Energi lebih": "🔥" };
 
 // Character screen: 5-tier naming per stat level, "Vigil" set (the
 // handoff's own prototype default) - the other two drafted sets (Ember,
@@ -432,6 +434,10 @@ let structForm = {};
 // which fields render.
 let recordMode = false;
 let structKind = null;
+// Task 7c (evidenceSchema): true when structKind above was auto-derived
+// from the quest's own evidenceSchema rather than picked by the user -
+// suppresses the redundant "Aktivitasnya jenis apa?" picker in that case.
+let structKindAuto = false;
 let reflectError = "";
 // Set right after a successful submit, cleared once the user dismisses the
 // brief "here's what happened" acknowledgment - see completedResultCardHTML.
@@ -469,6 +475,12 @@ let reasonOpenIds = new Set();
 let sideQuestsOpen = false;
 let kondisiOpen = false;
 let kondisiError = "";
+let kondisiNoteDraft = "";
+// Task 7c: "Aku nggak bisa quest ini" - a separate context-signal entry
+// point (reuses the Context Update mechanism, see kondisiRowHTML/
+// unableFormHTML) that never touches the quest itself. Set to the quest id
+// currently showing this picker, or null.
+let unableQuestId = null;
 let resetArmed = false;
 let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
@@ -1403,6 +1415,17 @@ function parseDurasiMenit(raw) {
   const n = Number(s);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
+// Task 7c (P1 item 6, real bug found in testing): a single MM:SS text field
+// was ambiguous ("2211" - 22 min 11 sec? 2211 minutes?) - replaced with two
+// separate MENIT/DETIK number inputs, combined here to the same decimal-
+// minutes shape every other consumer (pace calc, server validation, target
+// metrics) already expects, so only this one conversion edge changes.
+function durasiMenitFromFields(sf) {
+  const min = Number(sf.durasiMin) || 0;
+  const sec = Math.min(59, Number(sf.durasiSec) || 0);
+  const total = min + sec / 60;
+  return total > 0 ? total : null;
+}
 function mmss(decimalMinutes) {
   const m = Math.floor(decimalMinutes);
   const s = Math.round((decimalMinutes - m) * 60);
@@ -1659,7 +1682,9 @@ function questSummaryCard(q, goalLabel) {
   if (!q) return `<div class="quest-card"><div class="dot pending"></div>${spinnerHTML("AI sedang menyusun quest...")}</div>`;
   // Homepage redesign: "PRIMARY QUEST" (was "QUEST") - every active goal's
   // card is a Primary Quest now, none demoted, per the handoff's core rule.
-  const label = q.quest.mode === "acting" ? "ACTING METHOD" : "PRIMARY QUEST";
+  // Task 11c: a real Side Quest gets its own label instead, since it isn't
+  // tied to any goal and is explicitly lower-stakes/optional.
+  const label = q.isSideQuest ? "SIDE QUEST" : q.quest.mode === "acting" ? "ACTING METHOD" : "PRIMARY QUEST";
   const remaining = q.createdAt ? new Date(q.createdAt).getTime() + 24 * 60 * 60 * 1000 - Date.now() : null;
   const expired = remaining != null && remaining <= 0;
   // "Kenapa Eleva kasih quest ini →" progressive disclosure - independent
@@ -1770,6 +1795,11 @@ function completedResultCardHTML(r) {
   return `
     <div class="quest-card fadeUp">
       <div class="qlabel mono">${esc(r.questTitle)}</div>
+      ${r.interpretation ? `
+      <div class="observed-card" style="margin-bottom:14px">
+        <div class="eyebrow mono">ELEVA RESPONSE</div>
+        <p class="observed-line">${esc(r.interpretation)}</p>
+      </div>` : ""}
       <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
         ${r.status === "done" ? "SELESAI" : r.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
       </div>
@@ -1830,39 +1860,64 @@ function observedCardHTML(observed) {
     </div>`;
 }
 
-// Side Quests: PLACEHOLDER ONLY this round (founder decision) - shows how
-// many empty slots exist (3 - active goal count) but never generates real
-// bonus quests. Tapping it says so plainly instead of pretending to expand
-// into something real.
-function sideQuestRowHTML(goalCount) {
-  const slots = Math.max(0, 3 - goalCount);
-  if (!slots) return "";
+// Task 11c: Side Quest is now a REAL AI-generated bonus quest (not tied to
+// any goal) filling the carousel's otherwise-empty slots - the server
+// already generates/persists them (see GET /api/state), this just renders
+// whatever's currently open. Collapsed by default (a quick "→ N tersedia"
+// teaser) per the handoff's progressive-disclosure principle, expands to
+// full quest cards (reusing questSummaryCard, same "Mulai" flow as any
+// other quest) on tap.
+function sideQuestRowHTML(sideQuests) {
+  if (!sideQuests.length) return "";
   return sideQuestsOpen
     ? `<div class="side-quest-row open">
         <button class="side-quest-toggle" data-toggle-sidequest>↑ Sembunyikan side quest</button>
-        <div class="side-quest-placeholder">Side Quest belum tersedia di versi ini — segera hadir.</div>
+        ${sideQuests.map((q) => questSummaryCard(q, null)).join("")}
       </div>`
-    : `<button class="side-quest-row" data-toggle-sidequest>→ ${slots} Side Quest tersedia</button>`;
+    : `<button class="side-quest-row" data-toggle-sidequest>→ ${sideQuests.length} Side Quest tersedia</button>`;
 }
 
-// Kondisi Hari Ini: light, not a quest, not mandatory - single tap on a chip
-// commits immediately (no separate confirm step) and closes back to summary.
-function kondisiRowHTML(status) {
+// Task 11f (Context Update): light, not a quest, not mandatory - a chip tap
+// commits immediately (no separate confirm step), the note is genuinely
+// optional and only shown as an expandable "Ceritakan lebih →" link so it
+// never blocks the one-tap path.
+function kondisiRowHTML(status, note) {
   const isNormal = status === "Normal";
   return `
     <div class="kondisi-block">
       ${kondisiOpen ? `
         <div class="kondisi-label mono">GIMANA KONDISIMU HARI INI?</div>
         <div class="kondisi-chips">
-          ${KONDISI_LABELS.map((l) => `<button class="kondisi-chip ${status === l ? "selected" : ""}" data-kondisi="${esc(l)}">${esc(l)}</button>`).join("")}
+          ${KONDISI_LABELS.map((l) => `<button class="kondisi-chip ${status === l ? "selected" : ""}" data-kondisi="${esc(l)}">${KONDISI_EMOJI[l]} ${esc(l)}</button>`).join("")}
         </div>
+        <textarea class="kondisi-note-input" id="kondisiNoteInput" rows="2" placeholder="Ceritakan lebih (opsional)...">${esc(kondisiNoteDraft)}</textarea>
         ${kondisiError ? `<p style="color:var(--rust);font-size:12.5px;margin:8px 0 0">${esc(kondisiError)}</p>` : ""}
         <button class="kondisi-done" id="kondisiDone">Selesai</button>
       ` : `
         <div class="kondisi-summary">
-          <span><span class="kondisi-dot" style="color:${isNormal ? "var(--growth)" : "var(--accent)"}">●</span> Kondisi hari ini: <span class="kondisi-value">${esc(status)}</span></span>
+          <span><span class="kondisi-dot" style="color:${isNormal ? "var(--growth)" : "var(--accent)"}">●</span> Kondisi hari ini: <span class="kondisi-value">${isNormal ? "" : KONDISI_EMOJI[status] || ""} ${esc(status)}</span>${note ? ` <span class="kondisi-note-preview">— ${esc(note)}</span>` : ""}</span>
           <button class="kondisi-update" id="kondisiUpdateBtn">Update</button>
         </div>`}
+    </div>`;
+}
+
+// Task 7c ("Aku nggak bisa quest ini"): same Context Update chip set minus
+// "Energi lebih" (a positive state, doesn't fit "can't do this") - reuses
+// POST /api/kondisi directly, a context signal that never touches the
+// quest's own completion/growth. Rendered instead of the evidence form when
+// unableQuestId matches the quest being reflected on.
+function unableFormHTML() {
+  const chips = KONDISI_LABELS.filter((l) => l !== "Energi lebih");
+  return `
+    <div class="quest-card fadeUp" style="margin-top:-14px">
+      <div class="kondisi-label mono">KENAPA NGGAK BISA SEKARANG?</div>
+      <div class="kondisi-chips">
+        ${chips.map((l) => `<button class="kondisi-chip" data-unable-kondisi="${esc(l)}">${KONDISI_EMOJI[l]} ${esc(l)}</button>`).join("")}
+      </div>
+      <textarea class="kondisi-note-input" id="unableNoteInput" rows="2" placeholder="Ceritakan lebih (opsional)...">${esc(kondisiNoteDraft)}</textarea>
+      ${kondisiError ? `<p style="color:var(--rust);font-size:12.5px;margin:8px 0 0">${esc(kondisiError)}</p>` : ""}
+      <p class="mono" style="font-size:11.5px;color:var(--muted);margin:8px 0 0">Quest ini tetap terbuka — lanjutkan kapan pun kamu siap. Ini bukan evidence, jadi tidak memengaruhi growth.</p>
+      <button class="btn-ghost" id="cancelUnable" style="margin-top:10px">← Batal, balik ke quest</button>
     </div>`;
 }
 
@@ -1927,7 +1982,13 @@ function settingsScreenHTML() {
 
 function renderDashboard() {
   const s = appState;
-  const openQuests = s.openQuests || [];
+  // Task 11c: server now mixes real Side Quests into openQuests (flagged
+  // isSideQuest) alongside Primary Quests - split here once so the
+  // carousel/reflect-target logic below only ever sees Primary Quests, and
+  // Side Quests render separately via sideQuestRowHTML.
+  const allOpenQuests = s.openQuests || [];
+  const openQuests = allOpenQuests.filter((q) => !q.isSideQuest);
+  const sideQuests = allOpenQuests.filter((q) => q.isSideQuest);
   const goals = s.goals || [];
   const goalLabel = (goalIndex) => (goalIndex != null && goals[goalIndex] ? goals[goalIndex] : null);
   // Which open quest the reflect flow targets - looked up fresh from
@@ -1935,7 +1996,7 @@ function renderDashboard() {
   // a submit is always the source of truth. No implicit default: every
   // card's own button sets this explicitly, since there's no longer a
   // single privileged "today's quest" among up to 3 simultaneously open.
-  const targetDay = openQuests.find((q) => q.id === reflectTarget) || null;
+  const targetDay = allOpenQuests.find((q) => q.id === reflectTarget) || null;
   const hasReflection = Boolean(targetDay?.reflection);
 
   // Task 7b + founder revision: physical quests complete via typed record
@@ -1961,6 +2022,8 @@ function renderDashboard() {
   // gagal/berat" is a different concept (which specific set/rep failed) and
   // stays free text - the founder's revision only named cardio's field.
   const structFieldsHTML = !showStructFields ? "" : structKind !== "cardio" ? `
+      ${targetDay?.quest?.evidenceSchema?.metricType === "reps" && targetDay.quest.evidenceSchema.target != null
+        ? `<p class="mono" style="font-size:12px;color:var(--accent-bright);margin:0 0 10px">TARGET ${targetDay.quest.evidenceSchema.target} repetisi/set</p>` : ""}
       <div class="field">
         <label>Gerakan</label>
         <input type="text" data-sf="gerakan" maxlength="200" value="${sf("gerakan")}" placeholder="${structKind === "gym-alat" ? "mis. bench press, lat pulldown, leg press" : "mis. push-up, squat, plank"}" />
@@ -1983,24 +2046,32 @@ function renderDashboard() {
         <label>Aktivitasnya apa?</label>
         <input type="text" data-sf="jenisLainnya" maxlength="200" value="${sf("jenisLainnya")}" placeholder="mis. renang, hiking" />
       </div>` : ""}
+      ${targetDay?.quest?.evidenceSchema?.metricType === "distance" && targetDay.quest.evidenceSchema.target != null
+        ? `<p class="mono" style="font-size:12px;color:var(--accent-bright);margin:0 0 10px">TARGET ${targetDay.quest.evidenceSchema.target} km</p>` : ""}
       <div class="struct-grid">
-        <div class="field"><label>Durasi (MM:SS)</label><input type="text" inputmode="numeric" data-sf="durasiMenit" value="${sf("durasiMenit")}" placeholder="20:01" /></div>
-        <div class="field"><label>Jarak (km) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.1" data-sf="jarakKm" value="${sf("jarakKm")}" placeholder="5" /></div>
+        <div class="field"><label>Menit</label><input type="number" min="0" max="600" inputmode="numeric" data-sf="durasiMin" value="${sf("durasiMin")}" placeholder="20" /></div>
+        <div class="field"><label>Detik</label><input type="number" min="0" max="59" inputmode="numeric" data-sf="durasiSec" value="${sf("durasiSec")}" placeholder="01" /></div>
       </div>
-      <p class="mono" id="paceDisplay" style="font-size:12px;color:var(--muted);margin:-8px 0 14px">${(() => { const p = paceLabel(parseDurasiMenit(structForm.durasiMenit), structForm.jarakKm); return p ? `Pace: ${p}` : ""; })()}</p>
+      <div class="field"><label>Jarak (km) <span class="opt-note">opsional</span></label><input type="number" min="0" step="0.1" data-sf="jarakKm" value="${sf("jarakKm")}" placeholder="5" /></div>
+      <p class="mono" id="paceDisplay" style="font-size:12px;color:var(--muted);margin:-8px 0 14px">${(() => { const p = paceLabel(durasiMenitFromFields(structForm), structForm.jarakKm); return p ? `Pace: ${p}` : ""; })()}</p>
       <div class="field">
-        <label>Titik mulai berat</label>
+        <label>Rasanya gimana?</label>
         <div class="status-row">
-          ${["Ringan", "Cukup", "Berat"].map((v) => `<button class="status-btn ${structForm.titikBerat === v ? "active" : ""}" data-tberat="${v}">${v}</button>`).join("")}
+          ${["Ringan", "Cukup", "Berat", "Terlalu berat"].map((v) => `<button class="status-btn ${structForm.titikBerat === v ? "active" : ""}" data-tberat="${v}">${v}</button>`).join("")}
         </div>
       </div>
-      ${structForm.titikBerat === "Berat" ? `
+      ${["Berat", "Terlalu berat"].includes(structForm.titikBerat) ? `
       <div class="field">
         <label>Apa yang bikin berat?</label>
         <textarea data-sf="titikBeratDetail" rows="2" placeholder="Ceritain singkat...">${sf("titikBeratDetail")}</textarea>
       </div>` : ""}`;
 
-  const kindPickerHTML = !showPicker ? "" : `
+  // Task 7c: hidden entirely once evidenceSchema already told us the kind
+  // (structKindAuto) - asking "Aktivitasnya jenis apa?" again would be
+  // exactly the redundant question the PRD calls out (the quest itself
+  // already said "Lari 3,2 km"). Only shown as a fallback for quests
+  // generated before this field existed.
+  const kindPickerHTML = !showPicker || structKindAuto ? "" : `
       <div class="field">
         <label>Aktivitasnya jenis apa?</label>
         <div class="status-row">
@@ -2010,15 +2081,20 @@ function renderDashboard() {
         ${structKind == null ? `<p style="color:var(--muted);font-size:12.5px;margin:8px 0 0">Pilih satu dulu — form record-nya nyesuain jenis aktivitasmu.</p>` : ""}
       </div>`;
 
-  const reflectFormHTML = reflectOpen && !hasReflection ? `
+  // Task 7c: "Aku nggak bisa quest ini" swaps the whole form for the
+  // context-signal picker instead - checked before anything else so it
+  // takes over the same card slot the evidence form would otherwise use.
+  const reflectFormHTML = unableQuestId != null && unableQuestId === targetDay?.id ? unableFormHTML()
+    : reflectOpen && !hasReflection ? `
     <div class="quest-card fadeUp" style="margin-top:-14px">
+      ${mustRecord ? "" : `
       <div class="field">
         <label>Gimana progressnya?</label>
         <div class="status-row">
           ${[["done", "Selesai"], ["partial", "Sebagian"], ["skipped", "Nggak sempat"]].map(([k, l]) =>
             `<button class="status-btn ${reflectStatus === k ? "active" : ""}" data-status="${k}">${l}</button>`).join("")}
         </div>
-      </div>
+      </div>`}
       ${kindPickerHTML}
       ${structFieldsHTML}
       ${formReady ? `
@@ -2034,6 +2110,7 @@ function renderDashboard() {
       <button class="btn-primary full" id="submitReflect">${showStructFields ? "Simpan record & selesaikan quest" : "Simpan refleksi"}</button>` : ""}
       ${!mustRecord && reflectStatus !== "skipped" ? `
       <button class="btn-ghost" id="toggleRecord" style="margin-top:${formReady ? "10px" : "4px"}">${recordMode ? "← Balik ke refleksi teks aja" : "Aktivitas fisik? Catat sebagai record →"}</button>` : ""}
+      ${mustRecord ? `<button class="btn-ghost" id="unableQuestBtn" data-unable-quest="${targetDay.id}" style="margin-top:${formReady ? "10px" : "4px"}">Aku nggak bisa quest ini →</button>` : ""}
     </div>` : "";
 
   // Per-goal model: up to 3 quests can be open at once (one per active
@@ -2072,8 +2149,8 @@ function renderDashboard() {
     ${observedCardHTML(s.observed)}
     ${questSectionHTML}
     ${reflectFormHTML}
-    ${sideQuestRowHTML(goals.length)}
-    ${kondisiRowHTML(s.kondisiStatus || "Normal")}
+    ${sideQuestRowHTML(reflectOpen ? sideQuests.filter((q) => q.id !== reflectTarget) : sideQuests)}
+    ${kondisiRowHTML(s.kondisiStatus || "Normal", s.kondisiNote)}
     ${s.history?.length ? `
     <div style="margin:20px 0 28px">
       <div class="eyebrow mono">RIWAYAT</div>
@@ -2120,7 +2197,7 @@ function renderDashboard() {
   // actually did each time, never inherited.
   document.querySelectorAll("[data-reflect-id]").forEach((b) => b.addEventListener("click", async () => {
     const id = Number(b.dataset.reflectId);
-    const quest = openQuests.find((q) => q.id === id)?.quest;
+    const quest = allOpenQuests.find((q) => q.id === id)?.quest;
     // Task 9: practice-test quests skip the reflectOpen form entirely - they
     // get their own multi-step flow (pick Reading/Listening, pick Academic/
     // General, answer, submit) instead of a text/structured-fields box.
@@ -2144,9 +2221,26 @@ function renderDashboard() {
       return;
     }
     reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
-    structForm = {}; reflectError = "";
+    structForm = {}; reflectError = ""; unableQuestId = null;
     recordMode = quest?.completionType === "structured-physical" || quest?.statFocus === "body";
-    structKind = null;
+    // Task 7c (evidenceSchema): the AI already knows what kind of evidence
+    // this quest wants at generation time - skip the redundant "Aktivitasnya
+    // jenis apa?" question entirely when it told us, and pre-fill the
+    // activity type for cardio. Falls back to null (old picker shown) for
+    // quests generated before this field existed, or where the model
+    // couldn't derive a clean schema.
+    const schema = quest?.evidenceSchema;
+    if (schema?.metricType === "distance") {
+      structKind = "cardio";
+      structKindAuto = true;
+      if (schema.activityType) structForm.jenisAktivitas = schema.activityType;
+    } else if (schema?.metricType === "reps") {
+      structKind = schema.hasWeight ? "gym-alat" : "gym-badan";
+      structKindAuto = true;
+    } else {
+      structKind = null;
+      structKindAuto = false;
+    }
     renderDashboard();
   }));
   document.querySelectorAll("[data-pt-kind]").forEach((b) => b.addEventListener("click", () => {
@@ -2198,7 +2292,7 @@ function renderDashboard() {
       const qd = openQuests.find((q) => q.id === practiceTestFlow.questId);
       completedResult = {
         questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
-        mentorReply: resp.mentorReply, deltas: resp.deltas,
+        mentorReply: resp.mentorReply, interpretation: resp.interpretation, deltas: resp.deltas,
         practiceTest: { kind: practiceTestFlow.kind, track: practiceTestFlow.track, score: resp.score, total: resp.total, wrong: resp.wrong },
         target: null,
       };
@@ -2376,11 +2470,11 @@ function renderDashboard() {
   // re-render (new element appearing), not just a live DOM write.
   document.querySelectorAll("[data-tberat]").forEach((b) => b.addEventListener("click", () => {
     structForm.titikBerat = b.dataset.tberat;
-    if (structForm.titikBerat !== "Berat") delete structForm.titikBeratDetail;
+    if (!["Berat", "Terlalu berat"].includes(structForm.titikBerat)) delete structForm.titikBeratDetail;
     reflectError = "";
     renderDashboard();
   }));
-  document.getElementById("toggleRecord")?.addEventListener("click", () => { recordMode = !recordMode; structKind = null; reflectError = ""; renderDashboard(); });
+  document.getElementById("toggleRecord")?.addEventListener("click", () => { recordMode = !recordMode; structKind = null; structKindAuto = false; reflectError = ""; renderDashboard(); });
   // Bound by data attribute, not the shared .status-btn styling class -
   // the activity-kind picker reuses that class for its look, and a
   // class-bound handler would also fire there, silently blanking
@@ -2401,10 +2495,10 @@ function renderDashboard() {
       // is a derived read of the same two fields, so it updates the same
       // way word count does - write straight to the DOM, no render.
       if (el.dataset.sf === "jenisAktivitas") renderDashboard();
-      if (el.dataset.sf === "durasiMenit" || el.dataset.sf === "jarakKm") {
+      if (["durasiMin", "durasiSec", "jarakKm"].includes(el.dataset.sf)) {
         const paceEl = document.getElementById("paceDisplay");
         if (paceEl) {
-          const p = paceLabel(parseDurasiMenit(structForm.durasiMenit), structForm.jarakKm);
+          const p = paceLabel(durasiMenitFromFields(structForm), structForm.jarakKm);
           paceEl.textContent = p ? `Pace: ${p}` : "";
         }
       }
@@ -2420,11 +2514,15 @@ function renderDashboard() {
         // never sends a weight, even one left over from switching variants.
         body.structuredData = { ...structForm, kind: structKind === "cardio" ? "cardio" : "gym" };
         if (structKind === "gym-badan") delete body.structuredData.bebanKg;
-        // durasi is typed as MM:SS - convert to decimal minutes here, at the
-        // one edge where it leaves the client, so the server (and every
-        // other consumer: pace calc, target metrics) keeps working with a
-        // plain number same as before.
-        if (structKind === "cardio") body.structuredData.durasiMenit = parseDurasiMenit(structForm.durasiMenit);
+        // Task 7c: durasi is typed as separate Menit/Detik fields - combined
+        // to decimal minutes here, at the one edge where it leaves the
+        // client, so the server (and every other consumer: pace calc,
+        // target metrics) keeps working with a plain number same as before.
+        if (structKind === "cardio") {
+          body.structuredData.durasiMenit = durasiMenitFromFields(structForm);
+          delete body.structuredData.durasiMin;
+          delete body.structuredData.durasiSec;
+        }
       }
       const resp = await api("/api/reflection", { method: "POST", body });
       // The per-goal model regenerates this goal's next quest the instant
@@ -2434,12 +2532,16 @@ function renderDashboard() {
       // immediately (which could otherwise swap this card out from under
       // them before they ever read it).
       completedResult = {
-        questTitle: targetDay.quest.title, status: reflectStatus, goalIndex: targetDay.goalIndex,
-        mentorReply: resp.mentorReply, deltas: resp.deltas, structuredData: resp.structuredData,
+        // Task 7c: server computes the real status for structured-physical
+        // quests (evidence vs target) - resp.status is authoritative, not
+        // the client's reflectStatus (which for those quests is just a
+        // fixed "done" now that the self-report picker is gone).
+        questTitle: targetDay.quest.title, status: resp.status, goalIndex: targetDay.goalIndex,
+        mentorReply: resp.mentorReply, interpretation: resp.interpretation, deltas: resp.deltas, structuredData: resp.structuredData,
         target: resp.targetScreen || null,
       };
       reflectOpen = false; reflectTarget = null; reflectText = ""; structForm = {}; reflectError = "";
-      recordMode = false; structKind = null;
+      recordMode = false; structKind = null; structKindAuto = false;
       targetChoice = null; targetManualForm = {}; targetError = "";
       renderDashboard();
     } catch (e) {
@@ -2478,20 +2580,50 @@ function renderDashboard() {
     sideQuestsOpen = !sideQuestsOpen;
     renderDashboard();
   }));
-  document.getElementById("kondisiUpdateBtn")?.addEventListener("click", () => { kondisiOpen = true; kondisiError = ""; renderDashboard(); });
+  document.getElementById("kondisiUpdateBtn")?.addEventListener("click", () => { kondisiOpen = true; kondisiError = ""; kondisiNoteDraft = ""; renderDashboard(); });
   document.getElementById("kondisiDone")?.addEventListener("click", () => { kondisiOpen = false; renderDashboard(); });
+  document.getElementById("kondisiNoteInput")?.addEventListener("input", (e) => { kondisiNoteDraft = e.target.value; });
   // Single tap on a chip = commit immediately, no separate confirm step
   // (per handoff interaction spec) - closes back to the summary row itself.
+  // Whatever's already typed in the (optional) note field at tap-time rides
+  // along in the same request.
   document.querySelectorAll("[data-kondisi]").forEach((b) => b.addEventListener("click", async () => {
     const status = b.dataset.kondisi;
+    const note = document.getElementById("kondisiNoteInput")?.value || kondisiNoteDraft;
     try {
-      await api("/api/kondisi", { method: "POST", body: { status } });
+      const r = await api("/api/kondisi", { method: "POST", body: { status, note } });
       appState.kondisiStatus = status;
+      appState.kondisiNote = r.kondisiNote;
       kondisiOpen = false;
       kondisiError = "";
+      kondisiNoteDraft = "";
     } catch (e) {
       kondisiError = e.message;
     }
+    renderDashboard();
+  }));
+  // Task 7c "Aku nggak bisa quest ini" - same mechanism, but never closes
+  // back into the completed-quest flow: the quest stays exactly where it
+  // was, only the context signal gets saved.
+  document.querySelectorAll("[data-unable-kondisi]").forEach((b) => b.addEventListener("click", async () => {
+    const status = b.dataset.unableKondisi;
+    const note = document.getElementById("unableNoteInput")?.value || kondisiNoteDraft;
+    try {
+      const r = await api("/api/kondisi", { method: "POST", body: { status, note } });
+      appState.kondisiStatus = status;
+      appState.kondisiNote = r.kondisiNote;
+      unableQuestId = null;
+      kondisiError = "";
+      kondisiNoteDraft = "";
+    } catch (e) {
+      kondisiError = e.message;
+    }
+    renderDashboard();
+  }));
+  document.getElementById("cancelUnable")?.addEventListener("click", () => { unableQuestId = null; kondisiError = ""; renderDashboard(); });
+  document.querySelectorAll("[data-unable-quest]").forEach((b) => b.addEventListener("click", () => {
+    unableQuestId = Number(b.dataset.unableQuest);
+    kondisiError = ""; kondisiNoteDraft = "";
     renderDashboard();
   }));
   ensureCountdownTicking();

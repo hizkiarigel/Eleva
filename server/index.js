@@ -38,10 +38,28 @@ function wordCount(text) {
   return (text || "").trim().split(/\s+/).filter(Boolean).length;
 }
 
-// Homepage redesign (Kisahmu): a real 6-chip enum, mirrored client-side in
-// public/app.js (same hand-sync pattern as SUB_PATHWAY_NAMES - no shared
-// module system between client/server here).
-const KONDISI_LABELS = ["Capek", "Sakit/cedera", "Sibuk berat", "Traveling", "Mentally drained", "Energi lebih"];
+// Task 11f (Context Update, formalized wording/set from Eleva_PRD.pdf): a
+// real 6-chip enum, mirrored client-side in public/app.js (same hand-sync
+// pattern as SUB_PATHWAY_NAMES - no shared module system between
+// client/server here).
+const KONDISI_LABELS = ["Capek/energi rendah", "Sakit/cedera", "Beban kerja tinggi", "Traveling", "Mentally drained", "Energi lebih"];
+
+// Task 7c: auto-computed completion tier for a structured-physical quest,
+// replacing the old client self-reported "Gimana progressnya?" picker -
+// "selesai" vs "sebagian" is now a fact derived from evidence vs the
+// quest's own evidenceSchema.target, not a self-report. Falls back to
+// "done" (submission = completion, the pre-Task-7c behavior) whenever
+// there's no usable target to compare against - a quest without a clean
+// numeric target can't be judged partial, so it isn't.
+function computeEvidenceStatus(quest, structuredClean) {
+  const schema = quest?.evidenceSchema;
+  if (!schema || schema.target == null || !structuredClean) return "done";
+  const actual = schema.metricType === "distance" ? structuredClean.jarakKm
+    : schema.metricType === "reps" ? structuredClean.repetisi
+    : null;
+  if (actual == null) return "done";
+  return actual / schema.target >= 0.95 ? "done" : "partial";
+}
 
 // Kisahmu: archives the chapter that's about to be superseded, BEFORE the
 // caller overwrites character_state with the new one - shared by both
@@ -146,7 +164,15 @@ app.get("/api/state", requireAuth, async (req, res) => {
     if (state.kondisiStatus !== "Normal" && todayKey(state.kondisiUpdatedAt) !== todayKey()) {
       await db.resetKondisiToNormal(req.userId);
       state.kondisiStatus = "Normal";
+      state.kondisiNote = null;
     }
+
+    // Task 11e (Decay): lazy, at-most-once-per-day evaluation - see
+    // db.applyDecayIfDue for the full rationale (mandatory pause while
+    // kondisi != Normal, gradual not backlogged). Runs AFTER the kondisi
+    // reset above so a condition that just lapsed back to Normal today
+    // doesn't retroactively pause today's check too.
+    state.stats = await db.applyDecayIfDue(req.userId);
 
     // Per-goal quest model (founder-reported regression this replaces: a
     // goal's quest used to get silently swapped out before the user marked
@@ -189,6 +215,12 @@ app.get("/api/state", requireAuth, async (req, res) => {
           // already met - generateQuest's prompt references this instead of
           // treating every quest as a clean slate.
           currentTarget: goalIndex != null ? state.goalTargets?.[String(goalIndex)] : undefined,
+          // Task 11f: Context Update feeds quest generation directly (the
+          // WOOP-Obstacle tie-in from the PRD) - only passed when it's
+          // actually saying something (Normal is the default, nothing to
+          // moderate for).
+          kondisiStatus: state.kondisiStatus !== "Normal" ? state.kondisiStatus : undefined,
+          kondisiNote: state.kondisiStatus !== "Normal" ? state.kondisiNote : undefined,
           stats: state.stats,
           chapterNumber: state.chapterNumber,
           chapterTitle: state.chapterTitle,
@@ -219,6 +251,19 @@ app.get("/api/state", requireAuth, async (req, res) => {
         observed: state.observed,
       });
       openQuests.sort((a, b) => (a.goalIndex ?? -1) - (b.goalIndex ?? -1));
+    }
+
+    // Task 11c (Side Quest, real feature): fills the carousel's otherwise-
+    // empty slots (3 minus active goal count) with an optional bonus quest
+    // not tied to any goal. Only for accounts that actually have goal
+    // capture (goals.length > 0) - legacy pre-goal-capture accounts keep
+    // their single ungoaled Primary slot only, no Side Quest sprawl.
+    const sideSlots = goals.length ? Math.max(0, 3 - goals.length) : 0;
+    const openSideCount = openQuests.filter((q) => q.isSideQuest).length;
+    for (let i = openSideCount; i < sideSlots; i++) {
+      const result = await ai.generateSideQuest({ profile: state.profile, pathway: state.pathway, goals });
+      const created = await db.createQuest(req.userId, null, todayKey(), { quest: result.quest, insight: null }, true);
+      openQuests.push(created);
     }
 
     const fresh = await db.getState(req.userId);
@@ -270,6 +315,7 @@ app.get("/api/state", requireAuth, async (req, res) => {
       openQuests,
       observed: fresh.observed,
       kondisiStatus: fresh.kondisiStatus,
+      kondisiNote: fresh.kondisiNote,
       history: await db.allHistory(req.userId, 8),
       aiActive: ai.hasKey(),
     });
@@ -390,9 +436,18 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       if (!check.ok) return res.status(400).json({ error: check.error });
       structuredClean = check.clean;
     }
+    // Task 7c: "selesai" vs "sebagian" for a structured-physical quest is
+    // now a fact computed from evidence vs the quest's own
+    // evidenceSchema.target - the client no longer self-reports it (the old
+    // "Gimana progressnya?" picker is gone for this quest type). Every
+    // other quest type keeps trusting the client's status as before.
+    const effectiveStatus = isStructuredQuest && structuredClean
+      ? computeEvidenceStatus(day.quest, structuredClean)
+      : status;
 
     let deltas = {};
     let mentorReply;
+    let interpretation = null;
     let chapterAdvance = false;
     let newChapterTitle = null;
     let newChapterNarrative = null;
@@ -407,13 +462,13 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     } else {
       const eligible = structuredClean
         ? true // completeness+plausibility already code-verified above
-        : (status === "done" || status === "partial") && wordCount(text) >= 12;
+        : (effectiveStatus === "done" || effectiveStatus === "partial") && wordCount(text) >= 12;
       const ctx = {
         // originStory is v3; situation is the pre-v3 fallback for accounts
         // that onboarded before this field existed.
         profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
         quest: day.quest,
-        status,
+        status: effectiveStatus,
         reflectionText: trimmedText,
         structuredData: structuredClean || undefined,
         // Recent days give the AI the progressive baseline ("last time 15
@@ -428,6 +483,10 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       mentorReply = eligible
         ? result.mentorReply
         : "Coba ceritain lebih banyak apa yang sebenarnya terjadi — segelintir kata belum cukup buat pertumbuhan kelihatan nyata (dan itu memang sengaja begitu).";
+      // Task 7c "Eleva Response": shown even when growth was withheld (the
+      // gate message above already explains why) - interpretation is a
+      // read of the submitted numbers/text, not a growth verdict.
+      interpretation = result.interpretation || null;
       chapterAdvance = result.chapterAdvance;
       newChapterTitle = result.newChapterTitle;
       newChapterNarrative = result.newChapterNarrative;
@@ -443,7 +502,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     const allowAdvance = chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0 && Boolean(newChapterTitle && newChapterNarrative);
 
     const reflection = {
-      status,
+      status: effectiveStatus,
       text: trimmedText,
       // Stored inside the existing reflection jsonb - the PRD's "smallest
       // schema change" option (no new column). recentDays returns the full
@@ -452,10 +511,14 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       ...(structuredClean ? { structuredData: structuredClean } : {}),
       deltas,
       mentorReply,
+      interpretation,
       timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
     await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
+    // Task 11e (Decay): record which stats just grew for real, so the decay
+    // clock resets for exactly those - and only those - stats.
+    await db.touchStatActivity(req.userId, Object.keys(deltas));
     await db.updateState(req.userId, {
       stats: newStats,
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
@@ -494,7 +557,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     // swapping to the next quest - under the per-goal model a completed
     // goal is instantly eligible for a new quest, so without this the
     // mentor's reply/deltas would flash away before the user could read them.
-    res.json({ ok: true, status, mentorReply, deltas, structuredData: structuredClean || undefined, targetScreen });
+    res.json({ ok: true, status: effectiveStatus, mentorReply, interpretation, deltas, structuredData: structuredClean || undefined, targetScreen });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan refleksi." });
@@ -536,12 +599,17 @@ app.post("/api/goal-target", requireAuth, async (req, res) => {
 // new calendar day starts (see the lazy-reset check there).
 app.post("/api/kondisi", requireAuth, async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, note } = req.body;
     if (status !== "Normal" && !KONDISI_LABELS.includes(status)) {
       return res.status(400).json({ error: "Status kondisi tidak dikenal." });
     }
-    await db.updateKondisi(req.userId, status);
-    res.json({ ok: true, kondisiStatus: status });
+    // Task 11f: note is always optional, capped to a sane length - this is
+    // the same entry point Task 7c's "Aku nggak bisa quest ini" button uses
+    // (a context signal, never evidence/growth), so it also carries
+    // whatever short reason text the user typed there.
+    const trimmedNote = typeof note === "string" ? note.trim().slice(0, 300) : null;
+    await db.updateKondisi(req.userId, status, trimmedNote || null);
+    res.json({ ok: true, kondisiStatus: status, kondisiNote: trimmedNote || null });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan kondisi." });
@@ -633,6 +701,7 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
     };
     await db.saveReflection(req.userId, day.id, reflection);
     await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
+    await db.touchStatActivity(req.userId, Object.keys(deltas));
     await db.updateState(req.userId, {
       stats: newStats,
       chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
@@ -652,7 +721,7 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
       await db.setPracticeTestState(req.userId, day.goalIndex, { level: (practiceState.level || 1) + 1, history });
     }
 
-    res.json({ ok: true, score: graded.correct, total: graded.total, wrong: graded.wrong, mentorReply: result.mentorReply, deltas });
+    res.json({ ok: true, score: graded.correct, total: graded.total, wrong: graded.wrong, mentorReply: result.mentorReply, interpretation: result.interpretation || null, deltas });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan hasil tes." });
@@ -758,6 +827,7 @@ app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
       deltas, timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
+    await db.touchStatActivity(req.userId, Object.keys(deltas));
     await db.updateState(req.userId, {
       stats: newStats,
       chapterNumber: state.chapterNumber,

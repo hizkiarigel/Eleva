@@ -91,13 +91,46 @@ function normalizeCompletionType(quest) {
   return quest;
 }
 
+// Task 7c: the model self-reports evidenceSchema (what field(s) the
+// completion form should show, and what number counts as "done") the same
+// way it self-reports completionType/structuredKind - normalized here in
+// code before it ever reaches the client, same defense-in-depth pattern.
+// Unlike completionType, a malformed evidenceSchema is NOT a hard downgrade
+// (the quest itself is still fine) - it just patches to null, which makes
+// the client fall back to asking the user directly (the old, pre-Task-7c
+// behavior), never renders a broken/half-filled form.
+const CARDIO_ACTIVITY_TYPES = ["Lari", "Jalan cepat", "Sepeda", "Lompat tali", "Lainnya"];
+function normalizeEvidenceSchema(quest) {
+  if (!quest) return quest;
+  if (quest.completionType !== "structured-physical") {
+    quest.evidenceSchema = null;
+    return quest;
+  }
+  const s = quest.evidenceSchema;
+  if (!s || typeof s !== "object") {
+    quest.evidenceSchema = null;
+    return quest;
+  }
+  const target = typeof s.target === "number" && Number.isFinite(s.target) && s.target > 0 ? s.target : null;
+  if (quest.structuredKind === "cardio") {
+    const activityType = CARDIO_ACTIVITY_TYPES.includes(s.activityType) ? s.activityType : null;
+    quest.evidenceSchema = { activityType, hasWeight: null, metricType: "distance", target: target != null && target <= 200 ? target : null };
+  } else if (quest.structuredKind === "gym") {
+    quest.evidenceSchema = { activityType: null, hasWeight: typeof s.hasWeight === "boolean" ? s.hasWeight : null, metricType: "reps", target: target != null && target <= 500 ? target : null };
+  } else {
+    quest.evidenceSchema = null;
+  }
+  return quest;
+}
+
 async function generateQuest(ctx) {
   if (!hasKey()) return fallbackQuest(ctx);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan).` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "observed": {"yesterday": string, "noticed": string, "today": string}|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective"|"practice-test"|"job-match-analysis", "structuredKind": "cardio"|"gym"|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "observed" (redesign homepage, "Eleva Observed") adalah jejak penalaran singkat SEBELUM quest hari ini — null kalau ctx.recentDays kosong (belum ada apa pun untuk diamati, jangan mengarang). Kalau ada: "yesterday" 1 kalimat ringkas apa yang terjadi di reflection/structuredData PALING BARU (angka nyata kalau ada, mis. "3.21 km, pace tidak stabil"), "noticed" 1 kalimat pola yang kamu amati dari itu (observasi, bukan instruksi), "today" 1 kalimat keputusan/fokus quest hari ini SEBAGAI AKIBAT dari observasi itu — ketiganya harus benar-benar berantai (today harus terasa seperti konsekuensi logis dari noticed, noticed dari yesterday), bukan tiga kalimat lepas-lepas. "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective/practice-test/job-match-analysis. Pilih "practice-test" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal ujian/tes/sertifikasi terukur dengan komponen reading/listening comprehension (mis. "IELTS band 6.5", persiapan TOEFL, ujian bahasa lain) — kalau ragu atau goal-nya bukan soal itu, JANGAN pilih ini, pakai reflective/structured-physical seperti biasa (practice-test seharusnya jarang muncul). Pilih "job-match-analysis" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal mencari/melamar kerja (mis. "dapat kerja remote sebagai data analyst", goal Livelihood yang jelas-jelas soal job hunting) — quest-nya minta pengguna cek lowongan nyata yang mereka temukan dibanding CV mereka, bukan quest generik "cari lowongan". Kalau ragu, JANGAN pilih ini (job-match-analysis seharusnya jarang muncul, sama seperti practice-test). Quest kualitatif/emosional/sosial lain → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan). Kalau quest ini structured-physical, "evidenceSchema.target" WAJIB sama persis dengan angka target ini (jarakKm untuk cardio, repetisi untuk gym) — jangan bikin target baru yang beda.` : ""}${ctx.kondisiStatus && ctx.kondisiStatus !== "Normal" ? ` Kondisi terbaru pengguna (Context Update): "${ctx.kondisiStatus}"${ctx.kondisiNote ? ` (catatan mereka: "${ctx.kondisiNote}")` : ""} — anggap ini bagian dari Obstacle di kerangka WOOP: turunkan intensitas/skala quest hari ini secara wajar (opsi lebih ringan, target lebih kecil, atau geser ke sesuatu yang tetap bisa dikerjakan dalam kondisi ini), JANGAN abaikan kondisi ini demi instruksi generik.` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "observed": {"yesterday": string, "noticed": string, "today": string}|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective"|"practice-test"|"job-match-analysis", "structuredKind": "cardio"|"gym"|null, "evidenceSchema": {"activityType": "Lari"|"Jalan cepat"|"Sepeda"|"Lompat tali"|"Lainnya"|null, "hasWeight": boolean|null, "metricType": "distance"|"reps"|null, "target": number|null}|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "observed" (redesign homepage, "Eleva Observed") adalah jejak penalaran singkat SEBELUM quest hari ini — null kalau ctx.recentDays kosong (belum ada apa pun untuk diamati, jangan mengarang). Kalau ada: "yesterday" 1 kalimat ringkas apa yang terjadi di reflection/structuredData PALING BARU (angka nyata kalau ada, mis. "3.21 km, pace tidak stabil"), "noticed" 1 kalimat pola yang kamu amati dari itu (observasi, bukan instruksi), "today" 1 kalimat keputusan/fokus quest hari ini SEBAGAI AKIBAT dari observasi itu — ketiganya harus benar-benar berantai (today harus terasa seperti konsekuensi logis dari noticed, noticed dari yesterday), bukan tiga kalimat lepas-lepas. "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective/practice-test/job-match-analysis. Pilih "practice-test" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal ujian/tes/sertifikasi terukur dengan komponen reading/listening comprehension (mis. "IELTS band 6.5", persiapan TOEFL, ujian bahasa lain) — kalau ragu atau goal-nya bukan soal itu, JANGAN pilih ini, pakai reflective/structured-physical seperti biasa (practice-test seharusnya jarang muncul). Pilih "job-match-analysis" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal mencari/melamar kerja (mis. "dapat kerja remote sebagai data analyst", goal Livelihood yang jelas-jelas soal job hunting) — quest-nya minta pengguna cek lowongan nyata yang mereka temukan dibanding CV mereka, bukan quest generik "cari lowongan". Kalau ragu, JANGAN pilih ini (job-match-analysis seharusnya jarang muncul, sama seperti practice-test). Quest kualitatif/emosional/sosial lain → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). "evidenceSchema" (Task 7c — WAJIB, dipakai supaya pengguna TIDAK perlu ditanya ulang "jenis aktivitasnya apa?" saat quest disubmit) hanya diisi (bukan null) kalau completionType "structured-physical", else null. Untuk cardio: "activityType" WAJIB salah satu dari 5 pilihan itu sesuai aktivitas yang diminta/tersirat quest-nya, "metricType" harus "distance", "target" = angka target jarak dalam km yang diminta/tersirat quest (mis. quest "Lari 3,2 km" → target 3.2), "hasWeight" null. Untuk gym: "hasWeight" true kalau quest menyebut alat/beban (dumbbell/barbell/mesin/kettlebell), false kalau bodyweight murni (push-up/squat/plank tanpa alat), "metricType" harus "reps", "target" = jumlah repetisi PER SET yang diminta/tersirat quest (mis. quest "push-up 3x20" → target 20), "activityType" null. Kalau angka target yang wajar/spesifik tidak bisa disimpulkan dari quest-nya, "target" boleh null (bukan mengarang angka). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
     const result = await callClaude(user);
     if (!result?.quest?.title) throw new Error("bad shape");
     normalizeCompletionType(result.quest);
+    normalizeEvidenceSchema(result.quest);
     // "observed" is a bonus display field (Eleva Observed card), not
     // structurally critical like quest.title - a malformed shape gets
     // patched to null (card just doesn't render) instead of discarding an
@@ -109,6 +142,38 @@ async function generateQuest(ctx) {
     console.error("generateQuest failed, using fallback:", e.message);
     return fallbackQuest(ctx);
   }
+}
+
+const SIDE_QUEST_FALLBACKS = [
+  { title: "Regangkan badan 5 menit", description: "Berdiri, regangkan leher/bahu/punggung selama 5 menit. Tidak perlu sempurna, cuma gerak.", statFocus: "body", why: "Bonus kecil, bukan pengganti quest utamamu." },
+  { title: "Tulis satu hal yang kamu syukuri", description: "Satu kalimat saja — hal kecil apa pun hari ini yang terasa baik.", statFocus: "emotional", why: "Bonus kecil, bukan pengganti quest utamamu." },
+];
+
+// Task 11c (Side Quest, real feature): fills empty carousel slots (3 minus
+// active goal count) with an OPTIONAL bonus quest not tied to any specific
+// goal - per Eleva_PRD.pdf section 16's explicit clarification this is a
+// label/placement on the SAME Main Quest generation mechanism, not a new
+// quest type, so it deliberately reuses MENTOR_SYSTEM/callClaude rather
+// than inventing a parallel system. Kept intentionally lighter than
+// generateQuest: no WOOP/Goal-vs-Pathway framing (nothing to anchor it to),
+// always reflective (a bonus is low-stakes by design, never structured-
+// physical/practice-test/job-match-analysis), no chapter/pathwayNoun/
+// observed fields since it never touches chapter state.
+async function generateSideQuest(ctx) {
+  if (!hasKey()) return fallbackSideQuest();
+  try {
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan SATU Side Quest opsional untuk pengguna ini - bonus kecil yang TIDAK terikat ke goal manapun mereka (mis. stretching ringan, refleksi bebas singkat, satu tindakan sosial kecil), rendah tekanan, bisa diselesaikan dalam hitungan menit. Balas JSON dengan bentuk persis:\n{"quest": {"title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy], "why": string}}\n\nAturan: description maksimal 1-2 kalimat, benar-benar opsional/santai (bukan versi mini dari Primary Quest mereka), why singkat menjelaskan kenapa ini bonus yang layak dicoba. Jangan menyinggung goal spesifik mereka - ini murni tambahan, bukan turunan dari ctx.goals.`;
+    const result = await callClaude(user);
+    if (!result?.quest?.title) throw new Error("bad shape");
+    return { quest: { mode: "quest", completionType: "reflective", evidenceSchema: null, ...result.quest } };
+  } catch (e) {
+    console.error("generateSideQuest failed, using fallback:", e.message);
+    return fallbackSideQuest();
+  }
+}
+function fallbackSideQuest() {
+  const q = SIDE_QUEST_FALLBACKS[Math.floor(Math.random() * SIDE_QUEST_FALLBACKS.length)];
+  return { quest: { mode: "quest", completionType: "reflective", evidenceSchema: null, ...q } };
 }
 
 async function processReflection(ctx) {
@@ -124,7 +189,7 @@ async function processReflection(ctx) {
       : ctx.structuredData
       ? `Quest hari ini bertipe TERSTRUKTUR-FISIK: pengguna mengisi ctx.structuredData (field angka/pilihan yang kelengkapan & kewajarannya SUDAH divalidasi kode sebelum sampai ke kamu — jangan menolak karena format). Nilai statDeltas dari data terstruktur itu (plus ctx.reflectionText kalau diisi — itu OPSIONAL, ketiadaannya BUKAN alasan menolak growth). mentorReply: komentari angkanya secara spesifik (durasi/jarak/titik mulai berat — Ringan/Cukup/Berat, atau set×rep×beban), dan kalau ctx.recentDays punya structuredData sebelumnya, sebut baseline progresnya secara konkret (mis. "minggu lalu 15 repetisi, sekarang 18").`
       : `GROWTH-GATE KESPESIFIKAN (WAJIB, Task 7 - ini alasan gate panjang-kata saja tidak cukup): bandingkan ctx.reflectionText dengan ctx.quest.description/title. KALAU deskripsi quest hari ini secara eksplisit meminta detail konkret (angka, ukuran, jumlah, durasi, nama orang/tempat, observasi spesifik - mis. "catat repetisi, jarak, dan titik menyerah"), maka refleksi yang TIDAK menyebut SATU PUN detail yang diminta itu WAJIB ditolak growth-nya (statDeltas = {} kosong), TIDAK PEDULI seberapa panjang teksnya - refleksi generik panjang ("udah olahraga tadi, capek tapi enak, seneng bisa konsisten") adalah persis celah Goodhart yang gate ini tutup, dan mentorReply-nya menyebutkan dengan hangat detail spesifik apa yang kurang supaya besok bisa diterima. Sebaliknya, refleksi SINGKAT tapi menyebut detail spesifik yang diminta = SAH, beri growth yang pantas. KALAU quest hari ini bertipe kualitatif/emosional dan deskripsinya TIDAK meminta detail terukur apa pun, JANGAN memaksakan standar angka - refleksi jujur yang wajar dan menyentuh isi quest-nya tetap layak growth (gate ini soal kespesifikan YANG DIMINTA, bukan soal semua refleksi harus berisi angka).`;
-    const user = `Konteks (JSON):\n${JSON.stringify(ctx)}\n\nPengguna baru saja merefleksikan quest hari ini. Balas JSON dengan bentuk persis:\n{"statDeltas": {"<stat>": number}, "mentorReply": string, "chapterAdvance": boolean, "newChapterTitle": string|null, "newChapterNarrative": string|null}\n\n${evaluationRules}\n\nAturan umum: statDeltas hanya untuk stat yang benar-benar tersentuh, nilai integer 1-5, JANGAN beri nilai jika kosong/dangkal. mentorReply singkat (1-3 kalimat), merespons ISI konkret mereka secara spesifik. chapterAdvance hanya true jika ada pergeseran pola hidup yang nyata dan signifikan. "newChapterNarrative" WAJIB diisi (2-4 kalimat, paragraf naratif Bahasa Indonesia) HANYA kalau chapterAdvance true - ini masuk ke layar "Kisahmu" (autobiografi Chapter demi Chapter), jadi ceritakan kenapa Chapter ini bergeser dari sebelumnya (pola nyata apa yang berubah), bukan cuma mengulang newChapterTitle. null kalau chapterAdvance false.`;
+    const user = `Konteks (JSON):\n${JSON.stringify(ctx)}\n\nPengguna baru saja merefleksikan quest hari ini. Balas JSON dengan bentuk persis:\n{"statDeltas": {"<stat>": number}, "mentorReply": string, "interpretation": string, "chapterAdvance": boolean, "newChapterTitle": string|null, "newChapterNarrative": string|null}\n\n${evaluationRules}\n\nAturan umum: statDeltas hanya untuk stat yang benar-benar tersentuh, nilai integer 1-5, JANGAN beri nilai jika kosong/dangkal. mentorReply singkat (1-3 kalimat), merespons ISI konkret mereka secara spesifik. "interpretation" (Task 7c, "Eleva Response") adalah 1-2 kalimat yang EKSPLISIT merujuk balik ke angka/data yang BARU SAJA disubmit (ctx.structuredData kalau ada, atau isi ctx.reflectionText) — bukan pujian generik ("kerja bagus!"), tapi pengamatan konkret soal angkanya sendiri (mis. "Pace rata-ratamu mendekati target, tapi km pertama masih jauh lebih cepat dari dua berikutnya — coba ratakan dari awal"). Ini pasangan simetris dari "Eleva Observed" (yang bicara soal KEMARIN sebelum quest dimulai) — interpretation ini bicara soal HARI INI setelah evidence masuk. chapterAdvance hanya true jika ada pergeseran pola hidup yang nyata dan signifikan. "newChapterNarrative" WAJIB diisi (2-4 kalimat, paragraf naratif Bahasa Indonesia) HANYA kalau chapterAdvance true - ini masuk ke layar "Kisahmu" (autobiografi Chapter demi Chapter), jadi ceritakan kenapa Chapter ini bergeser dari sebelumnya (pola nyata apa yang berubah), bukan cuma mengulang newChapterTitle. null kalau chapterAdvance false.`;
     return await callClaude(user);
   } catch (e) {
     console.error("processReflection failed, using fallback:", e.message);
@@ -285,8 +350,9 @@ function fallbackQuest(ctx) {
     // observation. app.js simply skips the Eleva Observed card when null.
     observed: null,
     // Fallback quests are qualitative by construction - always the
-    // reflective completion flow, never the structured-physical form.
-    quest: { mode: "quest", completionType: "reflective", ...q },
+    // reflective completion flow, never the structured-physical form, so
+    // there's no evidence schema to derive either.
+    quest: { mode: "quest", completionType: "reflective", evidenceSchema: null, ...q },
   };
 }
 
@@ -294,6 +360,7 @@ function fallbackReflection() {
   return {
     statDeltas: {},
     mentorReply: "Refleksinya kesimpan. AI mentor belum aktif penuh (API key belum diisi), jadi belum bisa menilai stat growth secara personal untuk sesi ini.",
+    interpretation: "Mode tanpa API key: belum bisa membaca angka yang barusan kamu submit secara personal.",
     chapterAdvance: false,
     newChapterTitle: null,
     newChapterNarrative: null,
@@ -639,4 +706,5 @@ module.exports = {
   generateScenarioCard, generateChapterAnalysis,
   generateTargetOptions, generatePracticeTest, generateJobMatchAnalysis,
   PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
+  normalizeEvidenceSchema, generateSideQuest,
 };

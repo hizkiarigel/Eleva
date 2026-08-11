@@ -347,6 +347,13 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 .kondisi-chip.selected { border-color: var(--accent); background: #d8a35522; color: var(--accent); }
 .kondisi-done { background: none; border: none; color: var(--muted); font-size: 12.5px; padding: 0; }
+/* Task 11f: optional free-text note, genuinely optional so kept visually
+   light (no border emphasis) - the chip tap above is still the fast path. */
+.kondisi-note-input {
+  width: 100%; background: var(--surface); border: 1px solid var(--hair); border-radius: 10px;
+  color: var(--text); font-family: inherit; font-size: 13px; padding: 10px 12px; resize: vertical; margin-bottom: 6px;
+}
+.kondisi-note-preview { color: var(--muted); font-style: italic; }
 
 .decay-banner {
   background: var(--surface2); border: 1px solid var(--hair); border-radius: 10px;

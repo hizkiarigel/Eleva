@@ -141,6 +141,46 @@ async function init() {
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS observed JSONB;
   `);
 
+  // Task 11f (Context Update, formalized from Eleva_PRD.pdf): the chip status
+  // above already existed as "Kondisi Hari Ini" - this adds the optional
+  // free-text note half of the {status, note, timestamp} schema the PRD
+  // specifies, kept as its own nullable column (not folded into
+  // kondisi_status) since it's genuinely optional and has its own lifecycle
+  // (cleared implicitly whenever status changes again, see updateKondisi).
+  await pool.query(`
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS kondisi_note TEXT;
+  `);
+
+  // Task 11e (Decay, real mechanism per Eleva_PRD.pdf - founder confirmed
+  // via AskUserQuestion to build the actual stat-decrease version, not the
+  // cosmetic-only one from the previous round). stat_activity tracks the
+  // last time EACH stat received a positive growth delta (keyed by stat
+  // name, ISO timestamp) - the decay clock per stat, separate from the
+  // account-wide pathway_trial_started_at that's used as the fallback
+  // anchor for a stat that has never once been touched. last_decay_check is
+  // the lazy-evaluation gate (same idiom as kondisi's daily reset and the
+  // pathway resonance-check): decay is only ever evaluated once per
+  // calendar day, and application code applies at most ONE day's worth of
+  // reduction per check regardless of how many days were actually missed -
+  // a long absence is never backlogged into a big drop on return, per the
+  // PRD's explicit "LAMBAT dan BERTAHAP, bukan drop tiba-tiba, terasa
+  // sebagai konsekuensi wajar bukan hukuman."
+  await pool.query(`
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS stat_activity JSONB DEFAULT '{}'::jsonb;
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS last_decay_check TIMESTAMPTZ NOT NULL DEFAULT now();
+  `);
+
+  // Task 11c (Side Quest, real feature per Eleva_PRD.pdf - a label on the
+  // SAME Main Quest mechanism, not a new quest type per section 16's
+  // explicit clarification). Distinguishes an intentional goal-agnostic
+  // bonus quest from a legacy pre-goal-capture account's single ungoaled
+  // quest, both of which have goal_index NULL - without this flag the two
+  // would be indistinguishable and a legacy account's only quest would
+  // wrongly render in the Side Quest section instead of Primary.
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS is_side_quest BOOLEAN NOT NULL DEFAULT false;
+  `);
+
   // Kisahmu screen: full narrative per Chapter, chronological. Chapters are
   // archived HERE the moment chapter_number advances (before character_state
   // is overwritten with the new title/narrative) - see index.js's advance
@@ -224,6 +264,14 @@ async function getState(userId) {
     chapterNarrative: row.chapter_narrative,
     kondisiStatus: row.kondisi_status,
     kondisiUpdatedAt: row.kondisi_updated_at,
+    // Task 11f: optional free-text note attached to the current kondisi
+    // status - null whenever the user didn't add one (never required).
+    kondisiNote: row.kondisi_note,
+    // Task 11e: per-stat last-active timestamps + the lazy decay
+    // evaluation gate - see the column comment in init() for the full
+    // rationale. statActivity defaults to {} for accounts predating Decay.
+    statActivity: row.stat_activity || {},
+    lastDecayCheck: row.last_decay_check,
     // "Eleva Observed" card content, refreshed whenever a new quest is
     // generated (see index.js) - null until the first quest with real
     // recentDays context to reason about exists.
@@ -271,18 +319,88 @@ async function updateState(userId, { stats, chapterNumber, chapterTitle, growthS
   );
 }
 
-// Homepage redesign: "Kondisi Hari Ini" - a single current value, no history
-// kept (the design only ever shows "today's" condition). Bumps
-// kondisi_updated_at so index.js's lazy daily-reset check has something to
-// compare against.
-async function updateKondisi(userId, status) {
-  await pool.query(`UPDATE character_state SET kondisi_status = $2, kondisi_updated_at = now() WHERE user_id = $1`, [userId, status]);
+// Homepage redesign / Task 11f: "Kondisi Hari Ini" (Context Update) - a
+// single current value, no history kept (the design only ever shows
+// "today's" condition). note is optional free text (11f's schema), always
+// replaced wholesale with the new status - an old note never lingers
+// attached to a newer, different status. Bumps kondisi_updated_at so
+// index.js's lazy daily-reset check has something to compare against.
+async function updateKondisi(userId, status, note) {
+  await pool.query(
+    `UPDATE character_state SET kondisi_status = $2, kondisi_note = $3, kondisi_updated_at = now() WHERE user_id = $1`,
+    [userId, status, note || null]
+  );
 }
 // Called ONLY by the lazy daily-reset check (index.js) - resets back to
 // Normal without bumping kondisi_updated_at to "now" a second time
 // unnecessarily; the check already knows the date rolled over.
 async function resetKondisiToNormal(userId) {
-  await pool.query(`UPDATE character_state SET kondisi_status = 'Normal', kondisi_updated_at = now() WHERE user_id = $1`, [userId]);
+  await pool.query(`UPDATE character_state SET kondisi_status = 'Normal', kondisi_note = NULL, kondisi_updated_at = now() WHERE user_id = $1`, [userId]);
+}
+
+// Task 11e (Decay): records that a stat just received a REAL positive
+// growth delta - called right after any route applies deltas to stats
+// (POST /api/reflection, /api/practice-test/submit, /api/job-match/analyze).
+// Only ever called with keys that actually grew - a stat with no entry yet
+// falls back to pathway_trial_started_at as its decay anchor (see
+// applyDecayIfDue), so this never needs a fake "day 0" backfill.
+async function touchStatActivity(userId, statKeys) {
+  if (!statKeys || !statKeys.length) return;
+  const now = new Date().toISOString();
+  await pool.query(
+    `UPDATE character_state SET stat_activity = COALESCE(stat_activity, '{}'::jsonb) || $2::jsonb WHERE user_id = $1`,
+    [userId, JSON.stringify(Object.fromEntries(statKeys.map((k) => [k, now])))]
+  );
+}
+
+// Task 11e (Decay): lazy, at-most-once-per-calendar-day evaluation - same
+// idiom as the kondisi daily reset and the pathway resonance-check, called
+// from GET /api/state. MANDATORY pause while kondisi_status != 'Normal'
+// (non-negotiable per the PRD - decaying someone who's sick/burned out
+// would directly contradict why Context Update exists): the checkpoint
+// still advances to "now" during a pause so the day is never retroactively
+// decayed once the user's condition returns to Normal. When actually due,
+// applies exactly ONE day's worth of reduction per stat that's past the
+// inactivity threshold - never the full backlog for a long absence, so
+// reopening the app after two weeks away costs at most 1 point per stat,
+// not ten. Returns the (possibly unchanged) stats object so the caller can
+// use the current numbers without a second read.
+const DECAY_THRESHOLD_DAYS = 4;
+const DECAY_RATE = 1;
+async function applyDecayIfDue(userId) {
+  const { rows } = await pool.query(
+    `SELECT stats, stat_activity, kondisi_status, pathway_trial_started_at, last_decay_check FROM character_state WHERE user_id = $1`,
+    [userId]
+  );
+  const row = rows[0];
+  if (!row || !row.stats) return row?.stats || DEFAULT_STATS;
+
+  const dayKey = (d) => new Date(d).toLocaleDateString("en-CA");
+  const today = dayKey(new Date());
+  if (dayKey(row.last_decay_check) === today) return row.stats; // already evaluated today
+
+  if (row.kondisi_status !== "Normal") {
+    await pool.query(`UPDATE character_state SET last_decay_check = now() WHERE user_id = $1`, [userId]);
+    return row.stats;
+  }
+
+  const activity = row.stat_activity || {};
+  const anchor = row.pathway_trial_started_at ? new Date(row.pathway_trial_started_at) : new Date();
+  const newStats = { ...row.stats };
+  let changed = false;
+  for (const key of Object.keys(row.stats)) {
+    const lastActive = activity[key] ? new Date(activity[key]) : anchor;
+    const daysSince = Math.floor((Date.now() - lastActive.getTime()) / 86400000);
+    if (daysSince >= DECAY_THRESHOLD_DAYS && newStats[key] > 0) {
+      newStats[key] = Math.max(0, newStats[key] - DECAY_RATE);
+      changed = true;
+    }
+  }
+  await pool.query(
+    `UPDATE character_state SET stats = $2, last_decay_check = now() WHERE user_id = $1`,
+    [userId, changed ? newStats : row.stats]
+  );
+  return changed ? newStats : row.stats;
 }
 
 // Kisahmu: archives the OUTGOING chapter (current title+narrative, about to
@@ -346,7 +464,7 @@ async function resetUser(userId) {
 // so several rows can legitimately share the same date) ---
 
 function rowToQuest(r) {
-  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: r.reflection, createdAt: r.created_at };
+  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: r.reflection, createdAt: r.created_at, isSideQuest: r.is_side_quest };
 }
 
 // Every quest still open (not yet marked done) across the user's goals -
@@ -370,13 +488,15 @@ async function getQuestById(userId, id) {
 }
 
 // Issues a brand-new quest for one goal (goalIndex null for legacy
-// pre-goal-capture accounts, a single ungoaled slot). Always a fresh
-// insert - id is a plain serial, there's nothing to collide with, unlike
-// the old (user_id, date) key that forced awkward upsert/conflict logic.
-async function createQuest(userId, goalIndex, date, { quest, insight }) {
+// pre-goal-capture accounts, a single ungoaled slot - OR for a Task 11c
+// Side Quest, distinguished from the legacy case by isSideQuest). Always a
+// fresh insert - id is a plain serial, there's nothing to collide with,
+// unlike the old (user_id, date) key that forced awkward upsert/conflict
+// logic.
+async function createQuest(userId, goalIndex, date, { quest, insight }, isSideQuest = false) {
   const { rows } = await pool.query(
-    `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection) VALUES ($1, $2, $3, $4, $5, NULL) RETURNING *`,
-    [userId, goalIndex, date, quest, insight]
+    `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest) VALUES ($1, $2, $3, $4, $5, NULL, $6) RETURNING *`,
+    [userId, goalIndex, date, quest, insight, isSideQuest]
   );
   return rowToQuest(rows[0]);
 }
@@ -482,4 +602,5 @@ module.exports = {
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
   listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
   updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
+  touchStatActivity, applyDecayIfDue,
 };

@@ -43,8 +43,8 @@ function validateStructuredData(kind, data) {
     if (durasi == null || durasi <= 0) return { ok: false, error: "Durasi wajib diisi, format MM:SS (mis. 20:01)." };
     if (durasi > 600) return { ok: false, error: "Durasi lebih dari 10 jam dalam sehari tidak wajar — cek lagi angkanya." };
     if (jarak != null && (jarak < 0 || jarak > 200)) return { ok: false, error: "Jarak di luar rentang wajar (0-200 km) — cek lagi angkanya." };
-    if (!["Ringan", "Cukup", "Berat"].includes(titikBerat)) return { ok: false, error: "Pilih titik mulai berat: Ringan, Cukup, atau Berat." };
-    if (titikBerat === "Berat" && !titikBeratDetail) return { ok: false, error: "Ceritakan singkat apa yang bikin berat." };
+    if (!["Ringan", "Cukup", "Berat", "Terlalu berat"].includes(titikBerat)) return { ok: false, error: "Pilih salah satu: Ringan, Cukup, Berat, atau Terlalu berat." };
+    if (["Berat", "Terlalu berat"].includes(titikBerat) && !titikBeratDetail) return { ok: false, error: "Ceritakan singkat apa yang bikin berat." };
 
     if (jarak != null && jarak > 0) {
       const speed = jarak / (durasi / 60);
@@ -66,7 +66,7 @@ function validateStructuredData(kind, data) {
         durasiMenit: durasi,
         ...(jarak != null ? { jarakKm: jarak } : {}),
         titikBerat,
-        ...(titikBerat === "Berat" ? { titikBeratDetail: titikBeratDetail.slice(0, 300) } : {}),
+        ...(["Berat", "Terlalu berat"].includes(titikBerat) ? { titikBeratDetail: titikBeratDetail.slice(0, 300) } : {}),
       },
     };
   }
