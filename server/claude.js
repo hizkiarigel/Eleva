@@ -79,6 +79,13 @@ function normalizeCompletionType(quest) {
     quest.structuredKind = null;
     return quest;
   }
+  // Task 10b: a fourth completionType, for job-search goals - completed by
+  // comparing an uploaded CV against a real job posting, not a text/number
+  // form. Same "no structuredKind of its own" rule as practice-test.
+  if (quest.completionType === "job-match-analysis") {
+    quest.structuredKind = null;
+    return quest;
+  }
   quest.completionType = "reflective";
   delete quest.structuredKind;
   return quest;
@@ -87,7 +94,7 @@ function normalizeCompletionType(quest) {
 async function generateQuest(ctx) {
   if (!hasKey()) return fallbackQuest(ctx);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan).` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective"|"practice-test", "structuredKind": "cardio"|"gym"|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective/practice-test. Pilih "practice-test" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal ujian/tes/sertifikasi terukur dengan komponen reading/listening comprehension (mis. "IELTS band 6.5", persiapan TOEFL, ujian bahasa lain) — kalau ragu atau goal-nya bukan soal itu, JANGAN pilih ini, pakai reflective/structured-physical seperti biasa (practice-test seharusnya jarang muncul). Quest kualitatif/emosional/sosial lain → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan).` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective"|"practice-test"|"job-match-analysis", "structuredKind": "cardio"|"gym"|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective/practice-test/job-match-analysis. Pilih "practice-test" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal ujian/tes/sertifikasi terukur dengan komponen reading/listening comprehension (mis. "IELTS band 6.5", persiapan TOEFL, ujian bahasa lain) — kalau ragu atau goal-nya bukan soal itu, JANGAN pilih ini, pakai reflective/structured-physical seperti biasa (practice-test seharusnya jarang muncul). Pilih "job-match-analysis" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal mencari/melamar kerja (mis. "dapat kerja remote sebagai data analyst", goal Livelihood yang jelas-jelas soal job hunting) — quest-nya minta pengguna cek lowongan nyata yang mereka temukan dibanding CV mereka, bukan quest generik "cari lowongan". Kalau ragu, JANGAN pilih ini (job-match-analysis seharusnya jarang muncul, sama seperti practice-test). Quest kualitatif/emosional/sosial lain → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
     const result = await callClaude(user);
     if (!result?.quest?.title) throw new Error("bad shape");
     normalizeCompletionType(result.quest);
@@ -220,6 +227,42 @@ async function generatePracticeTest(ctx) {
   } catch (e) {
     console.error("generatePracticeTest failed, using fallback:", e.message);
     return fallbackPracticeTest(ctx);
+  }
+}
+
+// Task 10b (Job Match Analysis): the only multimodal generate* function in
+// this file - content is an ARRAY of blocks (instruction text + the CV +
+// one or more job-posting screenshots), not a JSON-stringified text prompt
+// like every other caller here. callClaude passes whatever it's given
+// straight through as the message content, so no change was needed there.
+const jobMatch = require("./jobMatch");
+
+function fallbackJobMatchAnalysis() {
+  return {
+    matchTable: [{ skill: "Analisis belum tersedia", status: "tidak ada", note: "Mode tanpa API key: skill di lowongan tidak bisa dibaca dari gambar tanpa mentor AI aktif." }],
+    verdict: hasKey()
+      ? "Analisis sempat gagal — coba upload ulang sebentar lagi."
+      : "Mode tanpa API key: analisis job-match butuh ANTHROPIC_API_KEY aktif untuk membaca screenshot lowongan dan CV-mu.",
+    relevanceNote: "",
+    nextStep: "Tambahkan ANTHROPIC_API_KEY di .env, lalu coba lagi.",
+  };
+}
+
+async function generateJobMatchAnalysis(ctx) {
+  if (!hasKey()) return fallbackJobMatchAnalysis();
+  try {
+    const cvBlocks = jobMatch.buildCvContentBlocks(ctx.cvArtifact);
+    const imageBlocks = jobMatch.buildImageBlocks(ctx.images);
+    if (!imageBlocks) throw new Error("bad images");
+    const instruction = `Konteks pengguna: goal Livelihood mereka adalah "${ctx.goalText || "mencari kerja/karier yang cocok"}"${ctx.pathway ? `, gaya Pathway mereka "${ctx.pathway}"` : ""}.\n\nTugas: dokumen/gambar pertama adalah CV pengguna. Gambar-gambar setelahnya adalah screenshot SATU lowongan kerja (bisa lebih dari satu screenshot untuk lowongan yang sama karena postingan asli sering kepanjangan buat satu layar — gabungkan jadi satu pemahaman utuh). Ekstrak dari lowongan itu: peran/judul, skill wajib (mandatory), skill nice-to-have, level pengalaman, konteks lain yang relevan. Bandingkan ke CV, lalu balas JSON dengan bentuk PERSIS:\n{"matchTable": [{"skill": string, "status": "ada bukti"|"disebut tapi lemah"|"tidak ada", "note": string}], "verdict": string, "relevanceNote": string, "nextStep": string}\n\nAturan WAJIB (prinsip anti-sycophancy — JUJUR, bukan menyenangkan pengguna):\n- "matchTable": satu baris per skill yang diminta lowongan (wajib maupun nice-to-have), "status" HARUS salah satu dari 3 nilai itu persis, "note" satu kalimat pendek alasan/bukti dari CV (atau kenapa tidak ada).\n- "verdict" maknanya HARUS salah satu dari ini (boleh disesuaikan kata-katanya, tapi jujur sesuai datanya): match kuat → semacam "Siap apply sekarang"; match sedang → semacam "Bisa apply, tapi perkuat [skill] dulu biar kompetitif"; gap besar → semacam "Gap masih besar — fokus bangun [skill] dulu sebelum apply ke role sejenis". JANGAN asal optimis kalau datanya tidak mendukung.\n- "relevanceNote": WAJIB cek apakah lowongan yang di-screenshot ini benar-benar nyambung ke GOAL pengguna ("${ctx.goalText || ""}"), BUKAN cuma nyambung ke isi CV. Kalau TIDAK nyambung (mis. goal "data analyst" tapi lowongan "data entry" — bertetangga tapi beda), WAJIB bilang jujur di sini, jangan diam-diam dianggap sama. Kalau memang nyambung, boleh singkat saja menyebut itu.\n- "nextStep": SATU langkah konkret sebagai penutup (apply sekarang / perkuat skill X minggu ini / cari lowongan yang lebih relevan) — satu fokus, bukan daftar panjang.\n- Bahasa Indonesia natural, nada mentor hangat tapi jujur (lihat aturan system prompt) — kejujuran lebih penting daripada bikin pengguna senang.`;
+    const content = [{ type: "text", text: instruction }, ...cvBlocks, ...imageBlocks];
+    const result = await callClaude(content);
+    const cleaned = jobMatch.cleanJobMatchResult(result);
+    if (!cleaned) throw new Error("bad shape");
+    return cleaned;
+  } catch (e) {
+    console.error("generateJobMatchAnalysis failed, using fallback:", e.message);
+    return fallbackJobMatchAnalysis();
   }
 }
 
@@ -584,6 +627,6 @@ function fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks) {
 module.exports = {
   generateQuest, processReflection, hasKey,
   generateScenarioCard, generateChapterAnalysis,
-  generateTargetOptions, generatePracticeTest,
+  generateTargetOptions, generatePracticeTest, generateJobMatchAnalysis,
   PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
 };

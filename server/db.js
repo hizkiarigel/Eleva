@@ -106,6 +106,25 @@ async function init() {
   await pool.query(`
     ALTER TABLE days ADD COLUMN IF NOT EXISTS practice_test_payload JSONB;
   `);
+
+  // Task 10a (Artifacts library): persistent per-user document library, not
+  // tied to any single quest - "CV" is the first real type, schema stays
+  // generic (portfolio/certificate/etc. can reuse the same table later
+  // without a migration). content is either { kind:"text", text } (DOCX gets
+  // extracted server-side at upload time, see server/jobMatch.js - Claude's
+  // API doesn't accept .docx directly) or { kind:"file", mimeType,
+  // dataBase64, filename } (PDF/image - sent to Claude as-is, PDF is
+  // natively supported as a document content block).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      content JSONB NOT NULL,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
 }
 
 // --- users ---
@@ -332,10 +351,62 @@ async function allHistory(userId, limit = 8) {
   return rows.map(rowToQuest);
 }
 
+// --- artifacts (Task 10a: persistent per-user document library) ---
+
+function rowToArtifact(r) {
+  return { id: r.id, type: r.type, content: r.content, uploadedAt: r.uploaded_at, updatedAt: r.updated_at };
+}
+
+// Metadata-only listing - strips dataBase64 out of file-kind content (a CV
+// PDF/photo can be hundreds of KB, no reason to ship that on every routine
+// "does a CV already exist?" check). getArtifactById below returns the full
+// thing, for the one place that actually needs the bytes (job-match-analyze).
+function stripArtifactPreview(a) {
+  const { content, ...rest } = a;
+  if (content?.kind === "file") {
+    return { ...rest, content: { kind: "file", mimeType: content.mimeType, filename: content.filename } };
+  }
+  if (content?.kind === "text") {
+    return { ...rest, content: { kind: "text", text: content.text.slice(0, 300) } };
+  }
+  return { ...rest, content };
+}
+
+async function listArtifacts(userId) {
+  const { rows } = await pool.query(`SELECT * FROM artifacts WHERE user_id = $1 ORDER BY updated_at DESC`, [userId]);
+  return rows.map(rowToArtifact).map(stripArtifactPreview);
+}
+
+async function getArtifactById(userId, id) {
+  const { rows } = await pool.query(`SELECT * FROM artifacts WHERE user_id = $1 AND id = $2`, [userId, id]);
+  return rows[0] ? rowToArtifact(rows[0]) : null;
+}
+
+async function createArtifact(userId, { type, content }) {
+  const { rows } = await pool.query(
+    `INSERT INTO artifacts (user_id, type, content) VALUES ($1, $2, $3) RETURNING *`,
+    [userId, type, content]
+  );
+  return rowToArtifact(rows[0]);
+}
+
+// "Ganti" - replaces an existing artifact's content in place (same id, same
+// type), per the founder spec's "lihat, tambah, ATAU GANTI artifact kapan
+// saja". WHERE user_id scopes this to the caller's own artifacts, so one
+// user can never overwrite another's by guessing an id.
+async function replaceArtifactContent(userId, id, content) {
+  const { rows } = await pool.query(
+    `UPDATE artifacts SET content = $3, updated_at = now() WHERE user_id = $1 AND id = $2 RETURNING *`,
+    [userId, id, content]
+  );
+  return rows[0] ? rowToArtifact(rows[0]) : null;
+}
+
 module.exports = {
   DEFAULT_STATS, init,
   createUser, getUserByEmail, getUserById,
   getState, createState, updateState, setGoalTarget, activatePathway, resetUser,
   getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
+  listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
 };

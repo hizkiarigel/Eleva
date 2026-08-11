@@ -246,6 +246,16 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   line-height: 1; display: flex; align-items: center; justify-content: center; z-index: 5;
 }
 .help-btn:active { color: var(--accent); border-color: var(--accent); }
+/* Task 10a: Artifacts library icon - same visual language as the help
+   button, positioned just to its left so both sit in the "top-right icon
+   row" without overlapping. */
+.artifacts-btn {
+  position: absolute; top: 44px; right: 58px; width: 28px; height: 28px;
+  border-radius: 50%; border: 1px solid var(--hair); background: var(--surface);
+  color: var(--muted); font-size: 13px; font-family: "IBM Plex Mono", monospace;
+  line-height: 1; display: flex; align-items: center; justify-content: center; z-index: 5;
+}
+.artifacts-btn:active { color: var(--accent); border-color: var(--accent); }
 .help-overlay {
   position: fixed; inset: 0; background: rgba(10, 10, 16, 0.62);
   display: flex; align-items: flex-end; justify-content: center; z-index: 50;

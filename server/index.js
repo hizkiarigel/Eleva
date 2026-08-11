@@ -9,10 +9,14 @@ const safety = require("./safety");
 const structured = require("./structured");
 const targets = require("./targets");
 const practiceTestLib = require("./practiceTest");
+const jobMatch = require("./jobMatch");
 
 const app = express();
 app.set("trust proxy", 1);
-app.use(express.json());
+// Default 100kb is far too small for base64-encoded CVs/screenshots (Task
+// 10a/10b) - everything else in this app is small JSON, so the higher limit
+// only matters for the artifacts/job-match routes.
+app.use(express.json({ limit: "20mb" }));
 
 app.use(
   cookieSession({
@@ -560,6 +564,120 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan hasil tes." });
+  }
+});
+
+// --- Artifacts library (Task 10a): persistent per-user document store, not
+// tied to any single quest - a user can view/add/replace an artifact any
+// time via this icon, and any quest that needs one (job-match-analysis is
+// the first) checks here first instead of asking to upload every time. ---
+
+app.get("/api/artifacts", requireAuth, async (req, res) => {
+  try {
+    res.json({ artifacts: await db.listArtifacts(req.userId) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal memuat artifacts." });
+  }
+});
+
+app.post("/api/artifacts", requireAuth, async (req, res) => {
+  try {
+    const { type, mimeType, dataBase64, filename, text } = req.body;
+    if (!type) return res.status(400).json({ error: "Tipe artifact wajib diisi." });
+    let content;
+    if (mimeType) {
+      const prepared = await jobMatch.prepareArtifactContent({ mimeType, dataBase64, filename });
+      if (prepared.error) return res.status(400).json({ error: prepared.error });
+      content = prepared.content;
+    } else if (text && String(text).trim()) {
+      content = { kind: "text", text: String(text).trim().slice(0, 20000), filename: filename || null };
+    } else {
+      return res.status(400).json({ error: "Isi file atau teks wajib diisi." });
+    }
+    const artifact = await db.createArtifact(req.userId, { type, content });
+    res.json({ ok: true, artifact });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan artifact." });
+  }
+});
+
+// "Ganti" - same validation as create, but updates an existing artifact in
+// place (same id) rather than adding a new one.
+app.post("/api/artifacts/:id/replace", requireAuth, async (req, res) => {
+  try {
+    const { mimeType, dataBase64, filename, text } = req.body;
+    let content;
+    if (mimeType) {
+      const prepared = await jobMatch.prepareArtifactContent({ mimeType, dataBase64, filename });
+      if (prepared.error) return res.status(400).json({ error: prepared.error });
+      content = prepared.content;
+    } else if (text && String(text).trim()) {
+      content = { kind: "text", text: String(text).trim().slice(0, 20000), filename: filename || null };
+    } else {
+      return res.status(400).json({ error: "Isi file atau teks wajib diisi." });
+    }
+    const artifact = await db.replaceArtifactContent(req.userId, Number(req.params.id), content);
+    if (!artifact) return res.status(404).json({ error: "Artifact tidak ditemukan." });
+    res.json({ ok: true, artifact });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal mengganti artifact." });
+  }
+});
+
+// Task 10b: Job Match Analysis. Unlike practice-test, this completion type
+// applies growth DETERMINISTICALLY (a flat bump to the quest's statFocus,
+// defaulting to livelihood) instead of a second AI call for mentorReply/
+// statDeltas - the analysis itself already returns rich, specific text
+// (verdict/relevanceNote/nextStep), so asking the model to comment on its
+// own comparison a second time would just be a second paid call for no real
+// new information. Chapter never advances from this completion type alone
+// (no AI judgment call feeding chapterAdvance here) - other quest types
+// still carry that forward normally.
+app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
+  try {
+    const { questId, cvArtifactId, images } = req.body;
+    if (!Array.isArray(images) || !images.length) return res.status(400).json({ error: "Upload minimal satu screenshot lowongan." });
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "job-match-analysis") return res.status(400).json({ error: "Quest ini bukan tipe Job Match Analysis." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    const cvArtifact = await db.getArtifactById(req.userId, cvArtifactId);
+    if (!cvArtifact) return res.status(400).json({ error: "CV tidak ditemukan — upload atau pilih CV dulu." });
+
+    const result = await ai.generateJobMatchAnalysis({
+      cvArtifact, images,
+      goalText: day.goalIndex != null ? state.goals?.[day.goalIndex] : undefined,
+      pathway: state.pathway,
+    });
+
+    const statFocus = (day.quest?.statFocus && day.quest.statFocus in state.stats) ? day.quest.statFocus : "livelihood";
+    const deltas = statFocus in state.stats ? { [statFocus]: 3 } : {};
+    const newStats = { ...state.stats };
+    Object.entries(deltas).forEach(([k, v]) => { newStats[k] = Math.max(0, Math.min(100, newStats[k] + v)); });
+    const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+
+    const reflection = {
+      status: "done", text: "",
+      jobMatchResult: result,
+      deltas, timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+    await db.updateState(req.userId, {
+      stats: newStats,
+      chapterNumber: state.chapterNumber,
+      chapterTitle: state.chapterTitle,
+      growthSessions: newGrowthSessions,
+      pathwayNoun: state.pathwayNoun,
+    });
+
+    res.json({ ok: true, result, deltas });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menganalisis kecocokan lowongan." });
   }
 });
 

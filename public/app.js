@@ -427,6 +427,16 @@ let targetError = "";
 // as a full-screen await between "track" and "test", same pattern as
 // dismissCompleted below - no separate "loading" step needed for that).
 let practiceTestFlow = null;
+// Task 10b (Job Match Analysis): same "separate flow, not reflectOpen"
+// pattern as practiceTestFlow. {questId, step, cvArtifact, images, error}.
+// step: "upload-cv" (skipped straight to "upload-job" if a CV artifact
+// already exists in the library) -> "upload-job".
+let jobMatchFlow = null;
+// Task 10a (Artifacts library): sheet state, independent of any quest flow -
+// reachable any time via its own icon, not just from job-match-analysis.
+let artifactsOpen = false;
+let artifactsList = null; // fetched lazily on first open, refetched after add/replace
+let artifactsError = "";
 let resetArmed = false;
 let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
@@ -1472,6 +1482,87 @@ function practiceTestFlowHTML() {
   return "";
 }
 
+// Reads a File into {mimeType, dataBase64, filename} - shared by the CV
+// upload, job-posting screenshots, and the Artifacts sheet's add/replace
+// forms. readAsDataURL gives "data:<mime>;base64,<data>" - only the part
+// after the comma goes to the server.
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result || "";
+      const comma = result.indexOf(",");
+      resolve({ mimeType: file.type, dataBase64: comma >= 0 ? result.slice(comma + 1) : "", filename: file.name });
+    };
+    reader.onerror = () => reject(new Error("Gagal membaca file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Task 10b: entirely separate from reflectOpen/practiceTestFlow, same
+// precedence pattern in questSectionHTML below. step "upload-cv" is skipped
+// straight to "upload-job" by the click handler if the Artifacts library
+// already has a CV - a returning user never has to re-upload one.
+function jobMatchFlowHTML() {
+  const f = jobMatchFlow;
+  if (!f) return "";
+  if (f.step === "upload-cv") {
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">JOB MATCH ANALYSIS</div>
+        <h2 class="fr">Upload CV dulu</h2>
+        <p class="why">Belum ada CV tersimpan di Artifacts. Upload sekali di sini, dipakai lagi otomatis buat quest serupa berikutnya — bisa diganti kapan pun lewat icon Artifacts. Format: PDF, DOCX, atau foto/gambar CV.</p>
+        <input type="file" id="jmCvFile" accept=".pdf,.docx,image/png,image/jpeg,image/webp" />
+        ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+        <button class="btn-ghost" id="jmCancel" style="margin-top:14px">← Batal</button>
+      </div>`;
+  }
+  if (f.step === "upload-job") {
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">JOB MATCH ANALYSIS</div>
+        <h2 class="fr">Upload lowongan yang mau dicek</h2>
+        <p class="why">CV: ${esc(f.cvArtifact?.content?.filename || "tersimpan")} ✓ — Screenshot lowongan kerjanya, boleh lebih dari satu sekaligus kalau postingannya kepanjangan buat satu layar.</p>
+        <input type="file" id="jmJobFiles" accept="image/png,image/jpeg,image/webp" multiple />
+        ${f.images.length ? `<p class="mono" style="font-size:12px;color:var(--muted);margin:8px 0 0">${f.images.length} gambar dipilih</p>` : ""}
+        ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+        <button class="btn-primary full" id="jmAnalyze" style="margin-top:14px" ${f.images.length ? "" : "disabled"}>Analisis kecocokan</button>
+        <button class="btn-ghost" id="jmChangeCv" style="margin-top:10px">Ganti CV</button>
+        <button class="btn-ghost" id="jmCancel">← Batal</button>
+      </div>`;
+  }
+  return "";
+}
+
+// Task 10a: Artifacts library sheet - reachable any time via its own icon,
+// independent of any quest flow (spec: "lihat, tambah, ATAU GANTI artifact
+// kapan saja"). artifactsList is metadata-only (no file bytes - see
+// db.js stripArtifactPreview), fetched lazily on first open.
+const ARTIFACT_TYPE_LABEL = { cv: "CV", portfolio: "Portfolio", certificate: "Sertifikat", other: "Lainnya" };
+function artifactsSheetHTML() {
+  if (!artifactsOpen) return "";
+  const list = artifactsList || [];
+  return `
+    <div class="help-overlay" id="artifactsOverlay">
+      <div class="help-sheet fadeUp" style="max-height:82vh;overflow-y:auto">
+        <div class="eyebrow mono" style="margin:0 0 12px">ARTIFACTS</div>
+        <p class="why" style="margin:0 0 16px">Dokumenmu tersimpan di sini — CV, portfolio, sertifikat. Sekali upload, dipakai lagi otomatis di quest yang butuh, tanpa nanya ulang.</p>
+        ${list.length ? list.map((a) => `
+          <div class="quest-card" style="margin-bottom:10px">
+            <div class="qlabel mono">${esc(ARTIFACT_TYPE_LABEL[a.type] || a.type)}</div>
+            <p class="desc" style="margin:4px 0 10px">${esc(a.content?.kind === "text" ? (a.content.text || "").slice(0, 120) + "…" : a.content?.filename || "file")}</p>
+            <button class="btn-ghost" data-artifact-replace="${a.id}">Ganti</button>
+          </div>`).join("") : `<p class="why" style="margin:0 0 16px">Belum ada artifact tersimpan.</p>`}
+        <div class="field" style="margin-top:10px">
+          <label>+ Tambah CV baru</label>
+          <input type="file" id="artifactAddFile" accept=".pdf,.docx,image/png,image/jpeg,image/webp" />
+        </div>
+        ${artifactsError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(artifactsError)}</p>` : ""}
+        <button class="btn-primary full" id="artifactsClose" style="margin-top:16px">Tutup</button>
+      </div>
+    </div>`;
+}
+
 // Task 9: score + per-wrong-answer explanation, folded into the same
 // completedResultCardHTML acknowledgment used for every other quest type -
 // same "Lanjut" dismiss/refetch flow, no separate results screen to build.
@@ -1490,6 +1581,26 @@ function practiceTestResultHTML(pt) {
           ${w.explanation ? `<p style="font-size:12.5px;color:var(--muted);margin:4px 0 0">${esc(w.explanation)}</p>` : ""}
         </div>`).join("")}
     </div>` : `<p class="why" style="margin:0 0 16px">Semua benar — mantap.</p>`}`;
+}
+
+// Task 10b: Job Match Analysis results - match table + honest verdict +
+// relevance-to-goal + one next step. No AI mentorReply here (see index.js
+// route comment: growth is a deterministic bump, not a second AI call), so
+// this card's "verdict" text stands in for it.
+const JOB_MATCH_STATUS_COLOR = { "ada bukti": "var(--growth)", "disebut tapi lemah": "var(--accent)", "tidak ada": "var(--rust)" };
+function jobMatchResultHTML(jm) {
+  return `
+    <div style="margin:0 0 16px">
+      <div class="eyebrow mono" style="margin:0 0 8px">KECOCOKAN SKILL</div>
+      ${jm.matchTable.map((row) => `
+        <div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--hair)">
+          <span style="font-size:13.5px">${esc(row.skill)}</span>
+          <span class="mono" style="font-size:11.5px;color:${JOB_MATCH_STATUS_COLOR[row.status] || "var(--muted)"};white-space:nowrap">${esc(row.status)}</span>
+        </div>`).join("")}
+    </div>
+    <p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 12px;line-height:1.6">${esc(jm.verdict)}</p>
+    ${jm.relevanceNote ? `<p class="why" style="margin:0 0 12px">${esc(jm.relevanceNote)}</p>` : ""}
+    <div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 16px">LANGKAH BERIKUTNYA: ${esc(jm.nextStep)}</div>`;
 }
 
 // Renders one open quest as a card - every card is equally "current" now
@@ -1624,7 +1735,8 @@ function completedResultCardHTML(r) {
       </div>
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
       ${r.practiceTest ? practiceTestResultHTML(r.practiceTest) : ""}
-      <p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>
+      ${r.jobMatch ? jobMatchResultHTML(r.jobMatch) : ""}
+      ${r.mentorReply ? `<p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>` : ""}
       ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
       ${targetPickerHTML(r.target)}
       <button class="btn-primary full" id="dismissCompleted" style="margin-top:18px">Lanjut</button>
@@ -1752,6 +1864,7 @@ function renderDashboard() {
   // card when one is pending dismissal.
   const questSectionHTML = completedResult ? completedResultCardHTML(completedResult)
     : practiceTestFlow ? practiceTestFlowHTML()
+    : jobMatchFlow ? jobMatchFlowHTML()
     : reflectOpen ? questSummaryCard(targetDay, goalLabel(targetDay?.goalIndex))
     : openQuests.length > 1 ? `
     <div class="quest-carousel">
@@ -1763,6 +1876,8 @@ function renderDashboard() {
   root.innerHTML = `
     <div class="shell">
       ${helpBtnHTML("dashboard")}${helpSheetHTML("dashboard")}
+      <button class="artifacts-btn" id="openArtifacts" aria-label="Artifacts">🗎</button>
+      ${artifactsSheetHTML()}
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;padding-right:34px">
         <div class="eyebrow mono" style="margin:0">ELEVA</div>
         <div class="mono" style="color:var(--muted);font-size:12px">${todayLabel()}</div>
@@ -1824,7 +1939,7 @@ function renderDashboard() {
   // renders and can back out of it if the guess is wrong for a given quest.
   // structKind always starts unpicked - the user declares what they
   // actually did each time, never inherited.
-  document.querySelectorAll("[data-reflect-id]").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("[data-reflect-id]").forEach((b) => b.addEventListener("click", async () => {
     const id = Number(b.dataset.reflectId);
     const quest = openQuests.find((q) => q.id === id)?.quest;
     // Task 9: practice-test quests skip the reflectOpen form entirely - they
@@ -1832,6 +1947,20 @@ function renderDashboard() {
     // General, answer, submit) instead of a text/structured-fields box.
     if (quest?.completionType === "practice-test") {
       practiceTestFlow = { questId: id, step: "kind", answers: {} };
+      renderDashboard();
+      return;
+    }
+    // Task 10b: job-match-analysis quests check the Artifacts library first -
+    // a returning user with a CV already on file skips straight to the job
+    // posting upload step, never asked to re-upload the same CV.
+    if (quest?.completionType === "job-match-analysis") {
+      root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
+      let cv = null;
+      try {
+        const { artifacts } = await api("/api/artifacts");
+        cv = artifacts.find((a) => a.type === "cv") || null;
+      } catch (e) { /* fall through to upload-cv either way */ }
+      jobMatchFlow = { questId: id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
       renderDashboard();
       return;
     }
@@ -1902,6 +2031,107 @@ function renderDashboard() {
     renderDashboard();
   });
   document.getElementById("ptCancel")?.addEventListener("click", () => { practiceTestFlow = null; renderDashboard(); });
+  // Task 10b: job-match-analysis flow.
+  document.getElementById("jmCvFile")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    root.innerHTML = spinnerHTML("Mengunggah & memproses CV...");
+    try {
+      const { mimeType, dataBase64, filename } = await fileToBase64(file);
+      const resp = await api("/api/artifacts", { method: "POST", body: { type: "cv", mimeType, dataBase64, filename } });
+      jobMatchFlow.cvArtifact = resp.artifact;
+      jobMatchFlow.step = "upload-job";
+      jobMatchFlow.error = "";
+    } catch (err) {
+      jobMatchFlow.error = err.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("jmJobFiles")?.addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    try {
+      jobMatchFlow.images = await Promise.all(files.map(fileToBase64));
+      jobMatchFlow.error = "";
+    } catch (err) {
+      jobMatchFlow.error = "Gagal membaca gambar.";
+    }
+    renderDashboard();
+  });
+  document.getElementById("jmChangeCv")?.addEventListener("click", () => {
+    jobMatchFlow.step = "upload-cv";
+    jobMatchFlow.error = "";
+    renderDashboard();
+  });
+  document.getElementById("jmAnalyze")?.addEventListener("click", async () => {
+    if (!jobMatchFlow.images.length) return;
+    root.innerHTML = spinnerHTML("Menganalisis kecocokan...");
+    try {
+      const resp = await api("/api/job-match/analyze", {
+        method: "POST",
+        body: { questId: jobMatchFlow.questId, cvArtifactId: jobMatchFlow.cvArtifact.id, images: jobMatchFlow.images },
+      });
+      const qd = openQuests.find((q) => q.id === jobMatchFlow.questId);
+      completedResult = {
+        questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
+        mentorReply: "", deltas: resp.deltas, jobMatch: resp.result, target: null,
+      };
+      jobMatchFlow = null;
+    } catch (e) {
+      jobMatchFlow.step = "upload-job";
+      jobMatchFlow.error = e.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("jmCancel")?.addEventListener("click", () => { jobMatchFlow = null; renderDashboard(); });
+  // Task 10a: Artifacts sheet.
+  document.getElementById("openArtifacts")?.addEventListener("click", async () => {
+    artifactsOpen = true; artifactsError = "";
+    renderDashboard();
+    try {
+      const { artifacts } = await api("/api/artifacts");
+      artifactsList = artifacts;
+    } catch (e) {
+      artifactsError = e.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("artifactsOverlay")?.addEventListener("click", (e) => {
+    if (e.target.id === "artifactsOverlay" || e.target.id === "artifactsClose") { artifactsOpen = false; renderDashboard(); }
+  });
+  document.getElementById("artifactAddFile")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { mimeType, dataBase64, filename } = await fileToBase64(file);
+      const resp = await api("/api/artifacts", { method: "POST", body: { type: "cv", mimeType, dataBase64, filename } });
+      artifactsList = [resp.artifact, ...(artifactsList || [])];
+      artifactsError = "";
+    } catch (err) {
+      artifactsError = err.message;
+    }
+    renderDashboard();
+  });
+  document.querySelectorAll("[data-artifact-replace]").forEach((b) => b.addEventListener("click", () => {
+    const id = b.dataset.artifactReplace;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf,.docx,image/png,image/jpeg,image/webp";
+    input.addEventListener("change", async () => {
+      const file = input.files[0];
+      if (!file) return;
+      try {
+        const { mimeType, dataBase64, filename } = await fileToBase64(file);
+        const resp = await api(`/api/artifacts/${id}/replace`, { method: "POST", body: { mimeType, dataBase64, filename } });
+        artifactsList = (artifactsList || []).map((a) => (String(a.id) === String(id) ? resp.artifact : a));
+        artifactsError = "";
+      } catch (err) {
+        artifactsError = err.message;
+      }
+      renderDashboard();
+    });
+    input.click();
+  }));
   document.getElementById("dismissCompleted")?.addEventListener("click", async () => {
     completedResult = null;
     targetChoice = null; targetManualForm = {}; targetError = "";
