@@ -2,3 +2,8 @@ node_modules/
 .env
 eleva.db*
 *.log
+
+# graphify: machine-specific paths and regenerable extraction cache
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/cache/
