@@ -99,6 +99,31 @@ function validateStructuredData(kind, data) {
     };
   }
 
+  // Task 7d: recovery/rest/nutrition Trials get their own structured
+  // evidence too - "TIDAK ADA tipe Trial yang default ke textarea bebas"
+  // applies to pemulihan quests exactly as much as active cardio/gym ones
+  // (this closes the regression the founder found: a post-injury "Audit
+  // Fondasi Pemulihan" quest falling back to a free-text journal prompt).
+  // No single target/pace to compare against here (canTarget in targets.js
+  // already returns false for unknown kinds, so this never triggers the
+  // Target Berikutnya A/B/C flow) - completion is just "did you record it".
+  if (kind === "recovery") {
+    const durasiTidurJam = num(data.durasiTidurJam);
+    const asupanAirGelas = num(data.asupanAirGelas);
+    const makanProtein = num(data.makanProtein);
+    const levelNyeri = String(data.levelNyeri || "").trim();
+
+    if (durasiTidurJam == null || durasiTidurJam < 0 || durasiTidurJam > 24) return { ok: false, error: "Durasi tidur wajib diisi, 0-24 jam." };
+    if (asupanAirGelas == null || asupanAirGelas < 0 || asupanAirGelas > 30) return { ok: false, error: "Asupan air di luar rentang wajar (0-30 gelas) — cek lagi angkanya." };
+    if (makanProtein == null || !Number.isInteger(makanProtein) || makanProtein < 0 || makanProtein > 10) return { ok: false, error: "Jumlah makan berprotein wajib angka bulat 0-10." };
+    if (!["Tidak ada", "Ringan", "Sedang", "Berat"].includes(levelNyeri)) return { ok: false, error: "Pilih level nyeri: Tidak ada, Ringan, Sedang, atau Berat." };
+
+    return {
+      ok: true,
+      clean: { kind: "recovery", durasiTidurJam, asupanAirGelas, makanProtein, levelNyeri },
+    };
+  }
+
   return { ok: false, error: "Jenis quest terstruktur tidak dikenal." };
 }
 

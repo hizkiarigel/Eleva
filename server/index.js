@@ -61,6 +61,26 @@ function computeEvidenceStatus(quest, structuredClean) {
   return actual / schema.target >= 0.95 ? "done" : "partial";
 }
 
+// Task 7d item 6: a separate shortfall-reason trigger, independent of the
+// "Rasanya gimana?" difficulty rating - evidence can land far below the
+// Milestone target even when the user rated it "Ringan" the whole time
+// (founder's example: sudden rain cut a run short at 1.8km of a 3.2km
+// target). Fires purely off evidence-vs-target ratio, never off the
+// difficulty rating. The picked reason is a CONTEXT signal (stored on the
+// reflection, read by the next day's generateQuest call) - never evidence,
+// never touches growth.
+const SHORTFALL_REASONS = ["Cuaca", "Cedera", "Gangguan/diinterupsi", "Kehabisan waktu", "Lainnya"];
+const SHORTFALL_THRESHOLD = 0.8;
+function computeShortfallPrompt(quest, structuredClean) {
+  const schema = quest?.evidenceSchema;
+  if (!schema || schema.target == null || !structuredClean) return null;
+  const actual = schema.metricType === "distance" ? structuredClean.jarakKm
+    : schema.metricType === "reps" ? structuredClean.repetisi
+    : null;
+  if (actual == null) return null;
+  return actual / schema.target < SHORTFALL_THRESHOLD ? { reasons: SHORTFALL_REASONS } : null;
+}
+
 // Kisahmu: archives the chapter that's about to be superseded, BEFORE the
 // caller overwrites character_state with the new one - shared by both
 // completion routes that can trigger a chapter advance (POST /api/reflection,
@@ -448,6 +468,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     let deltas = {};
     let mentorReply;
     let interpretation = null;
+    let safetyNote = null;
     let chapterAdvance = false;
     let newChapterTitle = null;
     let newChapterNarrative = null;
@@ -487,10 +508,16 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       // gate message above already explains why) - interpretation is a
       // read of the submitted numbers/text, not a growth verdict.
       interpretation = result.interpretation || null;
+      // Task 7d item 4: a gentle caution note when the AI detected a
+      // significant pain/injury signal - independent of eligible/growth,
+      // shown even when growth was withheld (safety, not a reward).
+      safetyNote = result.safetyNote || null;
       chapterAdvance = result.chapterAdvance;
       newChapterTitle = result.newChapterTitle;
       newChapterNarrative = result.newChapterNarrative;
     }
+
+    const shortfallPrompt = computeShortfallPrompt(day.quest, structuredClean);
 
     const newStats = { ...state.stats };
     Object.entries(deltas).forEach(([k, v]) => {
@@ -512,6 +539,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       deltas,
       mentorReply,
       interpretation,
+      safetyNote,
       timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
@@ -557,7 +585,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     // swapping to the next quest - under the per-goal model a completed
     // goal is instantly eligible for a new quest, so without this the
     // mentor's reply/deltas would flash away before the user could read them.
-    res.json({ ok: true, status: effectiveStatus, mentorReply, interpretation, deltas, structuredData: structuredClean || undefined, targetScreen });
+    res.json({ ok: true, status: effectiveStatus, mentorReply, interpretation, safetyNote, deltas, structuredData: structuredClean || undefined, targetScreen, shortfallPrompt, questId: day.id });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan refleksi." });
@@ -613,6 +641,29 @@ app.post("/api/kondisi", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan kondisi." });
+  }
+});
+
+// Task 7d item 6: attaches a shortfall reason to a quest that was JUST
+// completed with evidence far below its Milestone target - a context
+// signal (never evidence, never re-scores growth), read back by the next
+// day's generateQuest call for that goal. Scoped to quests belonging to the
+// caller that already have a reflection (db.setShortfallReason no-ops
+// otherwise), so this can never be used to attach a reason to someone
+// else's quest or to an unstarted one.
+app.post("/api/quest/shortfall-reason", requireAuth, async (req, res) => {
+  try {
+    const { questId, reason } = req.body;
+    if (!SHORTFALL_REASONS.includes(reason)) {
+      return res.status(400).json({ error: "Alasan tidak dikenal." });
+    }
+    const day = await db.getQuestById(req.userId, questId);
+    if (!day || !day.reflection) return res.status(400).json({ error: "Quest tidak ditemukan atau belum diselesaikan." });
+    await db.setShortfallReason(req.userId, questId, reason);
+    res.json({ ok: true, reason });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan alasan." });
   }
 });
 

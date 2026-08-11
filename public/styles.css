@@ -92,6 +92,15 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .quest-card .dot.pending { background: var(--accent); box-shadow: 0 0 0 4px #d8a35522; }
 .quest-card .dot.done { background: var(--growth); }
 .quest-card .qlabel { font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-bottom: 8px; }
+/* Task 7d.1: Primary Quest/Milestone context header - small and persistent,
+   deliberately understated (border-bottom, muted tone) so it reads as
+   "the constant backdrop", not competing with Today's Trial below it. */
+.quest-context {
+  display: flex; flex-direction: column; gap: 3px; font-size: 10.5px;
+  padding-bottom: 10px; margin-bottom: 14px; border-bottom: 1px solid var(--hair);
+}
+.quest-context-primary { color: var(--accent-bright); letter-spacing: .3px; }
+.quest-context-milestone { color: var(--muted); letter-spacing: .3px; }
 .quest-card h2 { font-size: 21px; font-weight: 600; margin: 0 0 8px; }
 .quest-card .desc { font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; }
 .quest-card .why { font-size: 13px; color: var(--muted); font-style: italic; margin: 0 0 16px; }
@@ -315,6 +324,17 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 .observed-line { font-size: 12.5px; line-height: 1.75; margin: 0; color: var(--text); }
 .observed-line.dim { color: var(--muted); }
+/* Task 7d.3: tiny inline tag prefixing each Eleva Response line
+   (Diamati/Kemungkinan/Keputusan) so the 3-layer structure reads at a
+   glance without needing 3 separate headings. */
+.er-tag { color: var(--accent); font-size: 10px; letter-spacing: .5px; text-transform: uppercase; margin-right: 4px; }
+/* Task 7d.4: gentle caution note for pain/injury signals - amber, not rust
+   (rust is reserved for errors elsewhere in this app; this isn't one). */
+.safety-note {
+  font-size: 12.5px; line-height: 1.6; color: var(--accent-bright);
+  background: #d8a35515; border: 1px solid #d8a35540; border-radius: 8px;
+  padding: 10px 12px; margin: 0 0 16px;
+}
 
 .reason-toggle {
   display: block; background: none; border: none; padding: 0; margin-top: 12px;

@@ -505,6 +505,22 @@ async function saveReflection(userId, id, reflection) {
   await pool.query(`UPDATE days SET reflection = $3 WHERE user_id = $1 AND id = $2`, [userId, id, reflection]);
 }
 
+// Task 7d item 6: attaches a shortfall reason to an ALREADY-completed quest's
+// reflection (merge, not replace - never touches deltas/mentorReply/etc.
+// already stored there). WHERE user_id scopes this so one user can never
+// tag another's quest. Only meaningful on a row that already has a
+// reflection (the picker only ever appears right after a submit); if
+// reflection is somehow still NULL this is a silent no-op, matching the
+// principle that this is a context signal layered onto evidence, never a
+// substitute for it.
+async function setShortfallReason(userId, dayId, reason) {
+  await pool.query(
+    `UPDATE days SET reflection = reflection || jsonb_build_object('shortfallReason', $3::text)
+     WHERE user_id = $1 AND id = $2 AND reflection IS NOT NULL`,
+    [userId, dayId, reason]
+  );
+}
+
 // Recent quests for AI context, newest first. Scoped to one goal
 // (goalIndex) for a structured-physical progressive baseline - "last time
 // THIS goal's cardio was 15 reps" shouldn't mix in a different goal's
@@ -602,5 +618,5 @@ module.exports = {
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
   listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
   updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
-  touchStatActivity, applyDecayIfDue,
+  touchStatActivity, applyDecayIfDue, setShortfallReason,
 };

@@ -442,6 +442,10 @@ let reflectError = "";
 // Set right after a successful submit, cleared once the user dismisses the
 // brief "here's what happened" acknowledgment - see completedResultCardHTML.
 let completedResult = null;
+// Task 7d.6: which shortfall reason (if any) the user already picked for
+// the CURRENT completedResult - reset alongside it, never persisted client-
+// side beyond this one acknowledgment card.
+let shortfallReasonPicked = null;
 // Fokus 2.2/2.3: "Target Berikutnya" picker state, live only while
 // completedResult.target is present (mode "options") - reset alongside it.
 let targetChoice = null; // null | "A" | "B" | "manual"
@@ -1678,13 +1682,19 @@ function formatCountdown(ms) {
   const s = totalSec % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
-function questSummaryCard(q, goalLabel) {
+// Task 7d.1: formal hierarchy - Primary Quest (the goal itself, stated once
+// at goal capture, never changes day to day) and Milestone (the persistent
+// current_target from Task 7b, changes only when reached) are shown as a
+// small persistent context header ABOVE the card. What used to be labeled
+// "PRIMARY QUEST" on the card itself is renamed "TODAY'S TRIAL" - this is
+// the thing that's allowed to change topic completely day to day (mis. from
+// running to recovery) WITHOUT that reading as Eleva "forgetting" the
+// user's actual goal, because the goal/milestone context line above it
+// hasn't moved. Side Quest is explicitly NOT part of this hierarchy (not
+// goal-tied), so it never gets the context header.
+function questSummaryCard(q, goalLabel, milestone) {
   if (!q) return `<div class="quest-card"><div class="dot pending"></div>${spinnerHTML("AI sedang menyusun quest...")}</div>`;
-  // Homepage redesign: "PRIMARY QUEST" (was "QUEST") - every active goal's
-  // card is a Primary Quest now, none demoted, per the handoff's core rule.
-  // Task 11c: a real Side Quest gets its own label instead, since it isn't
-  // tied to any goal and is explicitly lower-stakes/optional.
-  const label = q.isSideQuest ? "SIDE QUEST" : q.quest.mode === "acting" ? "ACTING METHOD" : "PRIMARY QUEST";
+  const label = q.isSideQuest ? "SIDE QUEST" : q.quest.mode === "acting" ? "TODAY'S ACTING METHOD" : "TODAY'S TRIAL";
   const remaining = q.createdAt ? new Date(q.createdAt).getTime() + 24 * 60 * 60 * 1000 - Date.now() : null;
   const expired = remaining != null && remaining <= 0;
   // "Kenapa Eleva kasih quest ini →" progressive disclosure - independent
@@ -1692,10 +1702,16 @@ function questSummaryCard(q, goalLabel) {
   // visible `why` paragraph so the card leads with the instruction, not the
   // reasoning behind it.
   const reasonOpen = reasonOpenIds.has(q.id);
+  const contextHeader = (goalLabel && !q.isSideQuest) ? `
+    <div class="quest-context mono">
+      <span class="quest-context-primary">◆ Primary Quest: ${esc(goalLabel)}</span>
+      ${milestone ? `<span class="quest-context-milestone">→ Milestone: ${esc(milestone)}</span>` : ""}
+    </div>` : "";
   return `
     <div class="quest-card">
+      ${contextHeader}
       <div class="dot pending"></div>
-      <div class="qlabel mono">${label}${goalLabel ? ` · ${esc(goalLabel)}` : ""}${q.quest.statFocus ? ` · ${esc(statLabel(q.quest.statFocus))}` : ""}</div>
+      <div class="qlabel mono">${label}${q.quest.statFocus ? ` · ${esc(statLabel(q.quest.statFocus))}` : ""}</div>
       <h2 class="fr">${esc(q.quest.title)}</h2>
       <p class="desc">${esc(q.quest.description)}</p>
       ${remaining != null ? `<p class="countdown mono${expired ? " urgent" : ""}" data-quest-countdown="${q.id}" data-created="${esc(q.createdAt)}">${expired ? "⏳ Waktu buat mulai quest ini udah lewat 24 jam." : `⏳ ${formatCountdown(remaining)}`}</p>` : ""}
@@ -1791,15 +1807,33 @@ function targetPickerHTML(t) {
 // calendar-based or 24h-based model gave for free), so without this the
 // mentor's reply/deltas would flash by and vanish before the user ever
 // saw them.
+// Task 7d.3: "interpretation" is now a 3-layer Observed/Hypothesis/Decision
+// object, not a bare sentence - rendered as 3 labeled lines so the hedge on
+// Hypothesis stays visually distinct from the more confident Decision line.
+// Old string-shaped interpretation (shouldn't happen post-deploy, but a
+// quest completed mid-deploy could still have one in flight) degrades to a
+// single unlabeled line rather than crashing.
+function elevaResponseHTML(interpretation) {
+  if (!interpretation) return "";
+  if (typeof interpretation === "string") {
+    return `<div class="observed-card" style="margin-bottom:14px"><div class="eyebrow mono">ELEVA RESPONSE</div><p class="observed-line">${esc(interpretation)}</p></div>`;
+  }
+  const { observed, hypothesis, decision } = interpretation;
+  return `
+    <div class="observed-card" style="margin-bottom:14px">
+      <div class="eyebrow mono">ELEVA RESPONSE</div>
+      ${observed ? `<p class="observed-line"><span class="er-tag">Diamati</span> ${esc(observed)}</p>` : ""}
+      ${hypothesis ? `<p class="observed-line dim"><span class="er-tag">Kemungkinan</span> ${esc(hypothesis)}</p>` : ""}
+      ${decision ? `<p class="observed-line"><span class="er-tag">Keputusan</span> ${esc(decision)}</p>` : ""}
+    </div>`;
+}
+
 function completedResultCardHTML(r) {
   return `
     <div class="quest-card fadeUp">
       <div class="qlabel mono">${esc(r.questTitle)}</div>
-      ${r.interpretation ? `
-      <div class="observed-card" style="margin-bottom:14px">
-        <div class="eyebrow mono">ELEVA RESPONSE</div>
-        <p class="observed-line">${esc(r.interpretation)}</p>
-      </div>` : ""}
+      ${elevaResponseHTML(r.interpretation)}
+      ${r.safetyNote ? `<p class="safety-note">⚠ ${esc(r.safetyNote)}</p>` : ""}
       <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
         ${r.status === "done" ? "SELESAI" : r.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
       </div>
@@ -1807,9 +1841,30 @@ function completedResultCardHTML(r) {
       ${r.practiceTest ? practiceTestResultHTML(r.practiceTest) : ""}
       ${r.jobMatch ? jobMatchResultHTML(r.jobMatch) : ""}
       ${r.mentorReply ? `<p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>` : ""}
-      ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
+      ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k]) => `<span class="delta-chip">${statLabel(k)} · Evidence tercatat</span>`).join("")}</div>` : ""}
+      ${shortfallPromptHTML(r)}
       ${targetPickerHTML(r.target)}
       <button class="btn-primary full" id="dismissCompleted" style="margin-top:18px">Lanjut</button>
+    </div>`;
+}
+
+// Task 7d.6: shortfall-reason chip picker, independent of the "Rasanya
+// gimana?" difficulty rating - only rendered when the server detected
+// evidence far below the quest's Milestone target (computeShortfallPrompt).
+// Single-tap-commits (same pattern as Kondisi Hari Ini): tapping a chip
+// posts immediately and the row just shows a small confirmation in place,
+// it never blocks "Lanjut".
+function shortfallPromptHTML(r) {
+  if (!r.shortfallPrompt) return "";
+  if (shortfallReasonPicked) {
+    return `<p class="mono" style="font-size:11.5px;color:var(--muted);margin:0 0 16px">Dicatat: ${esc(shortfallReasonPicked)} — bukan masalah, ini cuma konteks buat Eleva.</p>`;
+  }
+  return `
+    <div style="margin:0 0 18px">
+      <div class="kondisi-label mono">KENAPA HARI INI DI BAWAH TARGET?</div>
+      <div class="kondisi-chips">
+        ${r.shortfallPrompt.reasons.map((reason) => `<button class="kondisi-chip" data-shortfall-reason="${esc(reason)}">${esc(reason)}</button>`).join("")}
+      </div>
     </div>`;
 }
 
@@ -1991,6 +2046,12 @@ function renderDashboard() {
   const sideQuests = allOpenQuests.filter((q) => q.isSideQuest);
   const goals = s.goals || [];
   const goalLabel = (goalIndex) => (goalIndex != null && goals[goalIndex] ? goals[goalIndex] : null);
+  // Task 7d.1: Milestone = the persistent current_target (Task 7b), shown
+  // alongside Primary Quest in the context header - null until a goal has
+  // one (before the first "Target Berikutnya" pick, or right after a fresh
+  // target replaces a reached one).
+  const goalTargets = s.goalTargets || {};
+  const milestoneLabel = (goalIndex) => (goalIndex != null && goalTargets[String(goalIndex)] ? goalTargets[String(goalIndex)].label : null);
   // Which open quest the reflect flow targets - looked up fresh from
   // appState every render (never cached), so a just-refreshed state after
   // a submit is always the source of truth. No implicit default: every
@@ -2021,7 +2082,7 @@ function renderDashboard() {
   // asking for one anyway would just invite padding. Gym's "titik
   // gagal/berat" is a different concept (which specific set/rep failed) and
   // stays free text - the founder's revision only named cardio's field.
-  const structFieldsHTML = !showStructFields ? "" : structKind !== "cardio" ? `
+  const gymFieldsHTML = `
       ${targetDay?.quest?.evidenceSchema?.metricType === "reps" && targetDay.quest.evidenceSchema.target != null
         ? `<p class="mono" style="font-size:12px;color:var(--accent-bright);margin:0 0 10px">TARGET ${targetDay.quest.evidenceSchema.target} repetisi/set</p>` : ""}
       <div class="field">
@@ -2036,7 +2097,8 @@ function renderDashboard() {
       <div class="field">
         <label>Titik gagal/berat</label>
         <input type="text" data-sf="titikGagal" maxlength="200" value="${sf("titikGagal")}" placeholder="mis. set 3 rep 8, atau set terakhir" />
-      </div>` : `
+      </div>`;
+  const cardioFieldsHTML = `
       <div class="field">
         <label>Jenis aktivitas</label>
         <select data-sf="jenisAktivitas">${["", "Lari", "Jalan cepat", "Sepeda", "Lompat tali", "Lainnya"].map((v) => `<option value="${v}" ${String(structForm.jenisAktivitas ?? "") === v ? "selected" : ""}>${v || "Pilih..."}</option>`).join("")}</select>
@@ -2065,12 +2127,39 @@ function renderDashboard() {
         <label>Apa yang bikin berat?</label>
         <textarea data-sf="titikBeratDetail" rows="2" placeholder="Ceritain singkat...">${sf("titikBeratDetail")}</textarea>
       </div>` : ""}`;
+  // Task 7d item 5: recovery/rest quests get their own structured fields
+  // (sleep, water, protein meals, pain level) instead of ever falling back
+  // to a free-text journal prompt - closes the exact regression the founder
+  // found (a post-cramp "Audit Fondasi Pemulihan" quest reverting to "buat
+  // catatan jujur tentang apa yang kamu makan..."). No single target number
+  // here (evidenceSchema.target is always null for recovery, see
+  // server/claude.js's normalizeEvidenceSchema) - completion is just
+  // "did you record it", same as before Task 7c's auto-status computation
+  // existed for cardio/gym.
+  const recoveryFieldsHTML = `
+      <div class="struct-grid">
+        <div class="field"><label>Durasi tidur (jam)</label><input type="number" min="0" max="24" step="0.5" data-sf="durasiTidurJam" value="${sf("durasiTidurJam")}" placeholder="7" /></div>
+        <div class="field"><label>Asupan air (gelas)</label><input type="number" min="0" max="30" data-sf="asupanAirGelas" value="${sf("asupanAirGelas")}" placeholder="8" /></div>
+      </div>
+      <div class="field"><label>Makan berprotein (jumlah hari ini)</label><input type="number" min="0" max="10" data-sf="makanProtein" value="${sf("makanProtein")}" placeholder="2" /></div>
+      <div class="field">
+        <label>Level nyeri saat ini</label>
+        <div class="status-row">
+          ${["Tidak ada", "Ringan", "Sedang", "Berat"].map((v) => `<button class="status-btn ${structForm.levelNyeri === v ? "active" : ""}" data-nyeri="${v}">${v}</button>`).join("")}
+        </div>
+      </div>`;
+  const structFieldsHTML = !showStructFields ? "" : structKind === "cardio" ? cardioFieldsHTML : structKind === "recovery" ? recoveryFieldsHTML : gymFieldsHTML;
 
-  // Task 7c: hidden entirely once evidenceSchema already told us the kind
-  // (structKindAuto) - asking "Aktivitasnya jenis apa?" again would be
-  // exactly the redundant question the PRD calls out (the quest itself
-  // already said "Lari 3,2 km"). Only shown as a fallback for quests
-  // generated before this field existed.
+  // Task 7d DoD is about structured-physical quests specifically: since
+  // normalizeEvidenceSchema now guarantees every such quest carries a usable
+  // evidenceSchema/structuredKind, the [data-reflect-id] handler's cascade
+  // always sets structKindAuto=true for them - this picker can never reach a
+  // structured-physical quest anymore. It's still needed for the OTHER path
+  // through recordMode: the founder's manual "Aktivitas fisik? Catat sebagai
+  // record ->" opt-in toggle on an ordinary reflective quest (or a legacy
+  // quest that predates structuredKind tagging entirely), where there's no
+  // AI-declared kind to auto-derive from at all - #toggleRecord's handler
+  // resets structKindAuto=false specifically so this stays reachable there.
   const kindPickerHTML = !showPicker || structKindAuto ? "" : `
       <div class="field">
         <label>Aktivitasnya jenis apa?</label>
@@ -2124,13 +2213,13 @@ function renderDashboard() {
   const questSectionHTML = completedResult ? completedResultCardHTML(completedResult)
     : practiceTestFlow ? practiceTestFlowHTML()
     : jobMatchFlow ? jobMatchFlowHTML()
-    : reflectOpen ? questSummaryCard(targetDay, goalLabel(targetDay?.goalIndex))
+    : reflectOpen ? questSummaryCard(targetDay, goalLabel(targetDay?.goalIndex), milestoneLabel(targetDay?.goalIndex))
     : openQuests.length > 1 ? `
     <div class="quest-carousel">
-      ${openQuests.map((q) => questSummaryCard(q, goalLabel(q.goalIndex))).join("")}
+      ${openQuests.map((q) => questSummaryCard(q, goalLabel(q.goalIndex), milestoneLabel(q.goalIndex))).join("")}
     </div>
     <div class="eyebrow mono swipe-hint">← geser untuk lihat ${openQuests.length} quest yang lagi terbuka</div>`
-    : questSummaryCard(openQuests[0] || null, goalLabel(openQuests[0]?.goalIndex));
+    : questSummaryCard(openQuests[0] || null, goalLabel(openQuests[0]?.goalIndex), milestoneLabel(openQuests[0]?.goalIndex));
 
   // Homepage redesign: Home body is everything that used to be the whole
   // dashboard (minus Character Stats, which moved to its own screen) -
@@ -2223,12 +2312,16 @@ function renderDashboard() {
     reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
     structForm = {}; reflectError = ""; unableQuestId = null;
     recordMode = quest?.completionType === "structured-physical" || quest?.statFocus === "body";
-    // Task 7c (evidenceSchema): the AI already knows what kind of evidence
-    // this quest wants at generation time - skip the redundant "Aktivitasnya
-    // jenis apa?" question entirely when it told us, and pre-fill the
-    // activity type for cardio. Falls back to null (old picker shown) for
-    // quests generated before this field existed, or where the model
-    // couldn't derive a clean schema.
+    // Task 7c/7d (evidenceSchema): the AI already knows what kind of
+    // evidence this quest wants at generation time - skip the redundant
+    // "Aktivitasnya jenis apa?" question entirely, pre-fill the activity
+    // type for cardio. Task 7d DoD retires the manual picker fallback
+    // ENTIRELY (server/claude.js's normalizeEvidenceSchema now guarantees
+    // every structured-physical quest carries a non-null evidenceSchema) -
+    // the only remaining gap is a quest stored before Task 7c existed at
+    // all, where the evidenceSchema key is missing outright. For that sole
+    // legacy case, fall back to the older structuredKind tag (present since
+    // Task 7b) rather than ever asking the user to pick manually.
     const schema = quest?.evidenceSchema;
     if (schema?.metricType === "distance") {
       structKind = "cardio";
@@ -2236,6 +2329,17 @@ function renderDashboard() {
       if (schema.activityType) structForm.jenisAktivitas = schema.activityType;
     } else if (schema?.metricType === "reps") {
       structKind = schema.hasWeight ? "gym-alat" : "gym-badan";
+      structKindAuto = true;
+    } else if (schema?.metricType === "recovery") {
+      structKind = "recovery";
+      structKindAuto = true;
+    } else if (quest?.structuredKind === "cardio" || quest?.structuredKind === "gym" || quest?.structuredKind === "recovery") {
+      structKind = quest.structuredKind === "gym" ? "gym-alat" : quest.structuredKind;
+      structKindAuto = true;
+    } else if (quest?.completionType === "structured-physical") {
+      // Structured-physical but no usable tag at all (pre-Task-7b quest,
+      // vanishingly rare by now) - default silently rather than asking.
+      structKind = "cardio";
       structKindAuto = true;
     } else {
       structKind = null;
@@ -2407,11 +2511,22 @@ function renderDashboard() {
   }));
   document.getElementById("dismissCompleted")?.addEventListener("click", async () => {
     completedResult = null;
+    shortfallReasonPicked = null;
     targetChoice = null; targetManualForm = {}; targetError = "";
     root.innerHTML = spinnerHTML("Memuat quest berikutnya...");
     appState = await api("/api/state");
     renderDashboard();
   });
+  // Task 7d.6: shortfall-reason chip - single tap commits immediately (same
+  // pattern as Kondisi Hari Ini), never blocks "Lanjut" either way.
+  document.querySelectorAll("[data-shortfall-reason]").forEach((b) => b.addEventListener("click", async () => {
+    const reason = b.dataset.shortfallReason;
+    shortfallReasonPicked = reason;
+    renderDashboard();
+    try {
+      await api("/api/quest/shortfall-reason", { method: "POST", body: { questId: completedResult.questId, reason } });
+    } catch (e) { /* context signal, not critical - silently keep the optimistic UI state */ }
+  }));
   // Fokus 2.2/2.3: target picker - same pathway-carousel click pattern as
   // onboarding (tap a card to select it), plus a manual-entry variant whose
   // numbers get validated/derived the same way the record form's numbers do.
@@ -2464,7 +2579,6 @@ function renderDashboard() {
       renderDashboard();
     }
   });
-  document.querySelectorAll("[data-skind]").forEach((b) => b.addEventListener("click", () => { structKind = b.dataset.skind; reflectError = ""; renderDashboard(); }));
   // Fokus 0: Ringan/Cukup only need the pick itself; Berat reveals a
   // conditional reflection field, so unlike plain typed fields this needs a
   // re-render (new element appearing), not just a live DOM write.
@@ -2474,6 +2588,17 @@ function renderDashboard() {
     reflectError = "";
     renderDashboard();
   }));
+  // Task 7d.5: recovery Trial's pain-level chip picker - same active-class
+  // re-render pattern as data-tberat above, just no conditional field to reveal.
+  document.querySelectorAll("[data-nyeri]").forEach((b) => b.addEventListener("click", () => {
+    structForm.levelNyeri = b.dataset.nyeri;
+    reflectError = "";
+    renderDashboard();
+  }));
+  // Manual opt-in record-mode path (kindPickerHTML above) - still needed for
+  // an ordinary reflective/legacy quest the AI never tagged with a
+  // structuredKind at all, so there's nothing to auto-derive from.
+  document.querySelectorAll("[data-skind]").forEach((b) => b.addEventListener("click", () => { structKind = b.dataset.skind; reflectError = ""; renderDashboard(); }));
   document.getElementById("toggleRecord")?.addEventListener("click", () => { recordMode = !recordMode; structKind = null; structKindAuto = false; reflectError = ""; renderDashboard(); });
   // Bound by data attribute, not the shared .status-btn styling class -
   // the activity-kind picker reuses that class for its look, and a
@@ -2512,7 +2637,10 @@ function renderDashboard() {
         // kind is the user's pick (both gym variants validate as "gym" -
         // they only differ in which fields rendered); a bodyweight session
         // never sends a weight, even one left over from switching variants.
-        body.structuredData = { ...structForm, kind: structKind === "cardio" ? "cardio" : "gym" };
+        // Task 7d: "recovery" is its own third kind (rest/hydration/nutrition
+        // fields, see structFieldsHTML) - not a gym variant.
+        const kind = structKind === "cardio" ? "cardio" : structKind === "recovery" ? "recovery" : "gym";
+        body.structuredData = { ...structForm, kind };
         if (structKind === "gym-badan") delete body.structuredData.bebanKg;
         // Task 7c: durasi is typed as separate Menit/Detik fields - combined
         // to decimal minutes here, at the one edge where it leaves the
@@ -2537,9 +2665,11 @@ function renderDashboard() {
         // the client's reflectStatus (which for those quests is just a
         // fixed "done" now that the self-report picker is gone).
         questTitle: targetDay.quest.title, status: resp.status, goalIndex: targetDay.goalIndex,
-        mentorReply: resp.mentorReply, interpretation: resp.interpretation, deltas: resp.deltas, structuredData: resp.structuredData,
-        target: resp.targetScreen || null,
+        questId: resp.questId, mentorReply: resp.mentorReply, interpretation: resp.interpretation,
+        safetyNote: resp.safetyNote, deltas: resp.deltas, structuredData: resp.structuredData,
+        target: resp.targetScreen || null, shortfallPrompt: resp.shortfallPrompt || null,
       };
+      shortfallReasonPicked = null;
       reflectOpen = false; reflectTarget = null; reflectText = ""; structForm = {}; reflectError = "";
       recordMode = false; structKind = null; structKindAuto = false;
       targetChoice = null; targetManualForm = {}; targetError = "";
