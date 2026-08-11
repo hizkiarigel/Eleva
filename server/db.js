@@ -54,6 +54,11 @@ async function init() {
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS radar_raw JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS goals JSONB;
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS goal_targets JSONB DEFAULT '{}'::jsonb;
+    -- Task 9 (Practice Test, PRD bagian 13): per-goal difficulty level +
+    -- score history, keyed by goalIndex like goal_targets - deliberately
+    -- SEPARATE from goal_targets (that column is a "target to reach and
+    -- replace"; this one is a level that only ever increments, never resets).
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS practice_test JSONB DEFAULT '{}'::jsonb;
   `);
 
   // Per-goal quest model (founder-reported regression: a goal's quest was
@@ -90,6 +95,16 @@ async function init() {
   // (known, accepted gap - the founder deferred that decision).
   await pool.query(`
     ALTER TABLE days ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+  `);
+
+  // Task 9 (Practice Test): the generated passage/script + answer key lives
+  // HERE, not inside the `quest` jsonb column - `quest` flows to the client
+  // verbatim on every GET /api/state (via rowToQuest), so putting the answer
+  // key there would leak it to the browser between generate and submit.
+  // This column is never selected by rowToQuest, only read directly by the
+  // submit route for server-side grading.
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS practice_test_payload JSONB;
   `);
 }
 
@@ -147,6 +162,10 @@ async function getState(userId) {
     // object for every account until a target is first picked - never null,
     // callers index into it directly without an extra guard.
     goalTargets: row.goal_targets || {},
+    // Task 9: per-goal Practice Test progress, keyed by goalIndex as a
+    // string like goalTargets - {level, history: [{ts,testKind,track,score,total}]}.
+    // Empty object until a goal's first Practice Test is submitted.
+    practiceTest: row.practice_test || {},
   };
 }
 
@@ -197,6 +216,29 @@ async function setGoalTarget(userId, goalIndex, target) {
     `UPDATE character_state SET goal_targets = COALESCE(goal_targets, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb) WHERE user_id = $1`,
     [userId, String(goalIndex), JSON.stringify(target)]
   );
+}
+
+// Task 9: sets (or replaces) one goal's Practice Test level+history. Same
+// jsonb_build_object merge as setGoalTarget - never clobbers another goal's
+// entry in the same column. Level only ever increments (see the submit
+// route); this function just persists whatever the caller already computed.
+async function setPracticeTestState(userId, goalIndex, data) {
+  await pool.query(
+    `UPDATE character_state SET practice_test = COALESCE(practice_test, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb) WHERE user_id = $1`,
+    [userId, String(goalIndex), JSON.stringify(data)]
+  );
+}
+
+// Task 9: the generated test's answer key (passage/script + questions with
+// correctAnswer/explanation) - a full replace, not a merge (each generate
+// call produces a brand-new test). See the column comment in init() for why
+// this is a separate column from `quest`.
+async function setPracticeTestPayload(userId, dayId, payload) {
+  await pool.query(`UPDATE days SET practice_test_payload = $3 WHERE user_id = $1 AND id = $2`, [userId, dayId, payload]);
+}
+async function getPracticeTestPayload(userId, dayId) {
+  const { rows } = await pool.query(`SELECT practice_test_payload FROM days WHERE user_id = $1 AND id = $2`, [userId, dayId]);
+  return rows[0]?.practice_test_payload || null;
 }
 
 async function activatePathway(userId) {
@@ -295,4 +337,5 @@ module.exports = {
   createUser, getUserByEmail, getUserById,
   getState, createState, updateState, setGoalTarget, activatePathway, resetUser,
   getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
+  setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
 };

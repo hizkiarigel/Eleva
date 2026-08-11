@@ -71,6 +71,14 @@ function normalizeCompletionType(quest) {
   if (quest.completionType === "structured-physical" && ["cardio", "gym"].includes(quest.structuredKind)) {
     return quest;
   }
+  // Task 9: a third completionType, for goals with an objectively-gradeable
+  // learning component (IELTS-style reading/listening comprehension is the
+  // founder's first example, not a hardcoded special case). No structuredKind
+  // of its own - that field only ever distinguishes cardio/gym.
+  if (quest.completionType === "practice-test") {
+    quest.structuredKind = null;
+    return quest;
+  }
   quest.completionType = "reflective";
   delete quest.structuredKind;
   return quest;
@@ -79,7 +87,7 @@ function normalizeCompletionType(quest) {
 async function generateQuest(ctx) {
   if (!hasKey()) return fallbackQuest(ctx);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan).` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective", "structuredKind": "cardio"|"gym"|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective. Quest kualitatif/emosional/sosial → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan).` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective"|"practice-test", "structuredKind": "cardio"|"gym"|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" HANYA untuk quest fisik/terukur (cardio, gym, gerakan — biasanya area Body): penyelesaiannya lewat field angka terstruktur, bukan kotak refleksi; "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali) atau "gym" (beban/set×rep) kalau structured-physical, null kalau reflective/practice-test. Pilih "practice-test" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal ujian/tes/sertifikasi terukur dengan komponen reading/listening comprehension (mis. "IELTS band 6.5", persiapan TOEFL, ujian bahasa lain) — kalau ragu atau goal-nya bukan soal itu, JANGAN pilih ini, pakai reflective/structured-physical seperti biasa (practice-test seharusnya jarang muncul). Quest kualitatif/emosional/sosial lain → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
     const result = await callClaude(user);
     if (!result?.quest?.title) throw new Error("bad shape");
     normalizeCompletionType(result.quest);
@@ -93,11 +101,14 @@ async function generateQuest(ctx) {
 async function processReflection(ctx) {
   if (!hasKey()) return fallbackReflection();
   try {
-    // Task 7 (specificity gate) / Task 7b (structured path): two evaluation
-    // modes, chosen by whether ctx.structuredData exists. Both feed the same
-    // response shape - the route still hard-gates deltas independently
-    // (defense in depth), this prompt is the semantic layer on top.
-    const evaluationRules = ctx.structuredData
+    // Task 7 (specificity gate) / Task 7b (structured path) / Task 9
+    // (practice-test): three evaluation modes, chosen by which ctx field is
+    // present. All feed the same response shape - the route still hard-gates
+    // deltas independently where relevant (defense in depth), this prompt is
+    // the semantic layer on top.
+    const evaluationRules = ctx.practiceTestResult
+      ? `Quest hari ini bertipe PRACTICE TEST: pengguna baru menyelesaikan sesi latihan ${ctx.practiceTestResult.kind === "listening" ? "Listening" : "Reading"} (${ctx.practiceTestResult.track === "general" ? "General Training" : "Academic"}) dengan skor ${ctx.practiceTestResult.score}/${ctx.practiceTestResult.total} — ini bukti OBJEKTIF (dinilai otomatis benar/salah oleh kode, bukan olehmu), lebih kuat dari growth-gate kespesifikan Task 7, jadi statDeltas WAJIB diisi wajar berapa pun skornya (menyelesaikan tesnya sendiri sudah bukti keterlibatan nyata — jangan menahan growth cuma karena skornya rendah, itu tetap evidence sah). mentorReply: komentari skornya secara spesifik dan hangat (jangan cuma "kerja bagus" generik), dan kalau ctx.recentDays punya practiceTestResult sebelumnya, sebut progresnya secara konkret.`
+      : ctx.structuredData
       ? `Quest hari ini bertipe TERSTRUKTUR-FISIK: pengguna mengisi ctx.structuredData (field angka/pilihan yang kelengkapan & kewajarannya SUDAH divalidasi kode sebelum sampai ke kamu — jangan menolak karena format). Nilai statDeltas dari data terstruktur itu (plus ctx.reflectionText kalau diisi — itu OPSIONAL, ketiadaannya BUKAN alasan menolak growth). mentorReply: komentari angkanya secara spesifik (durasi/jarak/titik mulai berat — Ringan/Cukup/Berat, atau set×rep×beban), dan kalau ctx.recentDays punya structuredData sebelumnya, sebut baseline progresnya secara konkret (mis. "minggu lalu 15 repetisi, sekarang 18").`
       : `GROWTH-GATE KESPESIFIKAN (WAJIB, Task 7 - ini alasan gate panjang-kata saja tidak cukup): bandingkan ctx.reflectionText dengan ctx.quest.description/title. KALAU deskripsi quest hari ini secara eksplisit meminta detail konkret (angka, ukuran, jumlah, durasi, nama orang/tempat, observasi spesifik - mis. "catat repetisi, jarak, dan titik menyerah"), maka refleksi yang TIDAK menyebut SATU PUN detail yang diminta itu WAJIB ditolak growth-nya (statDeltas = {} kosong), TIDAK PEDULI seberapa panjang teksnya - refleksi generik panjang ("udah olahraga tadi, capek tapi enak, seneng bisa konsisten") adalah persis celah Goodhart yang gate ini tutup, dan mentorReply-nya menyebutkan dengan hangat detail spesifik apa yang kurang supaya besok bisa diterima. Sebaliknya, refleksi SINGKAT tapi menyebut detail spesifik yang diminta = SAH, beri growth yang pantas. KALAU quest hari ini bertipe kualitatif/emosional dan deskripsinya TIDAK meminta detail terukur apa pun, JANGAN memaksakan standar angka - refleksi jujur yang wajar dan menyentuh isi quest-nya tetap layak growth (gate ini soal kespesifikan YANG DIMINTA, bukan soal semua refleksi harus berisi angka).`;
     const user = `Konteks (JSON):\n${JSON.stringify(ctx)}\n\nPengguna baru saja merefleksikan quest hari ini. Balas JSON dengan bentuk persis:\n{"statDeltas": {"<stat>": number}, "mentorReply": string, "chapterAdvance": boolean, "newChapterTitle": string|null}\n\n${evaluationRules}\n\nAturan umum: statDeltas hanya untuk stat yang benar-benar tersentuh, nilai integer 1-5, JANGAN beri nilai jika kosong/dangkal. mentorReply singkat (1-3 kalimat), merespons ISI konkret mereka secara spesifik. chapterAdvance hanya true jika ada pergeseran pola hidup yang nyata dan signifikan.`;
@@ -158,6 +169,57 @@ async function generateTargetOptions(ctx) {
   } catch (e) {
     console.error("generateTargetOptions failed, using fallback:", e.message);
     return fallbackTargetOptions(ctx);
+  }
+}
+
+// Task 9 (Practice Test): generic to any measurable learning goal - IELTS is
+// the founder's example, not a hardcoded special case, so nothing here
+// mentions IELTS by name in code, only in the prompt as a format reference.
+const practiceTest = require("./practiceTest");
+
+// Keyless mode is honestly generic here too, same principle as every other
+// fallback in this file (fallbackQuest, fallbackChapterAnalysis) - static
+// content, clearly not pretending to read the user's actual level/history.
+function fallbackPracticeTest(ctx) {
+  if (ctx.kind === "listening") {
+    return {
+      script: `Presenter: Welcome back. Today we're talking about a visit to the local library. The library opens at nine in the morning and closes at eight in the evening on weekdays, but on weekends it closes earlier, at five. There is a small reading room upstairs, and a computer area on the ground floor. Visitors need a card to borrow books, but reading inside doesn't require one.`,
+      questions: [
+        { id: "q1", type: "mc", text: "What time does the library close on weekdays?", options: ["Five", "Eight", "Nine", "Six"], correctAnswer: "Eight", explanation: "Skrip menyebut tutup jam delapan malam di hari kerja." },
+        { id: "q2", type: "tf", text: "The library is closed on weekends.", options: ["True", "False", "Not Given"], correctAnswer: "False", explanation: "Skrip bilang tetap buka di akhir pekan, cuma tutup lebih awal (jam lima)." },
+        { id: "q3", type: "mc", text: "Where is the reading room?", options: ["Ground floor", "Upstairs", "Basement", "Outside"], correctAnswer: "Upstairs", explanation: "Skrip menyebut ruang baca ada di lantai atas." },
+        { id: "q4", type: "fill", text: "Visitors need a ____ to borrow books.", correctAnswer: "card", explanation: "Skrip menyebut butuh kartu untuk meminjam buku." },
+      ],
+    };
+  }
+  return {
+    passage: `Working from home has become common for many people. It offers flexibility, since employees can arrange their own schedule around personal commitments. However, some workers report feeling isolated without daily contact with colleagues. Companies have responded by introducing regular video meetings and occasional in-person gatherings to keep teams connected.`,
+    questions: [
+      { id: "q1", type: "mc", text: "What is one benefit of working from home mentioned in the passage?", options: ["Higher salary", "Flexibility", "Free lunch", "Shorter hours"], correctAnswer: "Flexibility", explanation: "Paragraf menyebut fleksibilitas sebagai manfaatnya." },
+      { id: "q2", type: "tf", text: "All workers prefer working from home, according to the passage.", options: ["True", "False", "Not Given"], correctAnswer: "False", explanation: "Sebagian pekerja melaporkan merasa terisolasi." },
+      { id: "q3", type: "fill", text: "Companies introduced regular video ____ to keep teams connected.", correctAnswer: "meetings", explanation: "Paragraf menyebut rapat video rutin." },
+    ],
+  };
+}
+
+async function generatePracticeTest(ctx) {
+  if (!hasKey()) return fallbackPracticeTest(ctx);
+  try {
+    const bodyKey = ctx.kind === "listening" ? "script" : "passage";
+    const lengthGuide = ctx.kind === "listening"
+      ? `panjang skrip dan jumlah soal naik seiring level: level 1-2 sekitar 8-10 soal, level 3+ boleh sampai 15-20 soal (mendekati format IELTS asli) — level saat ini: ${ctx.level}.`
+      : `panjang bacaan naik seiring level: level 1-2 sekitar 150-250 kata, level 3+ bisa 250-400 kata dan makin kompleks — level saat ini: ${ctx.level}, dengan 5-8 soal pemahaman.`;
+    const historyNote = ctx.history && ctx.history.length
+      ? ` Materi sesi-sesi sebelumnya (JANGAN ulang topik/kontennya persis, buat yang baru): ${ctx.history.map((h) => `${h.testKind}/${h.track} skor ${h.score}/${h.total}`).join("; ")}.`
+      : "";
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify({ goalText: ctx.goalText, pathway: ctx.pathway, level: ctx.level })}\n\nTugas: buatkan SATU sesi latihan "${ctx.kind === "listening" ? "Listening" : "Reading"}" gaya ${ctx.track === "general" ? "General Training" : "Academic"} format IELTS, untuk goal belajar terukur pengguna ini${ctx.goalText ? ` ("${ctx.goalText}")` : ""} — bentuk soal ini GENERIK untuk goal belajar apa pun (IELTS cuma contoh format, JANGAN dihardcode ke konten IELTS spesifik). ${lengthGuide}${historyNote}\n\nBalas JSON dengan bentuk PERSIS:\n{"${bodyKey}": string, "questions": [{"id": string, "type": "mc"|"tf"|"fill", "text": string, "options": [string]|null, "correctAnswer": string, "explanation": string}]}\n\nAturan: "${bodyKey}" berisi ${ctx.kind === "listening" ? "skrip percakapan/monolog natural dalam Bahasa Inggris (ini akan DIBACAKAN lewat text-to-speech browser, jadi tulis kalimat yang enak dibacakan keras, bukan format daftar/bullet)" : "satu bacaan Bahasa Inggris gaya IELTS"}, ${ctx.track === "general" ? "gaya umum sehari-hari (surat, iklan, artikel, percakapan/kuliah non-akademik)" : "gaya akademik"}. Campur tipe soal: "mc" (pilihan ganda, WAJIB isi "options" 3-4 pilihan), "tf" (True/False/Not Given, "options" WAJIB persis ["True","False","Not Given"]), "fill" (isian singkat, "options" null, "correctAnswer" satu kata/frasa pendek). "correctAnswer" WAJIB persis salah satu isi "options" untuk tipe mc/tf. "explanation" satu kalimat pendek pembahasan (Bahasa Indonesia) kenapa itu jawabannya — WAJIB diisi untuk SEMUA soal (dipakai kalau user salah, bukan cuma yang benar). JANGAN ulang topik/konten yang sama dengan materi sebelumnya di atas kalau ada.`;
+    const result = await callClaude(user);
+    const cleaned = practiceTest.cleanPayload(ctx.kind, result);
+    if (!cleaned) throw new Error("bad shape");
+    return cleaned;
+  } catch (e) {
+    console.error("generatePracticeTest failed, using fallback:", e.message);
+    return fallbackPracticeTest(ctx);
   }
 }
 
@@ -522,6 +584,6 @@ function fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks) {
 module.exports = {
   generateQuest, processReflection, hasKey,
   generateScenarioCard, generateChapterAnalysis,
-  generateTargetOptions,
+  generateTargetOptions, generatePracticeTest,
   PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
 };

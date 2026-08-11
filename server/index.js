@@ -8,6 +8,7 @@ const ai = require("./claude");
 const safety = require("./safety");
 const structured = require("./structured");
 const targets = require("./targets");
+const practiceTestLib = require("./practiceTest");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -450,6 +451,115 @@ app.post("/api/goal-target", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan target." });
+  }
+});
+
+// Task 9 (Practice Test): a third completionType, generic to any measurable
+// learning goal - IELTS is the founder's example, not a hardcoded special
+// case (PRD bagian 13). Split into its own generate/submit pair instead of
+// folding into POST /api/reflection: the flow (pick Reading/Listening ->
+// pick Academic/General -> generate -> answer -> grade) is different enough
+// from the free-text/structured-physical flows that reusing that route's
+// branching would cost more clarity than it saves. Both routes still reuse
+// the same underlying db.js primitives (getQuestById, saveReflection,
+// updateState) as /api/reflection, so quest-completion mechanics (growth,
+// chapter advance, Riwayat) stay identical either way.
+app.post("/api/practice-test/generate", requireAuth, async (req, res) => {
+  try {
+    const { questId, kind, track } = req.body;
+    if (!["reading", "listening"].includes(kind)) return res.status(400).json({ error: "Pilih Reading atau Listening dulu." });
+    if (!["academic", "general"].includes(track)) return res.status(400).json({ error: "Pilih Academic atau General Training dulu." });
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "practice-test") return res.status(400).json({ error: "Quest ini bukan tipe Practice Test." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+
+    const practiceState = (day.goalIndex != null && state.practiceTest?.[String(day.goalIndex)]) || { level: 1, history: [] };
+    const result = await ai.generatePracticeTest({
+      kind, track, level: practiceState.level || 1,
+      history: (practiceState.history || []).slice(-5),
+      goalText: day.goalIndex != null ? state.goals?.[day.goalIndex] : undefined,
+      pathway: state.pathway,
+    });
+    const payload = { kind, track, ...result };
+    // The answer key lives in days.practice_test_payload, NOT in the `quest`
+    // jsonb - see the column comment in db.js's init() for why (that column
+    // ships to the client verbatim on every GET /api/state, this one never
+    // does).
+    await db.setPracticeTestPayload(req.userId, day.id, payload);
+    res.json(practiceTestLib.stripAnswers(payload));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal membuat soal." });
+  }
+});
+
+app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
+  try {
+    const { questId, answers } = req.body;
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "practice-test") return res.status(400).json({ error: "Quest ini bukan tipe Practice Test." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    const payload = await db.getPracticeTestPayload(req.userId, day.id);
+    if (!payload) return res.status(400).json({ error: "Belum ada soal — generate dulu sebelum submit." });
+
+    const graded = practiceTestLib.gradeAnswers(payload.questions, answers || {});
+
+    const recentGoalDays = day.goalIndex != null ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined;
+    const ctx = {
+      profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
+      quest: day.quest,
+      status: "done",
+      // Distinct from structuredData - see processReflection's evaluationRules
+      // branch in claude.js. Objective evidence, no growth-gate needed.
+      practiceTestResult: { kind: payload.kind, track: payload.track, score: graded.correct, total: graded.total },
+      recentDays: recentGoalDays,
+      stats: state.stats,
+      growthSessions: state.growthSessions,
+    };
+    const result = await ai.processReflection(ctx);
+    const deltas = result.statDeltas || {}; // always eligible - no 12-word/specificity gate for objective test evidence
+
+    const newStats = { ...state.stats };
+    Object.entries(deltas).forEach(([k, v]) => {
+      if (newStats[k] !== undefined && typeof v === "number") {
+        newStats[k] = Math.max(0, Math.min(100, newStats[k] + Math.max(0, Math.min(5, Math.round(v)))));
+      }
+    });
+    const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+    const allowAdvance = result.chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0;
+
+    const reflection = {
+      status: "done", text: "",
+      practiceTestResult: { kind: payload.kind, track: payload.track, score: graded.correct, total: graded.total },
+      deltas, mentorReply: result.mentorReply, timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+    await db.updateState(req.userId, {
+      stats: newStats,
+      chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
+      chapterTitle: allowAdvance && result.newChapterTitle ? result.newChapterTitle : state.chapterTitle,
+      growthSessions: newGrowthSessions,
+      pathwayNoun: state.pathwayNoun,
+    });
+
+    // Progressive difficulty (founder spec): level always moves up by one on
+    // completion, regardless of score - "quest berikutnya otomatis lebih
+    // sulit sedikit dari level ini, TIDAK reset ke level dasar." History is
+    // capped so the column can't grow unbounded over a long First Trial.
+    if (day.goalIndex != null) {
+      const practiceState = state.practiceTest?.[String(day.goalIndex)] || { level: 1, history: [] };
+      const history = [...(practiceState.history || []), { ts: new Date().toISOString(), testKind: payload.kind, track: payload.track, score: graded.correct, total: graded.total }].slice(-20);
+      await db.setPracticeTestState(req.userId, day.goalIndex, { level: (practiceState.level || 1) + 1, history });
+    }
+
+    res.json({ ok: true, score: graded.correct, total: graded.total, wrong: graded.wrong, mentorReply: result.mentorReply, deltas });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan hasil tes." });
   }
 });
 

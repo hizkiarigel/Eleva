@@ -420,6 +420,13 @@ let completedResult = null;
 let targetChoice = null; // null | "A" | "B" | "manual"
 let targetManualForm = {}; // cardio: {jarakKm, durasiMenit} - gym: {set, repetisi, bebanKg}
 let targetError = "";
+// Task 9 (Practice Test): a completely separate flow from reflectOpen/
+// recordMode - tapping "Mulai" on a practice-test quest goes here instead.
+// null when inactive; {questId, step, kind, track, payload, answers, plays,
+// error} while active. step: "kind" -> "track" -> "test" (generate happens
+// as a full-screen await between "track" and "test", same pattern as
+// dismissCompleted below - no separate "loading" step needed for that).
+let practiceTestFlow = null;
 let resetArmed = false;
 let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
@@ -1379,6 +1386,112 @@ function structSummary(sd) {
   return `${jenis} · ${mmss(sd.durasiMenit)}${sd.jarakKm != null ? ` · ${sd.jarakKm} km` : ""} · ${sd.titikBerat}${sd.titikBeratDetail ? ` (${sd.titikBeratDetail})` : ""}`;
 }
 
+// Task 9 (Practice Test): browser-native TTS only, per founder spec - free,
+// no paid TTS/native app needed for the pilot. Robotic/inconsistent voice
+// quality across devices is a known, accepted limitation of this choice
+// (see PRD bagian 13), not a bug - upgrading to a paid TTS is an explicit
+// later-phase option, not a blocker to shipping this.
+function speakScript(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-US";
+  utterance.rate = 0.95;
+  window.speechSynthesis.speak(utterance);
+}
+
+const PRACTICE_LABELS = { reading: "Reading", listening: "Listening", academic: "Academic", general: "General Training" };
+
+function practiceQuestionHTML(q, idx) {
+  const chosen = practiceTestFlow.answers[q.id];
+  if (q.type === "fill") {
+    return `
+      <div class="field">
+        <label>${idx + 1}. ${esc(q.text)}</label>
+        <input type="text" data-pt-fill="${esc(q.id)}" value="${esc(chosen || "")}" placeholder="Jawabanmu..." />
+      </div>`;
+  }
+  return `
+    <div class="field">
+      <label>${idx + 1}. ${esc(q.text)}</label>
+      <div class="status-row" style="flex-wrap:wrap">
+        ${(q.options || []).map((o) => `<button class="status-btn ${chosen === o ? "active" : ""}" data-pt-choice="${esc(q.id)}" data-pt-value="${esc(o)}">${esc(o)}</button>`).join("")}
+      </div>
+    </div>`;
+}
+
+// Task 9: the practice-test flow is entirely separate from reflectOpen/
+// recordMode (see the click handler below that branches on completionType) -
+// it renders in questSectionHTML's place, not alongside it.
+function practiceTestFlowHTML() {
+  const f = practiceTestFlow;
+  if (!f) return "";
+  if (f.step === "kind") {
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">PRACTICE TEST</div>
+        <h2 class="fr">Mau latihan apa dulu?</h2>
+        <div class="status-row" style="margin-top:14px">
+          <button class="status-btn" data-pt-kind="reading">Reading</button>
+          <button class="status-btn" data-pt-kind="listening">Listening</button>
+        </div>
+        <button class="btn-ghost" id="ptCancel" style="margin-top:14px">← Batal</button>
+      </div>`;
+  }
+  if (f.step === "track") {
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">PRACTICE TEST · ${PRACTICE_LABELS[f.kind]}</div>
+        <h2 class="fr">Academic atau General Training?</h2>
+        <div class="status-row" style="margin-top:14px">
+          <button class="status-btn" data-pt-track="academic">Academic</button>
+          <button class="status-btn" data-pt-track="general">General Training</button>
+        </div>
+        ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+        <button class="btn-ghost" id="ptCancel" style="margin-top:14px">← Batal</button>
+      </div>`;
+  }
+  if (f.step === "test") {
+    const p = f.payload;
+    const body = f.kind === "listening" ? p.script : p.passage;
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">PRACTICE TEST · ${PRACTICE_LABELS[f.kind]} · ${PRACTICE_LABELS[f.track]}</div>
+        ${f.kind === "listening" ? `
+          <p class="why">Skrip dibacakan lewat suara browser — kualitasnya bisa terdengar robotic tergantung device, ini batasan versi pilot, bukan bug.</p>
+          <button class="btn-ghost" id="ptPlay" ${f.plays >= 2 ? "disabled" : ""}>${f.plays >= 2 ? "Sudah diputar 2x" : `▶ Putar (${f.plays}/2 terpakai)`}</button>
+        ` : `<p class="desc" style="white-space:pre-wrap;line-height:1.7">${esc(body)}</p>`}
+        <div style="margin-top:18px">
+          ${p.questions.map((q, i) => practiceQuestionHTML(q, i)).join("")}
+        </div>
+        ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:0 0 12px">${esc(f.error)}</p>` : ""}
+        <button class="btn-primary full" id="ptSubmit">Submit jawaban</button>
+        <button class="btn-ghost" id="ptCancel" style="margin-top:10px">← Batal</button>
+      </div>`;
+  }
+  return "";
+}
+
+// Task 9: score + per-wrong-answer explanation, folded into the same
+// completedResultCardHTML acknowledgment used for every other quest type -
+// same "Lanjut" dismiss/refetch flow, no separate results screen to build.
+function practiceTestResultHTML(pt) {
+  return `
+    <div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 12px">
+      ${PRACTICE_LABELS[pt.kind]} · ${PRACTICE_LABELS[pt.track]} · Skor ${pt.score}/${pt.total}
+    </div>
+    ${pt.wrong.length ? `
+    <div style="margin:0 0 16px">
+      <div class="eyebrow mono" style="margin:0 0 8px">PEMBAHASAN SOAL YANG SALAH</div>
+      ${pt.wrong.map((w) => `
+        <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--hair)">
+          <p style="font-size:13.5px;margin:0 0 4px">${esc(w.text)}</p>
+          <p class="mono" style="font-size:12px;color:var(--muted);margin:0">Jawabanmu: ${esc(w.yourAnswer || "-")} · Benar: ${esc(w.correctAnswer)}</p>
+          ${w.explanation ? `<p style="font-size:12.5px;color:var(--muted);margin:4px 0 0">${esc(w.explanation)}</p>` : ""}
+        </div>`).join("")}
+    </div>` : `<p class="why" style="margin:0 0 16px">Semua benar — mantap.</p>`}`;
+}
+
 // Renders one open quest as a card - every card is equally "current" now
 // (per-goal model: nothing ever expires or goes stale, a quest just sits
 // open until its own goal's button is tapped), so there's no more today-
@@ -1510,6 +1623,7 @@ function completedResultCardHTML(r) {
         ${r.status === "done" ? "SELESAI" : r.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
       </div>
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
+      ${r.practiceTest ? practiceTestResultHTML(r.practiceTest) : ""}
       <p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>
       ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k, v]) => `<span class="delta-chip">${statLabel(k)} +${v}</span>`).join("")}</div>` : ""}
       ${targetPickerHTML(r.target)}
@@ -1637,6 +1751,7 @@ function renderDashboard() {
   // for the same touch gesture - and to the "just completed" acknowledgment
   // card when one is pending dismissal.
   const questSectionHTML = completedResult ? completedResultCardHTML(completedResult)
+    : practiceTestFlow ? practiceTestFlowHTML()
     : reflectOpen ? questSummaryCard(targetDay, goalLabel(targetDay?.goalIndex))
     : openQuests.length > 1 ? `
     <div class="quest-carousel">
@@ -1712,12 +1827,81 @@ function renderDashboard() {
   document.querySelectorAll("[data-reflect-id]").forEach((b) => b.addEventListener("click", () => {
     const id = Number(b.dataset.reflectId);
     const quest = openQuests.find((q) => q.id === id)?.quest;
+    // Task 9: practice-test quests skip the reflectOpen form entirely - they
+    // get their own multi-step flow (pick Reading/Listening, pick Academic/
+    // General, answer, submit) instead of a text/structured-fields box.
+    if (quest?.completionType === "practice-test") {
+      practiceTestFlow = { questId: id, step: "kind", answers: {} };
+      renderDashboard();
+      return;
+    }
     reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
     structForm = {}; reflectError = "";
     recordMode = quest?.completionType === "structured-physical" || quest?.statFocus === "body";
     structKind = null;
     renderDashboard();
   }));
+  document.querySelectorAll("[data-pt-kind]").forEach((b) => b.addEventListener("click", () => {
+    practiceTestFlow.kind = b.dataset.ptKind;
+    practiceTestFlow.step = "track";
+    practiceTestFlow.error = "";
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-pt-track]").forEach((b) => b.addEventListener("click", async () => {
+    practiceTestFlow.track = b.dataset.ptTrack;
+    root.innerHTML = spinnerHTML("Menyusun soal...");
+    try {
+      const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: practiceTestFlow.questId, kind: practiceTestFlow.kind, track: practiceTestFlow.track } });
+      practiceTestFlow.payload = resp;
+      practiceTestFlow.answers = {};
+      practiceTestFlow.plays = 0;
+      practiceTestFlow.step = "test";
+      practiceTestFlow.error = "";
+    } catch (e) {
+      practiceTestFlow.step = "track";
+      practiceTestFlow.error = e.message;
+    }
+    renderDashboard();
+  }));
+  document.getElementById("ptPlay")?.addEventListener("click", () => {
+    if (practiceTestFlow.plays >= 2) return;
+    speakScript(practiceTestFlow.payload.script);
+    practiceTestFlow.plays += 1;
+    renderDashboard();
+  });
+  document.querySelectorAll("[data-pt-choice]").forEach((b) => b.addEventListener("click", () => {
+    practiceTestFlow.answers[b.dataset.ptChoice] = b.dataset.ptValue;
+    practiceTestFlow.error = "";
+    renderDashboard();
+  }));
+  // Fill-in-the-blank inputs write straight to state without re-rendering,
+  // same reasoning as reflectText/structForm elsewhere - a re-render mid-
+  // type would drop focus.
+  document.querySelectorAll("[data-pt-fill]").forEach((el) => el.addEventListener("input", (e) => {
+    practiceTestFlow.answers[el.dataset.ptFill] = e.target.value;
+  }));
+  document.getElementById("ptSubmit")?.addEventListener("click", async () => {
+    const p = practiceTestFlow.payload;
+    const missing = p.questions.some((q) => !String(practiceTestFlow.answers[q.id] || "").trim());
+    if (missing) { practiceTestFlow.error = "Jawab semua soal dulu."; renderDashboard(); return; }
+    root.innerHTML = spinnerHTML("Menilai jawaban...");
+    try {
+      const resp = await api("/api/practice-test/submit", { method: "POST", body: { questId: practiceTestFlow.questId, answers: practiceTestFlow.answers } });
+      const qd = openQuests.find((q) => q.id === practiceTestFlow.questId);
+      completedResult = {
+        questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
+        mentorReply: resp.mentorReply, deltas: resp.deltas,
+        practiceTest: { kind: practiceTestFlow.kind, track: practiceTestFlow.track, score: resp.score, total: resp.total, wrong: resp.wrong },
+        target: null,
+      };
+      practiceTestFlow = null;
+    } catch (e) {
+      practiceTestFlow.step = "test";
+      practiceTestFlow.error = e.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("ptCancel")?.addEventListener("click", () => { practiceTestFlow = null; renderDashboard(); });
   document.getElementById("dismissCompleted")?.addEventListener("click", async () => {
     completedResult = null;
     targetChoice = null; targetManualForm = {}; targetError = "";
