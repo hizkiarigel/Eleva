@@ -27,6 +27,16 @@ const PATHWAY_DESC = {
   Specialist: "Menyelam dalam ke satu domain spesifik yang tidak masuk kategori umum.",
 };
 const PATHWAY_NAMES = Object.keys(PATHWAY_DESC);
+// Design handoff Screen 2: short style phrase for the wildcard tarot card's
+// "why" line ("Arah alternatif kalau kamu ingin ...") - static template
+// copy, the Weaver phrasing is verbatim from the design mockup.
+const PATHWAY_ALT_PHRASE = {
+  Architect: "membangun sesuatu langkah demi langkah",
+  Warden: "menjaga konsistensi & fondasi yang stabil",
+  Weaver: "membangun koneksi & kolaborasi",
+  Pilgrim: "menjelajah dulu sebelum berkomitmen",
+  Specialist: "menyelam dalam di satu bidang",
+};
 // Task 9 (founder spec, 10 Agustus): fixed catalog of 15 sub-pathway
 // archetypes - MUST stay byte-for-byte identical to the copy in
 // server/claude.js (no shared module system between client/server here).
@@ -45,33 +55,40 @@ const SUB_PATHWAY_NAMES = {
 // testing - the placeholder was identical to their own real goal). Fixed
 // with per-Pathway generic placeholders instead - static/hardcoded, no new
 // API call, matching the gaya of each Pathway.
+// Design-handoff usability round (10 Agustus): every example must read as
+// realistically achievable within the 14-day First Trial - the old copy
+// ("5 proyek dalam 3 bulan", "closing 5 klien") quietly taught users to
+// write goals the trial could never contain.
 const PATHWAY_GOAL_PLACEHOLDER = {
-  Architect: "mis. Selesaikan portofolio 5 proyek dalam 3 bulan",
-  Warden: "mis. Konsisten olahraga 4x seminggu tanpa putus",
-  Weaver: "mis. Bangun ulang koneksi dengan 5 teman lama",
-  Pilgrim: "mis. Coba 3 jalur karier berbeda sebelum memutuskan satu",
+  Architect: "mis. Rapikan 1 bagian portofolio yang paling ketinggalan",
+  Warden: "mis. Olahraga 3x minggu ini, konsisten dulu",
+  Weaver: "mis. Hubungi lagi 2 teman lama yang udah jarang ngobrol",
+  Pilgrim: "mis. Coba 1 hal baru di luar rutinitas biasamu",
 };
 // Specialist has no fixed placeholder by design (the whole point is a
 // user-defined domain) - PRD's own worked example: "Sales" -> a sales-shaped
 // placeholder. Tiny static hint table, NOT an AI call; anything unmatched
 // falls through to the neutral template using the user's own words.
 const SPECIALIST_GOAL_HINTS = {
-  sales: "mis. Closing 5 klien baru bulan ini",
-  desain: "mis. Selesaikan 3 project desain untuk portofolio",
-  "desain grafis": "mis. Selesaikan 3 project desain untuk portofolio",
-  coding: "mis. Rilis 1 proyek pribadi yang bisa dipakai orang lain",
-  programming: "mis. Rilis 1 proyek pribadi yang bisa dipakai orang lain",
-  marketing: "mis. Jalankan 3 campaign kecil dan bandingkan hasilnya",
-  konten: "mis. Konsisten posting konten 3x seminggu selama sebulan",
+  sales: "mis. Closing 2 klien baru dalam 14 hari ke depan",
+  desain: "mis. Selesaikan 1 project desain buat portofolio",
+  "desain grafis": "mis. Selesaikan 1 project desain buat portofolio",
+  coding: "mis. Rilis versi kecil (MVP) dari 1 proyek pribadi",
+  programming: "mis. Rilis versi kecil (MVP) dari 1 proyek pribadi",
+  marketing: "mis. Jalankan 1 campaign kecil dan lihat hasilnya",
+  konten: "mis. Konsisten posting konten 3x seminggu selama 14 hari",
 };
 function goalPlaceholder(pendingPathway) {
   if (!pendingPathway) return "mis. Target konkret 14 hari ke depan";
   const { pathway, pathwayNoun } = pendingPathway;
   if (PATHWAY_GOAL_PLACEHOLDER[pathway]) return PATHWAY_GOAL_PLACEHOLDER[pathway];
-  // Specialist (canonical, from a carousel card) or a free-typed override -
-  // probe whichever text actually names the domain (override: pathway IS
-  // the custom text; canonical Specialist card: pathwayNoun is the AI's
-  // inferred role, e.g. "Closer" for a sales context).
+  // Since Task 9, a carousel-picked Specialist carries a fixed ARCHETYPE as
+  // its pathwayNoun ("Architect of Mastery", ...), not a user-domain noun
+  // like the pre-catalog "Closer" - probing/embedding it would produce
+  // nonsense placeholders ("mis. Architect of Mastery, target konkret...").
+  // Those cards get the neutral placeholder; the domain-probe below now
+  // only ever applies to free-typed override text.
+  if ((SUB_PATHWAY_NAMES[pathway] || []).includes(pathwayNoun)) return "mis. Target konkret 14 hari ke depan";
   const probe = (pathway !== "Specialist" ? pathway : pathwayNoun || "").toLowerCase().trim();
   if (SPECIALIST_GOAL_HINTS[probe]) return SPECIALIST_GOAL_HINTS[probe];
   const label = pathway && pathway !== "Specialist" ? pathway : (pathwayNoun && pathwayNoun !== "Specialist" ? pathwayNoun : "spesialisasimu");
@@ -120,7 +137,7 @@ function helpSheetHTML(key) {
     <div class="help-overlay" id="helpOverlay">
       <div class="help-sheet fadeUp">
         <p>${esc(HELP_TEXT[key] || "")}</p>
-        ${key === "radar" || key === "dashboard" ? axisDefinitionsHTML() : ""}
+        ${key === "dashboard" ? axisDefinitionsHTML() : ""}
         <button class="btn-primary full" id="closeHelp">Oke, ngerti</button>
       </div>
     </div>`;
@@ -149,9 +166,12 @@ const POLY_STEP_DEG = 360 / POLY_ORDER.length; // heptagon: ~51.43deg per axis
 // Square viewBox with padding so axis-name labels (anchored outward) never
 // clip; kept square so pointer->viewBox mapping stays a uniform scale.
 // Wider than the 8-axis era: the heptagon puts "Livelihood" at a
-// near-horizontal angle where it needs the full word to the right.
+// near-horizontal angle where it needs the full word to the right - and
+// since the design handoff, the per-axis (i) info icon sits past the label
+// text, so the padding widened again (Livelihood's icon was clipping at
+// the old -34/368 bounds).
 // Center invariant: POLY_VIEW_MIN + POLY_VIEW_SIZE/2 === POLY_CENTER.
-const POLY_VIEW_MIN = -34, POLY_VIEW_SIZE = 368;
+const POLY_VIEW_MIN = -46, POLY_VIEW_SIZE = 392;
 const DEFAULT_RADAR = { body: 5, growth: 5, livelihood: 5, emotional: 5, social: 5, purpose: 5, autonomy: 5 };
 
 function polyRadius(value) {
@@ -357,7 +377,6 @@ const root = document.getElementById("root");
 
 let onboardForm = {
   name: "",
-  privacyChecked: false,
   radar: { ...DEFAULT_RADAR },
   radarRaw: null, // frozen snapshot at the moment the radar step is left, before any calibration
   calibrationSum: {}, // {axisKey: cumulative direct calibration delta so far, capped [-3,3]}
@@ -452,7 +471,6 @@ function resetOnboardState() {
   onboardStep = 0;
   onboardForm = {
     name: "",
-    privacyChecked: false,
     radar: { ...DEFAULT_RADAR },
     radarRaw: null, // frozen snapshot at the moment the radar step is left, before any calibration
     calibrationSum: {}, // {axisKey: cumulative direct calibration delta so far, capped [-3,3]}
@@ -471,6 +489,8 @@ function resetOnboardState() {
   goalInputs = ["", "", ""];
   pendingPathway = null;
   onboardError = "";
+  openAxisInfo = null;
+  lockExplainerShown = false;
 }
 
 // Applies one card's two signals (favorite = +1, least-favorite = -1) to the
@@ -629,66 +649,100 @@ function renderAuth() {
 // gone, folded into the adaptive conversation and the radar chart itself.
 const ONBOARD_STEPS = [
   { type: "namePromise", q: "Siapa namamu?", promiseText: "Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva." },
-  { type: "radar", q: "Gambarkan dirimu sekarang", sub: "Tarik titik-titiknya. Menonjolkan satu sisi bikin sisi lain sedikit mengecil — bukan ke nol, cuma menyesuaikan, karena kamu (kayak semua orang) punya waktu & energi yang terbatas. Kalau ada sisi yang nggak boleh ikut bergeser, tap titiknya untuk mengunci (maksimal 3)." },
+  // Design-handoff usability round: question reframed from "describe yourself
+  // now" to "where do you want to focus" - user-tested copy, keep verbatim.
+  { type: "radar", q: "Ke mana kamu mau fokus sekarang?", sub: "Ini bukan soal gimana kondisimu sekarang — tapi area mana yang mau kamu prioritaskan ke depan. Tarik titik-titiknya buat nunjukin porsi fokusnya. Menonjolkan satu sisi bikin sisi lain sedikit mengecil, karena waktu & energimu terbatas." },
 ];
 
 function isStepValid(step) {
   const s = ONBOARD_STEPS[step];
   if (s.type === "radar") return true;
-  return onboardForm.name.trim().length > 0 && onboardForm.privacyChecked;
+  // Privacy consent moved from a separate checkbox to a caption under the
+  // primary button (design-handoff round) - tapping Lanjut IS the consent,
+  // so only the name gates this step now.
+  return onboardForm.name.trim().length > 0;
 }
 
-function lockHintText() {
-  return `Tap titik untuk mengunci prioritas (maks ${MAX_LOCKS}) — ${onboardForm.locked.length}/${MAX_LOCKS} terkunci`;
-}
-
-// Lock glyph sits tangentially (perpendicular to the axis) next to the
-// handle, so it collides with neither the center nor the axis-name labels
-// at any value.
-function lockGlyphPos(index, value) {
+// Point at a RAW radius (not value-space) along axis i - the instrument
+// chrome (bezel, scale rings, ticks) is drawn in radius-space per the design
+// spec ("~36%, ~68%, 100% of max radius"), unlike the data polygon which
+// stays in value-space via polyPoint.
+function radiusPoint(index, r) {
   const angle = ((-90 + index * POLY_STEP_DEG) * Math.PI) / 180;
-  const [x, y] = polyPoint(index, value);
-  return [x - 16 * Math.sin(angle), y + 16 * Math.cos(angle) + 3];
+  return [POLY_CENTER + r * Math.cos(angle), POLY_CENTER + r * Math.sin(angle)];
 }
-
+function heptagonPath(r) {
+  return POLY_ORDER.map((_, i) => {
+    const [x, y] = radiusPoint(i, r);
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ") + "Z";
+}
+// Axis label layout shared by render + updatePolygonDOM: 8px mono, wrapped
+// to two lines when the name is two words (Emotional Stability), locked
+// axis's label tinted accent. Returns {x, y, anchor, lines, dx, dy}.
+function axisLabelLayout(i) {
+  const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  const x = POLY_CENTER + (POLY_MAXR + 18) * dx;
+  const y = POLY_CENTER + (POLY_MAXR + 18) * dy + (dy > 0.35 ? 9 : dy < -0.35 ? -4 : 3.5);
+  const anchor = dx > 0.35 ? "start" : dx < -0.35 ? "end" : "middle";
+  const label = statLabel(POLY_ORDER[i]);
+  const lines = label.includes(" ") ? label.split(" ") : [label];
+  return { x, y, anchor, lines, dx, dy };
+}
 function renderPolygonSVG() {
   const radar = onboardForm.radar;
   const points = POLY_ORDER.map((k, i) => polyPoint(i, radar[k]));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
-  const rings = [0.33, 0.66, 1].map((f) => {
-    const pts = POLY_ORDER.map((k, i) => polyPoint(i, POLY_MIN + f * (POLY_MAX - POLY_MIN)));
-    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
-    return `<path d="${d}" class="poly-ring" />`;
-  }).join("");
-  const axisLines = POLY_ORDER.map((k, i) => {
-    const [x, y] = polyPoint(i, POLY_MAX);
+  // Instrument chrome (design handoff Screen 1): a faint outer bezel, three
+  // DASHED dim scale rings, SOLID brighter axis lines - the key hierarchy
+  // fix, axis and scale ring are no longer two same-opacity hairlines - and
+  // small open tick circles at the outer vertices.
+  const bezel = `<path d="${heptagonPath(POLY_MAXR + 7)}" class="poly-bezel" />`;
+  const rings = [0.36, 0.68, 1].map((f) => `<path d="${heptagonPath(f * POLY_MAXR)}" class="poly-ring" />`).join("");
+  const axisLines = POLY_ORDER.map((_, i) => {
+    const [x, y] = radiusPoint(i, POLY_MAXR);
     return `<line x1="${POLY_CENTER}" y1="${POLY_CENTER}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="poly-axis" />`;
   }).join("");
-  const labels = POLY_ORDER.map((k, i) => {
-    // Names sit beyond the handles' max radius, anchored AWAY from the chart
-    // (left labels extend leftward, right ones rightward, top/bottom stay
-    // centered) so a handle at value 10 (r=11 circle with the number inside)
-    // never covers its axis name.
-    const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
-    const dx = Math.cos(angle), dy = Math.sin(angle);
-    const x = POLY_CENTER + (POLY_MAXR + 12) * dx;
-    const y = POLY_CENTER + (POLY_MAXR + 12) * dy + (dy > 0.35 ? 9 : dy < -0.35 ? -2 : 3.5);
-    const anchor = dx > 0.35 ? "start" : dx < -0.35 ? "end" : "middle";
-    const label = statLabel(k);
-    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="poly-label" text-anchor="${anchor}">${esc(label)}</text>`;
+  const ticks = POLY_ORDER.map((_, i) => {
+    const [x, y] = radiusPoint(i, POLY_MAXR);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" class="poly-tick" />`;
   }).join("");
-  // Value number lives INSIDE each handle (so the exact 1-10 is always
-  // visible, not just the visual position); the circle stays the only
-  // pointer target - texts are pointer-events:none via CSS.
+  const MONO_CHAR_W = 4.9; // IBM Plex Mono advance width at 8px, for icon placement
+  const labels = POLY_ORDER.map((k, i) => {
+    const L = axisLabelLayout(i);
+    const isLocked = onboardForm.locked.includes(k);
+    const tspans = L.lines.map((line, li) => `<tspan x="${L.x.toFixed(1)}" dy="${li === 0 ? 0 : 8.5}">${esc(line)}</tspan>`).join("");
+    // The (i) info icon sits just past the label text (which grows toward
+    // anchor direction), with an oversized invisible hit circle - r=6 visual
+    // alone is too small a touch target.
+    const maxChars = Math.max(...L.lines.map((l) => l.length));
+    const w = maxChars * MONO_CHAR_W;
+    const iconX = L.anchor === "start" ? L.x + w + 10 : L.anchor === "end" ? L.x - w - 10 : L.x + w / 2 + 11;
+    const iconY = L.y - 3;
+    return `<text x="${L.x.toFixed(1)}" y="${L.y.toFixed(1)}" class="poly-label ${isLocked ? "locked" : ""}" data-label-for="${k}" text-anchor="${L.anchor}">${tspans}</text>
+      <g class="axis-info-btn" data-axis-info="${k}">
+        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="12" class="axis-info-hit" />
+        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="6" class="axis-info-bg" />
+        <text x="${iconX.toFixed(1)}" y="${(iconY + 2.8).toFixed(1)}" class="axis-info-glyph" text-anchor="middle">i</text>
+      </g>`;
+  }).join("");
+  // Visual dot (small, per design: outlined when free, SOLID accent when
+  // locked - never green, never a 🔒 glyph) is separate from the invisible
+  // oversized hit circle that keeps drag/tap usable on touch. The numeric
+  // value sits just inside each dot, 1-decimal per the instrument spec,
+  // with a bg-colored stroke so it stays legible over the dashed rings.
   const handles = POLY_ORDER.map((k, i) => {
     const [x, y] = polyPoint(i, radar[k]);
     const isLocked = onboardForm.locked.includes(k);
-    const [lx, ly] = lockGlyphPos(i, radar[k]);
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" class="poly-handle ${isLocked ? "locked" : ""}" data-stat="${k}" />
-      <text x="${x.toFixed(1)}" y="${(y + 3.5).toFixed(1)}" class="poly-value" data-value-for="${k}" text-anchor="middle">${radar[k]}</text>
-      <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" class="poly-lock" data-lock-for="${k}" text-anchor="middle"${isLocked ? "" : ' style="display:none"'}>🔒</text>`;
+    const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
+    const vx = x - 14 * Math.cos(angle), vy = y - 14 * Math.sin(angle);
+    return `<text x="${vx.toFixed(1)}" y="${(vy + 2.8).toFixed(1)}" class="poly-value ${isLocked ? "locked" : ""}" data-value-for="${k}" text-anchor="middle">${Number(radar[k]).toFixed(1)}</text>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isLocked ? 6.5 : 5}" class="poly-dot ${isLocked ? "locked" : ""}" data-dot-for="${k}" />
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="14" class="poly-handle" data-stat="${k}" />`;
   }).join("");
-  return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${rings}${axisLines}<path d="${pathD}" class="poly-shape" id="polyShape" />${labels}${handles}</svg>`;
+  const centerDot = `<circle cx="${POLY_CENTER}" cy="${POLY_CENTER}" r="3" class="poly-center" />`;
+  return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${bezel}${rings}${axisLines}${ticks}<path d="${pathD}" class="poly-shape" id="polyShape" />${centerDot}${labels}${handles}</svg>`;
 }
 
 // Read-only before/after comparison for Chapter Analysis (v7, WAJIB tampil):
@@ -725,8 +779,8 @@ function renderRadarComparisonSVG(radarRaw, radarCalibrated) {
     ${labels}
   </svg>
   <div class="poly-compare-legend">
-    <span class="legend-item"><span class="legend-dot raw"></span>Radar awal (sebelum kartu)</span>
-    <span class="legend-item"><span class="legend-dot calibrated"></span>Radar terkalibrasi</span>
+    <span class="legend-item"><span class="legend-dot raw"></span>Radar awal</span>
+    <span class="legend-item"><span class="legend-dot calibrated"></span>Terkalibrasi</span>
   </div>`;
 }
 
@@ -740,29 +794,40 @@ function updatePolygonDOM() {
     if (handle) {
       handle.setAttribute("cx", x.toFixed(1));
       handle.setAttribute("cy", y.toFixed(1));
-      handle.classList.toggle("locked", isLocked);
+    }
+    const dot = svg.querySelector(`circle[data-dot-for="${k}"]`);
+    if (dot) {
+      dot.setAttribute("cx", x.toFixed(1));
+      dot.setAttribute("cy", y.toFixed(1));
+      dot.setAttribute("r", isLocked ? "6.5" : "5");
+      dot.classList.toggle("locked", isLocked);
     }
     const valueText = svg.querySelector(`text[data-value-for="${k}"]`);
     if (valueText) {
-      valueText.setAttribute("x", x.toFixed(1));
-      valueText.setAttribute("y", (y + 3.5).toFixed(1));
-      valueText.textContent = onboardForm.radar[k];
+      const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
+      const vx = x - 14 * Math.cos(angle), vy = y - 14 * Math.sin(angle);
+      valueText.setAttribute("x", vx.toFixed(1));
+      valueText.setAttribute("y", (vy + 2.8).toFixed(1));
+      valueText.textContent = Number(onboardForm.radar[k]).toFixed(1);
+      valueText.classList.toggle("locked", isLocked);
     }
-    const lockText = svg.querySelector(`text[data-lock-for="${k}"]`);
-    if (lockText) {
-      const [lx, ly] = lockGlyphPos(i, onboardForm.radar[k]);
-      lockText.setAttribute("x", lx.toFixed(1));
-      lockText.setAttribute("y", ly.toFixed(1));
-      lockText.style.display = isLocked ? "" : "none";
-    }
+    const labelText = svg.querySelector(`text[data-label-for="${k}"]`);
+    if (labelText) labelText.classList.toggle("locked", isLocked);
   });
   const points = POLY_ORDER.map((k, i) => polyPoint(i, onboardForm.radar[k]));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
   document.getElementById("polyShape")?.setAttribute("d", pathD);
-  const hint = document.getElementById("lockHint");
-  if (hint) hint.textContent = lockHintText();
 }
 
+// One-time hint the first time a user locks any axis this session - a
+// transient teaching moment, deliberately NOT a persistent badge (the
+// persistent "TERKUNCI" badge pattern was tried and rejected in the
+// design-handoff usability round).
+let lockExplainerShown = false;
+// Which axis's definition panel is expanded below the radar chart (null =
+// none, zero height, no placeholder). Local UI state only - never persisted,
+// never touches onboarding data.
+let openAxisInfo = null;
 function toggleLock(key) {
   const i = onboardForm.locked.indexOf(key);
   if (i >= 0) {
@@ -776,9 +841,17 @@ function toggleLock(key) {
     // this, an axis eroding past the 5-midpoint would flip what counts as
     // "contrary" partway through calibration (see v12 riwayat in PRD.md).
     onboardForm.lockedOriginalValue[key] = onboardForm.radar[key];
+    if (!lockExplainerShown) {
+      lockExplainerShown = true;
+      const el = document.getElementById("lockExplainer");
+      if (el) {
+        el.textContent = "Terkunci — axis ini nggak akan ikut bergeser walau axis lain kamu ubah. Tap lagi buat buka kuncinya.";
+        el.style.display = "";
+      }
+    }
   }
   // At the cap, tapping a 4th point deliberately does nothing - the user has
-  // to unlock one first (founder-specified trade-off, the caption shows 3/3).
+  // to unlock one first (the "maksimal 3 axis" bullet above the chart says so).
   updatePolygonDOM();
 }
 
@@ -846,15 +919,26 @@ function renderOnboarding() {
   if (step.type === "namePromise") {
     bodyHTML = `
       <input type="text" id="fld" value="${esc(onboardForm.name)}" placeholder="Nama panggilan" autofocus />
-      <p class="fr" style="font-size:15.5px;line-height:1.6;font-style:italic;color:var(--muted);margin:18px 0">${esc(step.promiseText)}</p>
-      <div style="display:flex;gap:10px;align-items:flex-start">
-        <input type="checkbox" id="promiseCheck" ${onboardForm.privacyChecked ? "checked" : ""} style="margin-top:3px" />
-        <label for="promiseCheck" style="margin:0;font-size:13px;line-height:1.5;color:var(--muted)">Aku mengerti dan siap mulai.</label>
-      </div>`;
+      <p class="fr" style="font-size:15.5px;line-height:1.6;font-style:italic;color:var(--muted);margin:18px 0">${esc(step.promiseText)}</p>`;
   } else if (step.type === "radar") {
-    bodyHTML = `<div class="poly-wrap">${renderPolygonSVG()}</div>
+    // Design handoff Screen 1: the two bullets below are the ONLY
+    // always-visible explanatory copy on this screen - the old persistent
+    // "N/3 terkunci" counter line and any "tap the icon" prompt were
+    // explicitly rejected in usability testing. Locking feedback is the
+    // solid-gold dot itself plus a one-time #lockExplainer reveal.
+    bodyHTML = `
+      <ul style="font-size:11px;line-height:1.6;color:var(--muted);padding-left:16px;margin:0 0 22px">
+        <li>Tap titik di sudut radar untuk mengunci axis itu — <span style="color:var(--accent);font-weight:600">maksimal 3 axis</span> boleh dikunci.</li>
+        <li>Tap ikon <span class="axis-info-chip mono">i</span> untuk lihat penjelasan axis-nya.</li>
+      </ul>
+      <div class="poly-wrap">${renderPolygonSVG()}</div>
       <p class="mono" id="limitHint" style="font-size:12px;color:var(--accent);margin-top:10px;text-align:center;display:none"></p>
-      <p class="mono" id="lockHint" style="font-size:12px;color:var(--muted);margin-top:6px;text-align:center">${esc(lockHintText())}</p>`;
+      <p class="mono" id="lockExplainer" style="font-size:12px;color:var(--accent);margin-top:6px;text-align:center;display:none"></p>
+      ${openAxisInfo ? `
+      <div style="background:#1a1724;border:1px solid rgba(216,163,85,.3);border-radius:10px;padding:12px 14px;margin-top:12px">
+        <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--accent);margin-bottom:4px">${esc(statLabel(openAxisInfo).toUpperCase())}</div>
+        <div style="font-size:12.5px;line-height:1.5;color:var(--text)">${esc(AXIS_DEFINITIONS[openAxisInfo] || "")}</div>
+      </div>` : ""}`;
   }
 
   root.innerHTML = `
@@ -873,6 +957,7 @@ function renderOnboarding() {
         <button class="btn-ghost" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">Kembali</button>
         <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
       </div>
+      ${step.type === "namePromise" ? `<p style="font-size:12px;line-height:1.6;color:var(--muted);text-align:center;margin:14px 0 0">Dengan tap Lanjut, kamu setuju dengan pesan privasi di atas.</p>` : ""}
     </div>`;
 
   const fld = document.getElementById("fld");
@@ -880,11 +965,16 @@ function renderOnboarding() {
     onboardForm.name = e.target.value;
     document.getElementById("next").disabled = !isStepValid(onboardStep);
   });
-  document.getElementById("promiseCheck")?.addEventListener("change", (e) => {
-    onboardForm.privacyChecked = e.target.checked;
-    document.getElementById("next").disabled = !isStepValid(onboardStep);
-  });
   if (step.type === "radar") attachPolygonHandlers();
+  // Per-axis (i) info icons live inside the SVG - tapping one toggles which
+  // axis's definition panel shows below the chart. Full re-render is safe
+  // here: no text input on this screen, no drag in progress during a tap.
+  document.querySelectorAll("[data-axis-info]").forEach((el) => el.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const axis = el.dataset.axisInfo;
+    openAxisInfo = openAxisInfo === axis ? null : axis;
+    renderOnboarding();
+  }));
   document.getElementById("back")?.addEventListener("click", () => { onboardStep = Math.max(0, onboardStep - 1); renderOnboarding(); });
   document.getElementById("next").addEventListener("click", () => {
     if (!isStepValid(onboardStep)) return;
@@ -1032,7 +1122,7 @@ function renderAdaptive() {
     const instruction = !sel.mostPreferred
       ? "Tap opsi yang paling kamu suka."
       : !sel.leastPreferred
-        ? "Sekarang tap satu dari sisanya yang paling nggak kamu suka."
+        ? "Sekarang tap satu dari sisanya yang paling nggak sesuai sama kamu."
         : "Siap lanjut, atau tap ulang buat ganti pilihan.";
     root.innerHTML = `
       <div class="shell">
@@ -1102,6 +1192,18 @@ function renderAdaptive() {
 
   if (adaptivePhase === "analysis") {
     const flaggedLock = chapterAnalysis?.lockTension || [];
+    // Design handoff Screen 2: tarot-card footers carry a short templated
+    // "why this fits" line instead of the pathway's display name - built
+    // purely from data already on the client (radar top-axes / a static
+    // per-pathway phrase), no new scoring, per the handoff's hard
+    // "copy/template work only" constraint.
+    const top2 = (radar) => Object.entries(radar || {}).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => statLabel(k));
+    const whyLine = (opt) => {
+      if (opt.source === "calibrated") return `Cocok karena radarmu condong ke ${top2(onboardForm.radar).join(" & ")}.`;
+      if (opt.source === "raw") return `Sebelum kalibrasi, kamu condong ke ${top2(onboardForm.radarRaw || onboardForm.radar).join(" & ")}.`;
+      return `Arah alternatif kalau kamu ingin ${PATHWAY_ALT_PHRASE[opt.pathway] || "mencoba gaya yang beda"}.`;
+    };
+    const numerals = ["I", "II", "III"];
     root.innerHTML = `
       <div class="shell">
         ${helpBtnHTML("analysis")}${helpSheetHTML("analysis")}
@@ -1120,45 +1222,103 @@ function renderAdaptive() {
           Ketegangan kunci: pilihan-pilihanmu di kartu beberapa kali condong berlawanan dari sumbu yang kamu kunci (${flaggedLock.map((a) => esc(statLabel(a))).join(", ")}) — angkanya tetap seperti kamu kunci, tapi layak dipikir ulang kalau mau, lihat insight di atas.
         </p>` : ""}
         ${chapterAnalysis?.secondaryTrait ? `<p class="why" style="margin:0 0 16px">Trait tambahan yang kelihatan: ${esc(chapterAnalysis.secondaryTrait)}</p>` : ""}
-        <div class="eyebrow mono" style="margin-top:4px">PILIH PATHWAY</div>
-        <div class="pathway-carousel">
-          ${pathwayOptions.map((opt, i) => `
-            <div class="pathway-card ${selectedPathwayIndex === i ? "selected" : ""}" data-idx="${i}">
-              <div class="qlabel mono">${opt.source === "calibrated" ? "REKOMENDASI UTAMA" : opt.source === "raw" ? "DARI RADAR AWAL" : "COBA ARAH LAIN"}</div>
-              <h2 class="fr">${esc(opt.pathway)}${opt.pathwayNoun && opt.pathwayNoun !== opt.pathway ? `: ${esc(opt.pathwayNoun)}` : ""}</h2>
-              <p class="desc">${esc(PATHWAY_DESC[opt.pathway] || "")}</p>
-              <p class="why">${esc(opt.blurb || "")}</p>
-            </div>`).join("")}
+        <div class="eyebrow mono" style="margin-top:4px;color:var(--accent)">PILIH PATHWAY</div>
+        <p style="font-size:11.5px;line-height:1.65;color:var(--muted);margin:0 0 16px">Pathway adalah <span style="color:var(--accent);font-weight:600">cara</span> kamu ngerjain quest sehari-hari — bukan tujuannya. Tujuannya (<span style="color:var(--text);font-weight:600">goal kamu sendiri</span>) dipilih di step berikutnya. Tap salah satu kartu buat lanjut.</p>
+        <div class="tarot-carousel">
+          ${pathwayOptions.map((opt, i) => {
+            const primary = opt.source === "calibrated";
+            return `
+            <div class="tarot-card ${primary ? "primary" : ""}" data-idx="${i}">
+              <div class="tarot-art">
+                <div class="tarot-numeral mono">${numerals[i] || ""}</div>
+                ${primary ? `<div class="tarot-stars"></div>` : ""}
+              </div>
+              <div class="tarot-footer">
+                <div class="tarot-label mono">${opt.source === "calibrated" ? "REKOMENDASI UTAMA" : opt.source === "raw" ? "DARI RADAR AWAL" : "COBA ARAH LAIN"}</div>
+                <div class="tarot-why">${esc(whyLine(opt))}</div>
+              </div>
+            </div>`;
+          }).join("")}
         </div>
-        ${!overrideMode ? `
-        <button class="btn-primary full" id="acceptPathway" ${selectedPathwayIndex === null ? "disabled" : ""}>Mulai First Trial (14 hari)</button>
-        <div style="text-align:center;margin-top:16px">
-          <button class="btn-ghost" id="openOverride">Bukan ini — aku tahu persis mau melatih apa</button>
-        </div>` : `
-        <div class="field">
-          <label>Pathway yang mau kamu latih</label>
-          <input type="text" id="overrideInput" value="${esc(overrideText)}" placeholder="Tulis sendiri, mis. Sales, Public Speaking..." autofocus />
-        </div>
-        <button class="btn-primary full" id="confirmOverride" ${overrideText.trim().length > 1 ? "" : "disabled"}>Mulai First Trial dengan ini</button>
-        <div style="text-align:center;margin-top:16px">
-          <button class="btn-ghost" id="cancelOverride">Batal, pakai rekomendasi AI</button>
-        </div>`}
       </div>`;
-    document.querySelectorAll(".pathway-card").forEach((card) => {
+    // Tap = confirm (design handoff): no separate CTA under the carousel
+    // anymore - tapping a card IS the confirmation, straight into Goal
+    // Capture. This also sidesteps the old bug where confirming re-rendered
+    // this same carousel in place and reset its scroll position (most
+    // visible when picking the rightmost/wildcard card) - the screen changes
+    // entirely now instead. The free-text override entry moved to the Goal
+    // Capture screen (founder decision, 10 Agustus - the handoff flagged
+    // "confirm with product" and the answer was relocate, not cut).
+    document.querySelectorAll(".tarot-card").forEach((card) => {
       card.addEventListener("click", () => {
-        selectedPathwayIndex = Number(card.dataset.idx);
+        const idx = Number(card.dataset.idx);
+        const chosen = pathwayOptions[idx];
+        selectedPathwayIndex = idx;
+        pendingPathway = { pathway: chosen.pathway, pathwayNoun: chosen.pathwayNoun };
+        adaptivePhase = "goals";
         renderAdaptive();
       });
     });
-    document.getElementById("acceptPathway")?.addEventListener("click", () => {
-      if (selectedPathwayIndex === null) return;
-      const chosen = pathwayOptions[selectedPathwayIndex];
-      // v13: Pathway confirmed (the HOW) -> capture 1-3 goals (the WHAT)
-      // before anything is persisted or the first quest is generated.
-      pendingPathway = { pathway: chosen.pathway, pathwayNoun: chosen.pathwayNoun };
-      adaptivePhase = "goals";
+    return;
+  }
+
+  if (adaptivePhase === "goals") {
+    const filled = goalInputs.map((g) => g.trim()).filter(Boolean);
+    const pw = pendingPathway?.pathway || "";
+    // "The Warden" style heading per the mockup - the "The" prefix only fits
+    // the 5 canonical names; a free-text override shows the user's own words.
+    const heading = PATHWAY_NAMES.includes(pw) ? `The ${pw}` : pw;
+    const numerals = ["i.", "ii.", "iii."];
+    root.innerHTML = `
+      <div class="shell">
+        ${helpBtnHTML("goals")}${helpSheetHTML("goals")}
+        <div class="eyebrow mono">PATHWAY TERPILIH</div>
+        <h1 class="fr" style="font-size:26px;font-weight:600;color:var(--accent);margin:10px 0 4px">${esc(heading)}</h1>
+        <div class="ornament-divider"><div class="line l"></div><div class="diamond"></div><div class="line r"></div></div>
+        <p style="font-size:12.5px;line-height:1.65;color:var(--muted);margin:0 0 26px">${esc(pw)} adalah gaya kerjamu (HOW). Tiga niat di bawah ini adalah tujuan konkretmu (WHAT) untuk 14 hari pertama.</p>
+        <div class="goal-manuscript">
+          ${[0, 1, 2].map((i) => `
+          <div class="goal-entry">
+            <div class="goal-numeral mono${i === 2 && !goalInputs[2].trim() ? " dim" : ""}" id="goalNum${i}">${numerals[i]}</div>
+            <input type="text" class="goal-input" data-goal="${i}" maxlength="200" value="${esc(goalInputs[i])}" placeholder="${i === 2 ? "Opsional" : esc(goalPlaceholder(pendingPathway))}" />
+          </div>`).join("")}
+        </div>
+        <button class="btn-primary full" id="confirmGoals" style="margin-top:26px" ${filled.length ? "" : "disabled"}>Mulai First Trial (14 hari)</button>
+        <div style="text-align:center;margin-top:14px">
+          <button class="btn-ghost" id="backToPathway">← Balik pilih Pathway</button>
+          ${!overrideMode ? `<button class="btn-ghost" id="openOverride" style="display:block;margin:4px auto 0">Bukan salah satu dari kartu tadi? Tulis pathway-mu sendiri</button>` : ""}
+        </div>
+        ${overrideMode ? `
+        <div class="field" style="margin-top:14px">
+          <label>Pathway yang mau kamu latih</label>
+          <input type="text" id="overrideInput" value="${esc(overrideText)}" placeholder="Tulis sendiri, mis. Sales, Public Speaking..." autofocus />
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="cancelOverride" style="flex:1">Batal</button>
+          <button class="btn-primary" id="confirmOverride" style="flex:2" ${overrideText.trim().length > 1 ? "" : "disabled"}>Pakai ini</button>
+        </div>` : ""}
+      </div>`;
+    document.querySelectorAll("input[data-goal]").forEach((inp) => {
+      inp.addEventListener("input", (e) => {
+        goalInputs[Number(inp.dataset.goal)] = e.target.value;
+        const any = goalInputs.some((g) => g.trim());
+        document.getElementById("confirmGoals").disabled = !any;
+        // The optional third numeral brightens the moment it has content -
+        // direct DOM write, no re-render (typing must never lose focus).
+        if (inp.dataset.goal === "2") document.getElementById("goalNum2")?.classList.toggle("dim", !goalInputs[2].trim());
+      });
+    });
+    document.getElementById("backToPathway")?.addEventListener("click", () => {
+      pendingPathway = null;
+      overrideMode = false;
+      adaptivePhase = "analysis";
       renderAdaptive();
     });
+    // Free-text pathway override, relocated here from the carousel screen
+    // (founder decision after the design handoff removed its old entry
+    // point). End state is identical to the old flow: pendingPathway
+    // becomes the typed text verbatim, never coerced into the 15-archetype
+    // catalog - the heading/recap/placeholders just re-render around it.
     document.getElementById("openOverride")?.addEventListener("click", () => { overrideMode = true; overrideText = ""; renderAdaptive(); });
     document.getElementById("cancelOverride")?.addEventListener("click", () => { overrideMode = false; renderAdaptive(); });
     document.getElementById("overrideInput")?.addEventListener("input", (e) => {
@@ -1168,44 +1328,7 @@ function renderAdaptive() {
     document.getElementById("confirmOverride")?.addEventListener("click", () => {
       const v = overrideText.trim();
       pendingPathway = { pathway: v, pathwayNoun: v };
-      adaptivePhase = "goals";
-      renderAdaptive();
-    });
-    return;
-  }
-
-  if (adaptivePhase === "goals") {
-    const filled = goalInputs.map((g) => g.trim()).filter(Boolean);
-    root.innerHTML = `
-      <div class="shell">
-        ${helpBtnHTML("goals")}${helpSheetHTML("goals")}
-        <div class="eyebrow mono">ELEVA · FIRST TRIAL</div>
-        <div style="height:16px"></div>
-        <div class="chapter-header">
-          <h1 class="fr" style="font-size:28px">Apa yang mau kamu capai selama masa ini?</h1>
-          <div class="rule"></div>
-          <p class="insight">Tulis 1-3 hal — boleh dari area yang beda-beda sekaligus. Pathway-mu (${esc(pendingPathway?.pathway || "")}) yang menentukan GAYA mengejarnya; ini soal APA yang dikejar.</p>
-        </div>
-        ${[0, 1, 2].map((i) => `
-        <div class="field">
-          <label>Goal ${i + 1}${i === 0 ? "" : " (opsional)"}</label>
-          <input type="text" data-goal="${i}" maxlength="200" value="${esc(goalInputs[i])}" placeholder="${esc(goalPlaceholder(pendingPathway))}" />
-        </div>`).join("")}
-        <button class="btn-primary full" id="confirmGoals" ${filled.length ? "" : "disabled"}>Mulai First Trial (14 hari)</button>
-        <div style="text-align:center;margin-top:16px">
-          <button class="btn-ghost" id="backToPathway">← Balik pilih Pathway</button>
-        </div>
-      </div>`;
-    document.querySelectorAll("input[data-goal]").forEach((inp) => {
-      inp.addEventListener("input", (e) => {
-        goalInputs[Number(inp.dataset.goal)] = e.target.value;
-        const any = goalInputs.some((g) => g.trim());
-        document.getElementById("confirmGoals").disabled = !any;
-      });
-    });
-    document.getElementById("backToPathway")?.addEventListener("click", () => {
-      pendingPathway = null;
-      adaptivePhase = "analysis";
+      overrideMode = false;
       renderAdaptive();
     });
     document.getElementById("confirmGoals")?.addEventListener("click", () => {

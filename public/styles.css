@@ -1,13 +1,19 @@
 :root {
-  --bg: #14141c;
-  --surface: #1d1d28;
-  --surface2: #23212e;
-  --text: #edeae3;
-  --muted: #8b8a99;
-  --accent: #e8a33d;
+  /* Design-token audit (design handoff, 10 Agustus): deepened near-black
+     bases + softened gold. --growth and --rust deliberately unchanged:
+     green stays exclusive to "positive/complete", rust to "error/missed". */
+  --bg: #0d0c12;
+  --surface: #131019;
+  --surface2: #17151f;
+  --text: #ece7dc;
+  --muted: #948f9c;
+  --muted-dim: #6f6b78;
+  --accent: #d8a355;
+  --accent-bright: #e8b768;
   --growth: #7fa98f;
   --rust: #b5544a;
   --hair: rgba(255, 255, 255, 0.08);
+  --hair-strong: rgba(255, 255, 255, 0.16);
 }
 
 * { box-sizing: border-box; }
@@ -24,13 +30,18 @@ body {
 button { cursor: pointer; font-family: inherit; }
 input, textarea { font-family: "Inter", sans-serif; }
 input[type="range"] { accent-color: var(--accent); width: 100%; }
-::selection { background: #e8a33d55; }
+::selection { background: #d8a35555; }
 textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .fadeUp { animation: fadeUp .35s ease both; }
 .spin { animation: spin 1s linear infinite; display: inline-block; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fadeUp { animation: none; opacity: 1; transform: none; }
+  .spin { animation-duration: 2.5s; }
+}
 
 .shell { max-width: 560px; margin: 0 auto; padding: 48px 24px 80px; position: relative; }
 .centered { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
@@ -46,7 +57,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 
 .btn-primary {
   background: var(--accent); color: #1a1409; border: none; border-radius: 8px;
-  padding: 13px 22px; font-size: 15px; font-weight: 600;
+  padding: 16px 24px; font-size: 16px; font-weight: 600; min-height: 52px;
   display: inline-flex; align-items: center; gap: 8px; justify-content: center;
 }
 .btn-primary:disabled { background: #3a3730; opacity: .5; }
@@ -68,7 +79,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .trial-tag { color: var(--accent); opacity: .85; }
 
 .pathway-option { text-align: left; width: 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
-.pathway-option.active { border-color: var(--accent); background: #e8a33d18; }
+.pathway-option.active { border-color: var(--accent); background: #d8a35518; }
 .pathway-option .name { font-weight: 600; font-size: 15px; }
 .pathway-option.active .name { color: var(--accent); }
 .pathway-option .desc { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
@@ -78,7 +89,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .quest-carousel .quest-card { flex: 0 0 92%; scroll-snap-align: center; margin-bottom: 0; }
 .swipe-hint { text-align: center; margin: 0 0 28px; opacity: .75; }
 .quest-card .dot { position: absolute; top: 20px; right: 20px; width: 10px; height: 10px; border-radius: 50%; }
-.quest-card .dot.pending { background: var(--accent); box-shadow: 0 0 0 4px #e8a33d22; }
+.quest-card .dot.pending { background: var(--accent); box-shadow: 0 0 0 4px #d8a35522; }
 .quest-card .dot.done { background: var(--growth); }
 .quest-card .qlabel { font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-bottom: 8px; }
 .quest-card h2 { font-size: 21px; font-weight: 600; margin: 0 0 8px; }
@@ -89,7 +100,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 
 .status-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .status-btn { flex: 1; padding: 10px 8px; border-radius: 8px; font-size: 13px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
-.status-btn.active { border-color: var(--accent); background: #e8a33d22; color: var(--accent); }
+.status-btn.active { border-color: var(--accent); background: #d8a35522; color: var(--accent); }
 
 .stat-bar { margin-bottom: 14px; }
 .stat-bar .row-top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px; }
@@ -114,41 +125,105 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 
 .footer-bar { border-top: 1px solid var(--hair); padding-top: 16px; text-align: center; margin-top: 8px; }
 
-.banner-warn { background: #3a2e1a; border: 1px solid #e8a33d55; color: #e8a33d; font-size: 12.5px; padding: 10px 14px; border-radius: 8px; margin-bottom: 20px; }
+.banner-warn { background: #3a2e1a; border: 1px solid #d8a35555; color: var(--accent); font-size: 12.5px; padding: 10px 14px; border-radius: 8px; margin-bottom: 20px; }
 
+/* Radar chart - instrument/bezel styling (design handoff Screen 1).
+   Hierarchy: dashed dim scale rings < solid accent-tinted axis lines <
+   the user's data polygon. Depth via tone + hairline only, no shadows. */
 .poly-wrap { display: flex; justify-content: center; padding: 8px 0 4px; }
 .poly-svg { width: 100%; max-width: 320px; height: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
-.poly-ring { fill: none; stroke: var(--hair); stroke-width: 1; }
-.poly-axis { stroke: var(--hair); stroke-width: 1; }
-.poly-shape { fill: #e8a33d2e; stroke: var(--accent); stroke-width: 1.5; }
-.poly-label { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 9.5px; }
-.poly-handle { fill: var(--accent); stroke: var(--bg); stroke-width: 2; cursor: grab; touch-action: none; }
+.poly-bezel { fill: none; stroke: rgba(216, 163, 85, .14); stroke-width: 1; }
+.poly-ring { fill: none; stroke: rgba(255, 255, 255, .07); stroke-width: 1; stroke-dasharray: 2 4; }
+.poly-axis { stroke: rgba(216, 163, 85, .3); stroke-width: 1; }
+.poly-tick { fill: none; stroke: rgba(216, 163, 85, .5); stroke-width: 1; }
+.poly-shape { fill: rgba(216, 163, 85, .16); stroke: var(--accent); stroke-width: 1.75; }
+.poly-center { fill: rgba(216, 163, 85, .6); }
+.poly-label { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 8px; letter-spacing: .5px; }
+.poly-label.locked { fill: var(--accent); }
+/* Visual dot: outlined when free, SOLID accent when locked - never green
+   (green = positive/complete everywhere else), never a 🔒 glyph. */
+.poly-dot { fill: var(--bg); stroke: var(--accent); stroke-width: 2; pointer-events: none; }
+.poly-dot.locked { fill: var(--accent); }
+/* Oversized invisible hit circle keeps drag/tap usable on touch while the
+   visual dot stays small per the design. */
+.poly-handle { fill: transparent; stroke: none; pointer-events: all; cursor: grab; touch-action: none; }
 .poly-handle:active { cursor: grabbing; }
-.poly-handle.locked { fill: var(--growth); stroke: var(--text); cursor: pointer; }
-.poly-value { fill: #1a1409; font-family: "IBM Plex Mono", monospace; font-size: 10px; font-weight: 600; pointer-events: none; user-select: none; }
-.poly-lock { font-size: 10px; pointer-events: none; user-select: none; }
+.poly-value { fill: var(--text); font-family: "IBM Plex Mono", monospace; font-size: 7.5px; pointer-events: none; user-select: none;
+  paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.poly-value.locked { fill: var(--accent); }
+.axis-info-btn { cursor: pointer; }
+.axis-info-hit { fill: transparent; pointer-events: all; }
+.axis-info-bg { fill: rgba(216, 163, 85, .75); pointer-events: none; }
+.axis-info-glyph { fill: var(--bg); font-family: "IBM Plex Mono", monospace; font-size: 8px; pointer-events: none; user-select: none; }
+/* Inline preview of the same (i) control inside the bullet copy above the chart. */
+.axis-info-chip { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px;
+  border-radius: 50%; background: rgba(216, 163, 85, .75); color: var(--bg); font-size: 8px; vertical-align: 1px; }
 
 .poly-compare { touch-action: auto; }
-.poly-shape-raw { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
-.poly-shape-calibrated { fill: #e8a33d22; stroke: var(--accent); stroke-width: 1.5; }
-.poly-compare-legend { display: flex; justify-content: center; gap: 18px; margin-top: 4px; }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
-.legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.legend-dot.raw { background: var(--muted); }
+.poly-shape-raw { fill: none; stroke: rgba(148, 143, 156, .55); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.poly-shape-calibrated { fill: rgba(216, 163, 85, .14); stroke: var(--accent); stroke-width: 2; }
+.poly-compare-legend { display: flex; justify-content: center; gap: 16px; margin-top: 4px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--muted); }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.legend-dot.raw { background: transparent; border: 1px solid var(--muted); }
 .legend-dot.calibrated { background: var(--accent); }
 
+/* Pathway carousel (shared visual pattern, still used by the Target
+   Berikutnya picker after a physical quest) - unchanged by the tarot
+   redesign below, which is scoped to onboarding only. */
 .pathway-carousel { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 10px 2px 16px; margin-bottom: 8px; -webkit-overflow-scrolling: touch; }
 .pathway-card { flex: 0 0 78%; scroll-snap-align: center; background: var(--surface2); border: 1px solid var(--hair); border-radius: 12px; padding: 20px; cursor: pointer; }
-.pathway-card.selected { border-color: var(--accent); background: #e8a33d14; }
+.pathway-card.selected { border-color: var(--accent); background: #d8a35514; }
 .pathway-card .qlabel { font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-bottom: 8px; }
 .pathway-card.selected .qlabel { color: var(--accent); }
 .pathway-card h2 { font-size: 19px; font-weight: 600; margin: 0 0 8px; }
 .pathway-card .desc { font-size: 13.5px; line-height: 1.55; margin: 0 0 8px; }
 .pathway-card .why { font-size: 12.5px; color: var(--muted); font-style: italic; margin: 0; }
 
+/* Tarot-styled pathway cards (design handoff Screen 2, onboarding only).
+   Tap = confirm; primary/recommended card is larger with a gold border and
+   inset glow, secondaries stay flat and dimmed so the hierarchy reads
+   before anything is tapped. Illustration zones are CSS-gradient
+   placeholders - real tarot/celestial art should replace them before wide
+   release (acceptable for the pilot). */
+.tarot-carousel { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 10px; -webkit-overflow-scrolling: touch; }
+.tarot-card { flex: none; width: 130px; aspect-ratio: 2.27/4.75; display: flex; flex-direction: column;
+  border-radius: 4px; background: #161320; border: 1px solid rgba(255, 255, 255, .1); opacity: .8; cursor: pointer; }
+.tarot-card.primary { width: 150px; opacity: 1; background: linear-gradient(180deg, #1e1b28, #131019);
+  border: 2px solid var(--accent); box-shadow: 0 0 0 4px rgba(216, 163, 85, .12) inset; }
+.tarot-art { flex: 1; border-radius: 2px 2px 0 0; position: relative;
+  background: radial-gradient(circle at 40% 40%, rgba(255, 255, 255, .08), transparent 60%), #100e17; }
+.tarot-card.primary .tarot-art {
+  background: radial-gradient(circle at 30% 30%, rgba(216, 163, 85, .35), transparent 60%),
+    radial-gradient(circle at 70% 70%, rgba(148, 100, 200, .25), transparent 55%), #100e17; }
+.tarot-numeral { position: absolute; top: 8px; left: 8px; font-size: 9px; color: var(--muted-dim); }
+.tarot-card.primary .tarot-numeral { font-size: 10px; color: var(--accent); }
+.tarot-stars { position: absolute; top: 38%; left: 50%; width: 3px; height: 3px; background: var(--text); border-radius: 50%;
+  box-shadow: 20px 10px 0 rgba(236, 231, 220, .7), -16px 22px 0 rgba(236, 231, 220, .5), 8px -18px 0 rgba(236, 231, 220, .4); }
+.tarot-footer { flex: none; padding: 10px 9px 12px; }
+.tarot-card.primary .tarot-footer { padding: 12px 10px 14px; }
+.tarot-label { font-size: 8.5px; letter-spacing: 1px; color: var(--muted-dim); margin-bottom: 4px; }
+.tarot-card.primary .tarot-label { font-size: 9px; color: var(--accent); }
+.tarot-why { font-size: 10px; line-height: 1.4; color: var(--muted); font-style: italic; }
+.tarot-card.primary .tarot-why { font-size: 11px; line-height: 1.45; color: #ccc7bc; }
+
+/* Goal Capture as numbered manuscript entries (design handoff Screen 3). */
+.ornament-divider { display: flex; align-items: center; gap: 10px; margin: 10px 0 16px; }
+.ornament-divider .line { flex: 1; height: 1px; }
+.ornament-divider .line.l { background: linear-gradient(90deg, var(--accent), transparent); }
+.ornament-divider .line.r { background: linear-gradient(90deg, transparent, var(--accent)); }
+.ornament-divider .diamond { width: 5px; height: 5px; transform: rotate(45deg); background: var(--accent); flex: none; }
+.goal-manuscript { border-top: 1px solid var(--hair); }
+.goal-entry { display: flex; gap: 12px; align-items: flex-start; padding: 16px 0; border-bottom: 1px solid var(--hair); }
+.goal-numeral { font-size: 12px; color: var(--accent); flex: none; padding-top: 2px; }
+.goal-numeral.dim { color: var(--muted-dim); }
+.goal-input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 14px; padding: 0; }
+.goal-input::placeholder { color: var(--muted); font-style: italic; }
+.goal-input:focus { outline: none; }
+
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { padding: 9px 16px; border-radius: 20px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); font-size: 13.5px; }
-.chip.active { border-color: var(--accent); background: #e8a33d22; color: var(--accent); }
+.chip.active { border-color: var(--accent); background: #d8a35522; color: var(--accent); }
 
 /* Task 7b: structured completion fields for physical quests */
 .struct-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
@@ -187,8 +262,8 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .axis-def-text { color: var(--muted); }
 
 .scenario-options { display: flex; flex-direction: column; gap: 10px; }
-.scenario-opt { text-align: left; padding: 14px 16px; border-radius: 10px; font-size: 14.5px; line-height: 1.4; border: 1px solid var(--hair); background: var(--surface); color: var(--text); }
+.scenario-opt { text-align: left; padding: 14px 16px; border-radius: 12px; font-size: 14.5px; line-height: 1.4; border: 1px solid var(--hair-strong); background: var(--surface2); color: var(--text); }
 .scenario-opt:active { transform: scale(.98); }
-.scenario-opt.favorite { border-color: var(--accent); background: #e8a33d18; }
+.scenario-opt.favorite { border-color: var(--accent); background: #d8a35518; }
 .scenario-opt.least { border-color: #b5544a77; background: #b5544a14; color: var(--muted); }
 .opt-tag { margin-right: 8px; }
