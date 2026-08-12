@@ -106,8 +106,8 @@ async function test(name, fn) {
     await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
   }
 
-  console.log("E2E: picker auto-skip per practiceTestSchema");
-  await test("full schema (kind+track) skips both pickers straight to the questions", async () => {
+  console.log("E2E: Today's Trial practice-test quests always skip the picker (12 Agustus follow-up)");
+  await test("full schema (kind+track) goes straight to the questions", async () => {
     await openDashboard();
     await page.click(`[data-reflect-id="${fullQuest}"]`);
     await page.waitForSelector("#ptSubmit", { timeout: 20000 });
@@ -115,17 +115,27 @@ async function test(name, fn) {
     assert.strictEqual(await page.locator('text=Academic atau General Training?').count(), 0, "track picker must not appear");
   });
 
-  await test("kind-only schema skips the kind picker but still asks for track", async () => {
+  await test("kind-only schema also goes straight to the questions (track defaults to academic)", async () => {
     await openDashboard();
     await page.click(`[data-reflect-id="${kindQuest}"]`);
-    await page.waitForSelector('text=Academic atau General Training?', { timeout: 20000 });
+    await page.waitForSelector("#ptSubmit", { timeout: 20000 });
+    assert.strictEqual(await page.locator('text=Academic atau General Training?').count(), 0, "track picker must not appear");
+    await page.click("#ptCancel");
+  });
+
+  await test("no schema also goes straight to the questions (defaults to reading/academic)", async () => {
+    await openDashboard();
+    await page.click(`[data-reflect-id="${bareQuest}"]`);
+    await page.waitForSelector("#ptSubmit", { timeout: 20000 });
     assert.strictEqual(await page.locator('text=Mau latihan apa dulu?').count(), 0, "kind picker must not appear");
     await page.click("#ptCancel");
   });
 
-  await test("no schema falls back to the full picker flow (regression)", async () => {
+  await test("META practice-test tool still shows the manual picker (deliberate choice, unchanged)", async () => {
     await openDashboard();
-    await page.click(`[data-reflect-id="${bareQuest}"]`);
+    await page.click('[data-tab="meta"]');
+    await page.waitForSelector('[data-meta-tool="practice-test"]', { timeout: 20000 });
+    await page.click('[data-meta-tool="practice-test"]');
     await page.waitForSelector('text=Mau latihan apa dulu?', { timeout: 20000 });
     await page.click("#ptCancel");
   });

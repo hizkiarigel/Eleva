@@ -1501,6 +1501,16 @@ function practiceQuestionHTML(q, idx) {
 function practiceTestFlowHTML() {
   const f = practiceTestFlow;
   if (!f) return "";
+  if (f.step === "error") {
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">PRACTICE TEST</div>
+        <h2 class="fr">Gagal menyusun soal</h2>
+        <p style="color:var(--rust);font-size:13px;margin:8px 0 14px">${esc(f.error || "Terjadi kesalahan.")}</p>
+        <button class="btn-primary full" id="ptRetry">Coba lagi</button>
+        <button class="btn-ghost" id="ptCancel" style="margin-top:10px">← Batal</button>
+      </div>`;
+  }
   if (f.step === "kind") {
     return `
       <div class="quest-card fadeUp">
@@ -2384,34 +2394,37 @@ function renderDashboard() {
     const id = Number(b.dataset.reflectId);
     const quest = allOpenQuests.find((q) => q.id === id)?.quest;
     // Task 9: practice-test quests skip the reflectOpen form entirely - they
-    // get their own multi-step flow (pick Reading/Listening, pick Academic/
-    // General, answer, submit) instead of a text/structured-fields box.
+    // get their own flow (answer, submit) instead of a text/structured-
+    // fields box.
     if (quest?.completionType === "practice-test") {
-      // Item 1 (12 Agustus): the quest's own practiceTestSchema (filled at
-      // generation time only when the quest explicitly commits to a
-      // kind/track - same pattern as evidenceSchema below) skips the
-      // redundant pickers. Both filled → straight to the questions; kind
-      // only → just the track picker; neither → the full pre-Item-1 picker
-      // flow, unchanged. META sessions never carry a schema (no concrete
-      // quest to read), so they always take the full-picker path.
-      const pts = quest.practiceTestSchema;
-      if (pts?.kind && pts?.track) {
-        practiceTestFlow = { questId: id, kind: pts.kind, track: pts.track, answers: {} };
-        root.innerHTML = spinnerHTML("Menyusun soal...");
-        try {
-          const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: id, kind: pts.kind, track: pts.track } });
-          practiceTestFlow.payload = resp;
-          practiceTestFlow.plays = 0;
-          practiceTestFlow.step = "test";
-          practiceTestFlow.error = "";
-        } catch (e) {
-          practiceTestFlow.step = "track";
-          practiceTestFlow.error = e.message;
-        }
-      } else if (pts?.kind) {
-        practiceTestFlow = { questId: id, kind: pts.kind, step: "track", answers: {} };
-      } else {
-        practiceTestFlow = { questId: id, step: "kind", answers: {} };
+      // Item 1 (12 Agustus) + follow-up (12 Agustus, founder request from
+      // production): tapping "Mulai" on a Today's Trial practice-test quest
+      // NEVER shows the Reading/Listening or Academic/General pickers
+      // anymore - it goes straight to the questions. quest.practiceTestSchema
+      // supplies kind/track when the quest itself was explicit about them;
+      // otherwise this defaults to Reading/Academic (a fixed default, not an
+      // AI guess - simplest predictable behavior). The picker UI itself
+      // (practiceTestFlowHTML's "kind"/"track" steps) still exists and is
+      // still used by the META tab's practice-test tool, where the user is
+      // deliberately choosing to start a session and picking what to
+      // practice IS the point.
+      const pts = quest.practiceTestSchema || {};
+      const kind = pts.kind || "reading";
+      const track = pts.track || "academic";
+      practiceTestFlow = { questId: id, kind, track, answers: {} };
+      root.innerHTML = spinnerHTML("Menyusun soal...");
+      try {
+        const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: id, kind, track } });
+        practiceTestFlow.payload = resp;
+        practiceTestFlow.plays = 0;
+        practiceTestFlow.step = "test";
+        practiceTestFlow.error = "";
+      } catch (e) {
+        // Rare (generatePracticeTest already falls back to static content on
+        // any AI failure - this only fires on a real server/network error).
+        // No picker to fall back to anymore, so a dedicated retry step.
+        practiceTestFlow.step = "error";
+        practiceTestFlow.error = e.message;
       }
       renderDashboard();
       return;
@@ -2585,6 +2598,21 @@ function renderDashboard() {
     renderDashboard();
   });
   document.getElementById("ptCancel")?.addEventListener("click", () => { practiceTestFlow = null; renderDashboard(); });
+  document.getElementById("ptRetry")?.addEventListener("click", async () => {
+    const f = practiceTestFlow;
+    root.innerHTML = spinnerHTML("Menyusun soal...");
+    try {
+      const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: f.questId, kind: f.kind, track: f.track } });
+      f.payload = resp;
+      f.plays = 0;
+      f.step = "test";
+      f.error = "";
+    } catch (e) {
+      f.step = "error";
+      f.error = e.message;
+    }
+    renderDashboard();
+  });
   // Task 10b: job-match-analysis flow.
   document.getElementById("jmCvFile")?.addEventListener("change", async (e) => {
     const file = e.target.files[0];

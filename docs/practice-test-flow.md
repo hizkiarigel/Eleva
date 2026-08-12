@@ -12,14 +12,11 @@ flowchart TD
     CT -- "ya" --> PTS["practiceTestSchema {kind, track}\ndiisi HANYA kalau quest eksplisit menyebutnya;\nnormalizePracticeTestSchema membersihkan nilai liar → null"]
 
     PTS --> TAP["Tap 'Mulai' di dashboard\n(public/app.js, handler data-reflect-id)"]
-    META["Tab META → POST /api/meta/start\n(sesi bebas, TIDAK berubah:\nselalu tanya dari awal)"] --> PICKK
+    META["Tab META → POST /api/meta/start\n(sesi bebas, TIDAK berubah:\npicker manual tetap tampil, ini satu-satunya\njalur user benar-benar MEMILIH kind/track)"] --> PICKK["picker kind (Reading/Listening)\n→ picker track (Academic/General)"]
+    PICKK --> GEN
 
-    TAP --> BR{"isi practiceTestSchema?"}
-    BR -- "kind + track terisi" --> GEN
-    BR -- "cuma kind" --> PICKT["picker track saja\n(Academic / General)"]
-    BR -- "kosong / null semua" --> PICKK["picker kind\n(Reading / Listening)"]
-    PICKK --> PICKT
-    PICKT --> GEN
+    TAP --> DEFAULT["kind = practiceTestSchema.kind atau 'reading'\ntrack = practiceTestSchema.track atau 'academic'\n(follow-up 12 Agustus: TIDAK PERNAH nanya picker\nlagi di Today's Trial, langsung generate)"]
+    DEFAULT --> GEN
 
     GEN["POST /api/practice-test/generate\nmigrasi skema lama → tracks; cek nextDrill track ini"] --> DRILL{"tracks[kind].nextDrill\nada?"}
     DRILL -- "ya" --> GDRILL["generatePracticeTest mode DRILL\n12 soal, fokus 1 kategori lemah"]
@@ -49,9 +46,14 @@ Penjelasan node yang tidak jelas dari namanya:
 - **practiceTestSchema** — pasangan `evidenceSchema` untuk quest belajar: AI
   mengisinya saat quest generation HANYA kalau judul/deskripsi quest sudah
   eksplisit menyebut kind/track ("Tembus Blind Spot Listening" →
-  `{kind:"listening", track:null}`); kalau generik, tetap `null` dan picker
-  lama muncul persis seperti sebelumnya. Jalur META tidak pernah membawa
-  schema (sesi bebas tanpa quest konkret), jadi selalu lewat picker penuh.
+  `{kind:"listening", track:null}`). Awalnya (Item 1) field kosong bikin
+  picker tetap tampil; per follow-up 12 Agustus (permintaan langsung dari
+  production), Today's Trial **tidak pernah lagi menampilkan picker** —
+  field yang kosong tinggal di-default ke `reading`/`academic` di klien,
+  bukan ditanyakan. Picker manual (`practiceTestFlowHTML` step
+  `"kind"`/`"track"`) TIDAK dihapus dari kode — itu satu-satunya jalur
+  sekarang lewat tab META, di mana user memang sengaja memilih mau latihan
+  apa, bukan menjalankan Today's Trial yang sudah ditentukan Eleva.
 - **nextDrill** — satu-satunya state kecil di luar history: rekomendasi
   "Next Trial" dari submit terakhir (kategori terlemah). Sesi berikutnya untuk
   track itu otomatis jadi DRILL 12 soal terfokus; drill tetap menambah

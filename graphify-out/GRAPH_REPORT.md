@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-12)
 
 ## Corpus Check
-- 31 files · ~116,410 words
+- 31 files · ~116,929 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 408 nodes · 632 edges · 20 communities (16 shown, 4 thin omitted)
+- 408 nodes · 632 edges · 21 communities (17 shown, 4 thin omitted)
 - Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 78 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `53aa05d6`
+- Built from commit: `a0c07c41`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -33,8 +33,9 @@
 - Eleva Root CLAUDE.md — graphify Integration Rules
 - Task 4: Privacy Notice (minimal)
 - Task 6: Prompt Caching
-- structSummary
+- completedResultCardHTML
 - practice-test-flow.md
+- questSummaryCard
 
 ## God Nodes (most connected - your core abstractions)
 1. `renderDashboard()` - 32 edges
@@ -68,7 +69,7 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (20 total, 4 thin omitted)
+## Communities (21 total, 4 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.05
@@ -76,7 +77,7 @@ Nodes (25): ai, app, auth, cookieSession, db, express, jobMatch, KONDISI_LABELS 
 
 ### Community 1 - "app.js"
 Cohesion: 0.05
-Nodes (45): adaptiveCards, adaptiveSelection, applyCalibrationCard(), applySynergyDrag(), ARTIFACT_TYPE_LABEL, authForm, AXIS_DEFINITIONS, buildPathwayOptions() (+37 more)
+Nodes (42): adaptiveCards, adaptiveSelection, applyCalibrationCard(), applySynergyDrag(), ARTIFACT_TYPE_LABEL, authForm, AXIS_DEFINITIONS, buildPathwayOptions() (+34 more)
 
 ### Community 2 - "claude.js"
 Cohesion: 0.09
@@ -95,8 +96,8 @@ Cohesion: 0.08
 Nodes (30): Adaptive Scenario Cards, Chapter Advancement Mechanism, Claude Sonnet (not Haiku) Model Choice, Context Update / Kondisi Hari Ini (11f), Homepage/Dashboard Redesign (4-screen nav shell), Stat Decay Mechanism (11e), Eleva (AI Character Growth System), Goal Capture (v13, bridge to First Trial) (+22 more)
 
 ### Community 6 - "renderDashboard"
-Cohesion: 0.10
-Nodes (32): appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML(), esc(), fileToBase64() (+24 more)
+Cohesion: 0.12
+Nodes (25): appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), characterScreenHTML(), durasiMenitFromFields(), esc(), fileToBase64(), helpSheetHTML() (+17 more)
 
 ### Community 7 - "Eleva_Prototype.jsx"
 Cohesion: 0.10
@@ -111,8 +112,8 @@ Cohesion: 0.47
 Nodes (10): api(), boot(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder(), render(), renderAdaptive(), renderAuth() (+2 more)
 
 ### Community 10 - "renderOnboarding"
-Cohesion: 0.16
-Nodes (17): attachPolygonHandlers(), axisLabelLayout(), characterScreenHTML(), helpBtnHTML(), heptagonPath(), isStepValid(), polyPoint(), polyRadius() (+9 more)
+Cohesion: 0.19
+Nodes (15): attachPolygonHandlers(), axisLabelLayout(), helpBtnHTML(), heptagonPath(), isStepValid(), polyPoint(), polyRadius(), polyValueFromRadius() (+7 more)
 
 ### Community 11 - "auth.js"
 Cohesion: 0.38
@@ -130,9 +131,13 @@ Nodes (4): assert, { chromium }, { Client }, { spawn }
 Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
-### Community 18 - "structSummary"
-Cohesion: 0.67
-Nodes (3): mmss(), paceLabel(), structSummary()
+### Community 18 - "completedResultCardHTML"
+Cohesion: 0.20
+Nodes (10): completedResultCardHTML(), elevaResponseHTML(), jobMatchResultHTML(), mmss(), paceLabel(), practiceTestResultHTML(), shortfallPromptHTML(), structSummary() (+2 more)
+
+### Community 20 - "questSummaryCard"
+Cohesion: 0.40
+Nodes (5): ensureCountdownTicking(), formatCountdown(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
 
 ## Knowledge Gaps
 - **126 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+121 more)
@@ -151,7 +156,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `index.js` be split into smaller, more focused modules?**
   _Cohesion score 0.04756871035940803 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.04995374653098982 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05179704016913319 - nodes in this community are weakly interconnected._
 - **Should `claude.js` be split into smaller, more focused modules?**
   _Cohesion score 0.09407665505226481 - nodes in this community are weakly interconnected._
 - **Should `graphify Skill Definition (SKILL.md)` be split into smaller, more focused modules?**
