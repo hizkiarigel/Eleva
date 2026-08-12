@@ -424,3 +424,225 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   .meta-tool-card { flex-direction: row; text-align: left; padding: 14px; }
 }
 .settings-soon { font-size: 11px; color: var(--muted-dim); }
+
+/* ===========================================================================
+   Cinematic auth (design handoff 12 Agustus, design_handoff_cinematic_login)
+   Scoped to renderAuth() only — .auth- namespace. Uses the handoff's literal
+   palette (pre-token-audit values: #e8a33d gold, #f0c26a highlight, #14141c-
+   family night sky) rather than the audited :root tokens on purpose: the
+   night scene is a self-contained composition and the handoff says to copy
+   exact values. The drift vs the 10-Agustus audit tokens is flagged back to
+   design, not silently reconciled here. Type on this screen is Instrument
+   Serif + Manrope only (replaces Fraunces/Plex Mono for auth per handoff).
+   =========================================================================== */
+
+@keyframes authTwinkle { 0%, 100% { opacity: .25; } 50% { opacity: .9; } }
+@keyframes authDoorGlowPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes authDoorSwing { from { transform: perspective(60px) rotateY(0deg); } to { transform: perspective(60px) rotateY(62deg); } }
+@keyframes authFigureWalkIn {
+  0% { transform: translateX(0); opacity: 1; }
+  70% { transform: translateX(15px); opacity: 1; }
+  100% { transform: translateX(18px); opacity: 0; }
+}
+
+/* --- Scene (always visible behind the glass panel, not sequence-exclusive) --- */
+.auth-scene {
+  position: fixed; inset: 0; overflow: hidden; background: #05050a;
+  transform-origin: 50% 62%; transition: transform 1.4s cubic-bezier(.25, .7, .3, 1);
+}
+.auth-scene.camera-push { transform: scale(1.18); }
+.auth-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #050509 0%, #0c0c16 45%, #14141c 75%, #1a1720 100%); }
+/* Parallax layers: JS writes transform directly on mousemove (depth-scaled,
+   opposite the cursor); this transition smooths those writes. */
+.auth-plx { transition: transform .3s ease-out; will-change: transform; }
+.auth-stars { position: absolute; inset: 0 0 45% 0; }
+.auth-star { position: absolute; border-radius: 50%; background: #fff; opacity: .6; animation: authTwinkle var(--tw-dur, 3s) ease-in-out var(--tw-delay, 0s) infinite; }
+
+.auth-portal { position: absolute; left: 50%; bottom: 30%; width: 120px; height: 170px; margin-left: -60px; }
+.auth-portal-glow {
+  position: absolute; left: 50%; top: 50%; width: 90px; height: 90px; border-radius: 50%;
+  transform: translate(-50%, -50%); filter: blur(2px);
+  background: radial-gradient(circle, rgba(232, 163, 61, .12) 0%, rgba(232, 163, 61, 0) 70%);
+  transition: width 1.1s ease, height 1.1s ease, background 1.1s ease;
+}
+.auth-portal-glow.lit { width: 340px; height: 340px; background: radial-gradient(circle, rgba(232, 163, 61, .55) 0%, rgba(232, 163, 61, 0) 70%); }
+.auth-portal-arch {
+  position: absolute; inset: 0; border-radius: 60px 60px 6px 6px;
+  background: linear-gradient(180deg, #26232f, #1a1820 60%, #100f14);
+  border: 1px solid rgba(255, 255, 255, .06);
+}
+/* Gradient backgrounds don't interpolate — the lit state crossfades in via an
+   overlay so the 1.1s ease reads as a real crossfade, not a jump. */
+.auth-portal-arch::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: 0;
+  background: linear-gradient(180deg, #f0c26a, #e8a33d 55%, #7a5320);
+  box-shadow: 0 0 60px 14px rgba(232, 163, 61, .5) inset;
+  transition: opacity 1.1s ease;
+}
+.auth-portal-arch.lit::after { opacity: 1; }
+
+.auth-mid, .auth-fg { position: absolute; inset: 0; }
+.auth-dune-far { position: absolute; left: -10%; bottom: 22%; width: 120%; height: 16%; border-radius: 50% 50% 0 0; background: linear-gradient(180deg, #1c1a24, #100e16); opacity: .9; }
+.auth-path {
+  position: absolute; left: 50%; bottom: 0; width: 60px; height: 32%; margin-left: -30px;
+  background: linear-gradient(180deg, rgba(232, 163, 61, .05), rgba(20, 20, 28, 0));
+  clip-path: polygon(45% 0%, 55% 0%, 85% 100%, 15% 100%);
+}
+.auth-pilgrim-wrap {
+  position: absolute; left: 50%; bottom: 26%; width: 10px; margin-left: -5px; z-index: 3;
+  transition: transform .3s ease-out, bottom 1.6s cubic-bezier(.3, .6, .3, 1), opacity .8s ease;
+}
+.auth-pilgrim {
+  width: 10px; height: 24px; border-radius: 5px 5px 2px 2px;
+  background: linear-gradient(180deg, #3a3844, #181620);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .5);
+  transform-origin: 50% 100%; transition: transform 1.6s ease;
+}
+.auth-pilgrim-wrap.p-moves { bottom: 34%; }
+.auth-pilgrim-wrap.p-moves .auth-pilgrim { transform: scale(.72); }
+.auth-pilgrim-wrap.p-gone { bottom: 38%; opacity: 0; }
+.auth-pilgrim-wrap.p-gone .auth-pilgrim { transform: scale(.3); }
+.auth-dune-near { position: absolute; left: -15%; bottom: -6%; width: 130%; height: 20%; border-radius: 50% 50% 0 0; background: linear-gradient(180deg, #100e15, #050408); }
+.auth-vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 55%, rgba(0, 0, 0, 0) 35%, rgba(0, 0, 0, .55) 100%); pointer-events: none; z-index: 2; }
+
+/* --- Glass panel --- */
+.auth-panel-wrap {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  z-index: 5; padding: 24px; overflow-y: auto; transition: opacity .45s ease;
+}
+.auth-panel-wrap.gone { opacity: 0; pointer-events: none; }
+.auth-panel {
+  width: 360px; max-width: 100%; margin: auto 0;
+  background: rgba(29, 29, 40, .6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.25); backdrop-filter: blur(20px) saturate(1.25);
+  border: 1px solid rgba(255, 255, 255, .1); border-radius: 18px; padding: 34px 30px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .55);
+  font-family: "Manrope", sans-serif;
+}
+.auth-logo-row { display: flex; align-items: center; gap: 8px; margin-bottom: 22px; }
+.auth-logo-mark {
+  width: 20px; height: 20px; border-radius: 5px; background: linear-gradient(135deg, #f0c26a, #e8a33d);
+  display: flex; align-items: center; justify-content: center; font-size: 11px; color: #1a1409; font-weight: 700;
+}
+.auth-wordmark { font-size: 13px; letter-spacing: 3px; color: #edeae3; font-weight: 700; text-transform: uppercase; }
+/* Instrument Serif ships one weight — render as loaded, never synthesize bold. */
+.auth-headline { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 30px; line-height: 1.15; margin: 0 0 8px; color: #edeae3; }
+.auth-sub { font-size: 13.5px; color: #8b8a99; margin: 0 0 26px; }
+.auth-error { color: #b5544a; font-size: 13px; margin: 0 0 14px; }
+.auth-error:empty { display: none; }
+
+.auth-field { margin-bottom: 16px; position: relative; }
+.auth-field label { display: block; font-size: 11.5px; font-weight: 500; letter-spacing: .4px; color: #d9b878; margin-bottom: 7px; }
+.auth-field .req { color: #e8a33d; }
+.auth-field input {
+  width: 100%; background: rgba(20, 20, 28, .65); border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 9px; padding: 13px 14px; color: #edeae3; font-size: 14.5px;
+  font-family: "Manrope", sans-serif; transition: border-color .15s, box-shadow .15s;
+}
+.auth-field input:focus { outline: none; border-color: #e8a33d; box-shadow: 0 0 0 3px rgba(232, 163, 61, .18); }
+.auth-field .auth-eye { position: absolute; right: 14px; top: 38px; cursor: pointer; font-size: 12px; color: #8b8a99; letter-spacing: .5px; user-select: none; }
+.auth-field-caption { font-size: 11.5px; color: #6f6b78; margin-top: 6px; }
+
+.auth-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
+.auth-remember { display: flex; align-items: center; gap: 8px; cursor: pointer; background: none; border: none; padding: 0; color: #8b8a99; font-size: 12.5px; font-family: "Manrope", sans-serif; }
+.auth-checkbox {
+  width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, .25);
+  background: transparent; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: #1a1409; flex-shrink: 0;
+}
+.auth-checkbox.on { border-color: #e8a33d; background: #e8a33d; }
+.auth-forgot { font-size: 12.5px; color: #8b8a99; cursor: pointer; background: none; border: none; padding: 0; font-family: "Manrope", sans-serif; }
+
+/* Privacy consent (Task 4 — NOT in the handoff, deliberately kept: a live
+   compliance feature can't be dropped by a visual redesign; restyled compact
+   to sit in the new panel. Flagged back to design.) */
+.auth-consent { display: flex; gap: 9px; align-items: flex-start; margin: 0 0 18px; cursor: pointer; }
+.auth-consent .auth-checkbox { margin-top: 2px; }
+.auth-consent span { font-size: 11.5px; line-height: 1.5; color: #8b8a99; }
+
+/* --- Submit button + door --- */
+.auth-submit {
+  position: relative; width: 100%; overflow: hidden; border: none; border-radius: 9px;
+  padding: 15px 20px; font-size: 15px; font-weight: 700; color: #1a1409;
+  font-family: "Manrope", sans-serif;
+  background: linear-gradient(135deg, #f0c26a, #e8a33d);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.auth-submit:disabled { cursor: default; }
+.auth-submit.idle-disabled { opacity: .55; }
+/* Green celebrate crossfade via overlay (gradients don't interpolate). */
+.auth-submit::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: 0;
+  background: linear-gradient(135deg, #8fc9a8, #7fa98f); transition: opacity 1.1s ease;
+}
+.auth-submit.celebrating::before { opacity: 1; }
+.auth-btn-label { position: relative; z-index: 1; transition: opacity .3s ease; }
+.auth-submit.authenticating .auth-btn-label, .auth-submit.celebrating .auth-btn-label { opacity: 0; }
+.auth-btn-check {
+  position: absolute; left: 50%; top: 50%; z-index: 1; font-size: 19px; opacity: 0;
+  transform: translate(-50%, -50%) scale(.4);
+  transition: transform .35s cubic-bezier(.3, 1.4, .4, 1), opacity .3s ease;
+}
+.auth-submit.celebrating .auth-btn-check { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.auth-door-frame { position: relative; z-index: 1; width: 16px; height: 20px; transition: opacity .3s ease; }
+.auth-submit.celebrating .auth-door-frame { opacity: 0; }
+.auth-door-glow {
+  position: absolute; inset: -6px; border-radius: 6px; opacity: 0;
+  background: radial-gradient(circle, rgba(255, 236, 180, .9), rgba(255, 236, 180, 0) 70%);
+  transition: opacity .3s ease;
+}
+.auth-submit.authenticating .auth-door-glow { opacity: 1; animation: authDoorGlowPulse 1s ease-in-out infinite; }
+.auth-door {
+  position: absolute; left: 0; top: 0; width: 14px; height: 20px; border-radius: 3px;
+  background: rgba(26, 20, 9, .5); transform-origin: left center;
+  box-shadow: inset 2px 0 0 rgba(255, 255, 255, .35); transition: background .4s ease;
+}
+.auth-submit.authenticating .auth-door {
+  background: linear-gradient(180deg, #fff3d6, #f0c26a);
+  animation: authDoorSwing .7s ease-out forwards;
+}
+.auth-figure { position: absolute; left: -10px; top: 1px; width: 5px; height: 16px; }
+.auth-submit.authenticating .auth-figure { animation: authFigureWalkIn .7s ease-in forwards; }
+.auth-figure-head { display: block; width: 4px; height: 4px; border-radius: 50%; background: #1a1409; margin: 0 auto; }
+.auth-figure-body { display: block; width: 2px; height: 10px; background: #1a1409; border-radius: 1px; margin: 1px auto 0; }
+.auth-helper { text-align: center; font-size: 12.5px; color: #8b8a99; margin-top: 10px; }
+.auth-helper:empty { display: none; }
+
+/* --- Divider, OAuth (visual only — backend is email/password), footer --- */
+.auth-divider { display: flex; align-items: center; gap: 10px; margin: 20px 0; }
+.auth-divider .line { flex: 1; height: 1px; background: rgba(255, 255, 255, .1); }
+.auth-divider span { font-size: 11.5px; color: #6f6b78; white-space: nowrap; }
+.auth-oauth { display: flex; gap: 10px; margin-bottom: 20px; }
+.auth-oauth-btn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px 0; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .1);
+  background: rgba(255, 255, 255, .03); color: #c9c6ce; font-size: 13px; cursor: default;
+}
+.auth-footer { text-align: center; }
+.auth-footer button { background: none; border: none; padding: 0; font-size: 12.5px; color: #8b8a99; font-family: "Manrope", sans-serif; cursor: pointer; }
+.auth-footer button b { color: #e8a33d; font-weight: 600; }
+
+/* --- Threshold flash + reveal overlays (position: fixed so they survive
+   being reparented to <body> across the root.innerHTML swap into the real
+   home render) --- */
+.auth-flash {
+  position: fixed; inset: 0; background: #f0c26a; opacity: 0;
+  transition: opacity 1s ease; z-index: 80; pointer-events: none;
+}
+.auth-flash.half { opacity: .55; }
+.auth-flash.full { opacity: 1; }
+.auth-flash.fade-out { opacity: 0; transition: opacity .8s ease; }
+.auth-reveal-overlay {
+  position: fixed; inset: 0; background: #14141c; opacity: 0;
+  transition: opacity .35s ease; z-index: 90; pointer-events: none;
+}
+.auth-reveal-overlay.on { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-star { animation: none; }
+  .auth-plx { transition: none; }
+  .auth-scene { transition: none; }
+  .auth-submit.authenticating .auth-door { animation: none; transform: perspective(60px) rotateY(62deg); }
+  .auth-submit.authenticating .auth-figure { animation: none; opacity: 0; }
+  .auth-submit.authenticating .auth-door-glow { animation: none; }
+}
