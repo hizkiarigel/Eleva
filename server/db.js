@@ -211,6 +211,102 @@ async function init() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+
+  // SOMA Nutrition (Part B, 12 Agustus): a small curated searchable food
+  // database - MVP per the brief ("search -> serving size -> computed
+  // macros"), not an external API integration. barcode is a real column
+  // (exact-match lookup works today, see server/nutrition.js) but nothing
+  // populates it from camera hardware yet - "build the interface/
+  // architecture now even if scanning infra isn't wired" per the brief.
+  // Values are PER the stated serving_amount/serving_unit (e.g. "100" +
+  // "gram"), not per-100g normalized - keeps the serving-size UI a direct
+  // read of one row, no client-side scaling math to get wrong.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS foods (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      serving_amount NUMERIC NOT NULL,
+      serving_unit TEXT NOT NULL,
+      calories NUMERIC NOT NULL,
+      protein NUMERIC NOT NULL,
+      carbohydrates NUMERIC NOT NULL,
+      fat NUMERIC NOT NULL,
+      barcode TEXT UNIQUE
+    );
+  `);
+
+  // SOMA Nutrition (Part B): each logged meal is durable EVIDENCE (brief
+  // item 4), not just transient UI state feeding a running total - reusable
+  // by AI analysis / character progression / next-quest generation, same
+  // "evidence persisted, not just displayed" principle as every other
+  // completion type. quest_id nullable: a META nutrition session (no goal,
+  // like the existing META body/practice-test/job-match tools) still logs
+  // real entries. Raw photo bytes are NEVER persisted here (same principle
+  // as job-match screenshots, server/jobMatch.js) - a photo-sourced entry
+  // only keeps the AI's resulting food_name/macros plus source='photo', not
+  // the image itself.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS food_entries (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      quest_id INTEGER REFERENCES days(id) ON DELETE SET NULL,
+      food_name TEXT NOT NULL,
+      serving_amount NUMERIC NOT NULL,
+      serving_unit TEXT NOT NULL,
+      calories NUMERIC NOT NULL,
+      protein NUMERIC NOT NULL,
+      carbohydrates NUMERIC NOT NULL,
+      fat NUMERIC NOT NULL,
+      meal_type TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'search',
+      date TEXT NOT NULL,
+      recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  await seedFoods();
+}
+
+// SOMA Nutrition (Part B): MVP seed data, not exhaustive - a modest curated
+// list of common Indonesian foods/drinks so search has real results to
+// return. INSERT ... ON CONFLICT DO NOTHING keyed by name so this is safe to
+// call on every boot (idempotent, same idiom as the ALTER TABLE IF NOT
+// EXISTS calls above).
+const FOOD_SEED = [
+  ["Nasi putih", 100, "gram", 130, 2.7, 28, 0.3, "8992761111017"],
+  ["Nasi merah", 100, "gram", 111, 2.6, 23, 0.9, null],
+  ["Telur ayam rebus", 1, "butir", 78, 6.3, 0.6, 5.3, null],
+  ["Telur ayam goreng", 1, "butir", 92, 6.8, 0.6, 6.9, null],
+  ["Ayam goreng (dada, tanpa kulit)", 100, "gram", 165, 31, 0, 3.6, null],
+  ["Ayam goreng tepung", 100, "gram", 260, 17, 12, 16, null],
+  ["Tempe goreng", 100, "gram", 195, 15, 12, 11, null],
+  ["Tahu goreng", 100, "gram", 150, 11, 5, 10, null],
+  ["Ikan lele goreng", 100, "gram", 210, 18, 4, 14, null],
+  ["Sayur bayam bening", 100, "gram", 23, 2.9, 3.6, 0.4, null],
+  ["Tumis kangkung", 100, "gram", 60, 2.6, 4.3, 4, null],
+  ["Pisang", 1, "buah sedang", 105, 1.3, 27, 0.4, "8992388111013"],
+  ["Apel", 1, "buah sedang", 95, 0.5, 25, 0.3, null],
+  ["Susu sapi cair", 250, "ml", 149, 8, 12, 8, "8992772111015"],
+  ["Yogurt plain", 100, "gram", 61, 3.5, 4.7, 3.3, null],
+  ["Roti tawar putih", 1, "lembar", 66, 2.3, 12.5, 0.9, null],
+  ["Oatmeal (masak air)", 100, "gram", 71, 2.5, 12, 1.5, null],
+  ["Mie instan goreng", 1, "bungkus", 380, 8, 52, 15, "8996001600016"],
+  ["Kopi hitam tanpa gula", 250, "ml", 2, 0.3, 0, 0, null],
+  ["Air putih", 250, "ml", 0, 0, 0, 0, null],
+  ["Kacang tanah rebus", 100, "gram", 180, 8, 13, 12, null],
+  ["Tumis tahu tempe", 100, "gram", 170, 12, 8, 10, null],
+  ["Sup ayam sayur", 250, "ml", 120, 12, 8, 4, null],
+  ["Gado-gado (tanpa lontong)", 250, "gram", 300, 12, 20, 20, null],
+  ["Bubur ayam", 250, "gram", 220, 10, 30, 6, null],
+];
+async function seedFoods() {
+  for (const [name, servingAmount, servingUnit, calories, protein, carbohydrates, fat, barcode] of FOOD_SEED) {
+    await pool.query(
+      `INSERT INTO foods (name, serving_amount, serving_unit, calories, protein, carbohydrates, fat, barcode)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (name) DO NOTHING`,
+      [name, servingAmount, servingUnit, calories, protein, carbohydrates, fat, barcode]
+    );
+  }
 }
 
 // --- users ---
@@ -573,6 +669,30 @@ async function allHistory(userId, limit = 8) {
   return rows.map(rowToQuest);
 }
 
+// SOMA Nutrition Part B item 9: nutrition-log quests resolve LAZILY (GET
+// /api/state's end-of-day check, see resolveNutritionQuest in index.js) -
+// there's no synchronous moment right after completion for the user to pick
+// a shortfall reason the way structured-physical's flow has one, so GET
+// /api/state surfaces any still-unpicked ones here instead (reusing the
+// SAME reflection.shortfallPrompt/shortfallReason fields and the SAME
+// POST /api/quest/shortfall-reason route Task 7d item 6 already built).
+async function listPendingShortfalls(userId, completionType, limit = 5) {
+  // JSONB gotcha: reflection->'shortfallPrompt' returns the jsonb literal
+  // `null` (not SQL NULL) when the key is present with a JSON null value
+  // (the COMPLETED case, see resolveNutritionQuest) - "IS NOT NULL" alone
+  // would incorrectly match those rows too, so this also excludes the
+  // jsonb null literal explicitly.
+  const { rows } = await pool.query(
+    `SELECT * FROM days WHERE user_id = $1 AND reflection IS NOT NULL
+     AND quest->>'completionType' = $2
+     AND reflection->'shortfallPrompt' IS NOT NULL AND reflection->'shortfallPrompt' <> 'null'::jsonb
+     AND reflection->>'shortfallReason' IS NULL
+     ORDER BY id DESC LIMIT $3`,
+    [userId, completionType, limit]
+  );
+  return rows.map(rowToQuest);
+}
+
 // --- artifacts (Task 10a: persistent per-user document library) ---
 
 function rowToArtifact(r) {
@@ -624,6 +744,93 @@ async function replaceArtifactContent(userId, id, content) {
   return rows[0] ? rowToArtifact(rows[0]) : null;
 }
 
+// --- SOMA Nutrition (Part B, 12 Agustus) ---
+
+// PROGRESSIVE quests (brief item 3) keep their running state INSIDE the
+// `quest` jsonb column itself ("extend existing quest schema minimally"),
+// mutated across many contribution submissions over one day rather than
+// written once at generation time like every SESSION quest. Whole-column
+// read-modify-write (same idiom as setPracticeTestPayload/goal_targets'
+// jsonb_build_object merges) rather than SQL jsonb path surgery - simplest
+// correct thing for a column that's only ever touched by one user's own
+// requests, never concurrently from two places at once.
+async function updateQuestProgress(userId, dayId, questPatch) {
+  const { rows } = await pool.query(`SELECT quest FROM days WHERE user_id = $1 AND id = $2`, [userId, dayId]);
+  if (!rows.length) return null;
+  const quest = { ...rows[0].quest, ...questPatch };
+  await pool.query(`UPDATE days SET quest = $3 WHERE user_id = $1 AND id = $2`, [userId, dayId, quest]);
+  return quest;
+}
+
+function rowToFoodEntry(r) {
+  return {
+    id: r.id, questId: r.quest_id, foodName: r.food_name,
+    servingAmount: Number(r.serving_amount), servingUnit: r.serving_unit,
+    calories: Number(r.calories), protein: Number(r.protein),
+    carbohydrates: Number(r.carbohydrates), fat: Number(r.fat),
+    mealType: r.meal_type, source: r.source, date: r.date, recordedAt: r.recorded_at,
+  };
+}
+
+// Each submission is durable evidence (brief item 4) - persisted here
+// regardless of which entry path produced it (search-based or the optional
+// photo-based path, server/nutritionEntry.js normalizes both to this same
+// shape first).
+async function createFoodEntry(userId, entry) {
+  const { rows } = await pool.query(
+    `INSERT INTO food_entries (user_id, quest_id, food_name, serving_amount, serving_unit, calories, protein, carbohydrates, fat, meal_type, source, date)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [userId, entry.questId ?? null, entry.foodName, entry.servingAmount, entry.servingUnit,
+      entry.calories, entry.protein, entry.carbohydrates, entry.fat, entry.mealType, entry.source, entry.date]
+  );
+  return rowToFoodEntry(rows[0]);
+}
+
+async function listFoodEntriesForQuest(userId, questId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM food_entries WHERE user_id = $1 AND quest_id = $2 ORDER BY recorded_at ASC`,
+    [userId, questId]
+  );
+  return rows.map(rowToFoodEntry);
+}
+
+// Today's Nutrition page totals - not scoped to one quest_id, since a user
+// can eat outside of any active quest too (the page shows real intake
+// regardless of whether a Nutrition Trial happens to be running today).
+async function listFoodEntriesForDate(userId, date) {
+  const { rows } = await pool.query(
+    `SELECT * FROM food_entries WHERE user_id = $1 AND date = $2 ORDER BY recorded_at ASC`,
+    [userId, date]
+  );
+  return rows.map(rowToFoodEntry);
+}
+
+function rowToFood(r) {
+  return {
+    id: r.id, name: r.name, servingAmount: Number(r.serving_amount), servingUnit: r.serving_unit,
+    calories: Number(r.calories), protein: Number(r.protein), carbohydrates: Number(r.carbohydrates),
+    fat: Number(r.fat), barcode: r.barcode,
+  };
+}
+
+// Food search MVP (brief item 5): plain case-insensitive substring match
+// against the curated seed list - no external nutrition API in this round.
+async function searchFoods(query) {
+  const { rows } = await pool.query(
+    `SELECT * FROM foods WHERE name ILIKE $1 ORDER BY name ASC LIMIT 20`,
+    [`%${query}%`]
+  );
+  return rows.map(rowToFood);
+}
+
+// Barcode lookup - the interface/architecture the brief asks for even
+// though nothing wires up camera scanning hardware yet; this works today
+// against any barcode present in the seed data via a typed/pasted code.
+async function getFoodByBarcode(barcode) {
+  const { rows } = await pool.query(`SELECT * FROM foods WHERE barcode = $1`, [barcode]);
+  return rows[0] ? rowToFood(rows[0]) : null;
+}
+
 module.exports = {
   DEFAULT_STATS, init,
   createUser, getUserByEmail, getUserById,
@@ -632,5 +839,7 @@ module.exports = {
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
   listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
   updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
-  touchStatActivity, applyDecayIfDue, setShortfallReason,
+  touchStatActivity, applyDecayIfDue, setShortfallReason, listPendingShortfalls,
+  updateQuestProgress, createFoodEntry, listFoodEntriesForQuest, listFoodEntriesForDate,
+  searchFoods, getFoodByBarcode,
 };
