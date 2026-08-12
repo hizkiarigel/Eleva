@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786543678.3667235,
-    "ast_hash": "15be53631feebb0cf23602ecfc8bbf8e",
+    "mtime": 1786546164.3678071,
+    "ast_hash": "9a5f3976676d20bd9da86712e6c8c875",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -30,13 +30,13 @@
     "semantic_hash": ""
   },
   "server/db.js": {
-    "mtime": 1786542492.3747506,
-    "ast_hash": "40c61c1bcf3ac3cae5529fc8a2ddd9ed",
+    "mtime": 1786544993.215834,
+    "ast_hash": "f51e21a8b6df9f326100690a9c97fb4f",
     "semantic_hash": ""
   },
   "server/index.js": {
-    "mtime": 1786542508.3187501,
-    "ast_hash": "bc719e11908da7010e92727e2a02a1b4",
+    "mtime": 1786545072.843832,
+    "ast_hash": "d731958b404b446af580c808954700f8",
     "semantic_hash": ""
   },
   "server/jobMatch.js": {
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786543996.666716,
-    "ast_hash": "4ae943133cdb35e057064c64a1224f8e",
+    "mtime": 1786546444.4958007,
+    "ast_hash": "c0e644eee1a192bff9f1e38fa5c055bd",
     "semantic_hash": ""
   },
   "README.md": {
@@ -155,8 +155,8 @@
     "semantic_hash": "d06b0ae2738f35339a54701f5a85b1ca"
   },
   "tests/practicetest.e2e.js": {
-    "mtime": 1786509218.4352448,
-    "ast_hash": "c991bd56268baeb8d504a47ae7c5b21d",
+    "mtime": 1786546144.7758076,
+    "ast_hash": "979d479b45969449265e789c59e66f8c",
     "semantic_hash": ""
   },
   "tests/practicetest.js": {
@@ -215,8 +215,8 @@
     "semantic_hash": ""
   },
   "tests/nutrition.e2e.js": {
-    "mtime": 1786542810.1387434,
-    "ast_hash": "9da87962d8fca60a661c34f0b30ec407",
+    "mtime": 1786545838.0678146,
+    "ast_hash": "d9b489723895a6e6326316a0e58598c0",
     "semantic_hash": ""
   },
   "tests/nutrition.js": {
@@ -232,6 +232,11 @@
   "public/assets/meta-world-map.png": {
     "mtime": 1786542291.1561122,
     "ast_hash": "b91b2a744ed844a518524caa966504cc",
+    "semantic_hash": ""
+  },
+  "server/metaTargets.js": {
+    "mtime": 1786545032.951833,
+    "ast_hash": "ff3817c45228ef9c4dc06697bbf71a2c",
     "semantic_hash": ""
   }
 }

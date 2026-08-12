@@ -475,12 +475,6 @@ let jobApplicationFlow = null;
 // /api/meta/start succeeds or the user backs out.
 let metaBodyPicking = false;
 let metaError = "";
-// Meta Inner Realm redesign (12 Agustus): SOMA's realm cluster now shows
-// Activity and Nutrition as two separate progress cards (founder decision -
-// the world-map handoff's own prototype only knew about Fisik/Lari, predates
-// the SOMA Nutrition merge) so each routes straight to its
-// activeSomaQuest/data-soma-mode resume-or-start logic - no more "which one
-// do you mean?" mode picker in between (metaSomaPicking retired with it).
 // Hint-card dismissal persistence: this app has no localStorage precedent
 // anywhere else (help sheets are pure in-memory, reset on reload) - the
 // handoff explicitly allows "localStorage or backend flag, whichever this
@@ -488,6 +482,16 @@ let metaError = "";
 // simplest option that needs no schema change.
 let metaHintDismissed = false;
 try { metaHintDismissed = localStorage.getItem("elevaMetaHintDismissed") === "1"; } catch (e) { /* private mode etc - just stays visible every load */ }
+// META target-recommendation flow (12 Agustus follow-up, founder feedback):
+// "World Map shows Target, Realm page shows Tools" - each realm's
+// world-map card now shows the user's real target (server/metaTargets.js),
+// tapping an ACTIVE one opens that realm's tool list instead of jumping
+// straight into a flow. metaRealmOpen replaces the old direct-tap routing
+// SOMA had (its 2-card layout is retired - SOMA is back to one card, same
+// as LINGUA/LABORA, since it's a target card now, not a tool picker).
+let metaRealmOpen = null; // null | "soma" | "lingua" | "labora"
+let metaGoalDraft = { soma: "", lingua: "", labora: "" }; // empty-state "add a goal" input drafts, per realm
+let metaTargetBusy = false; // guards the confirm/add-goal buttons while a request is in flight
 // SOMA Nutrition Part B: "Log Meal" flow state - same "separate flow, not
 // reflectOpen" pattern as jobMatchFlow/jobApplicationFlow.
 // {questId, step, mealType, entries, search:{query,results,error},
@@ -2567,12 +2571,13 @@ function activeSomaQuest(allOpenQuests, mode) {
   )) || null;
 }
 
-// Meta Inner Realm redesign (design_handoff_meta_inner_realm, 12 Agustus):
-// replaces the old flat 3-card META grid with a scrollable RPG world map -
-// exact colors/spacing/copy/icon paths copied verbatim from the handoff's
-// README.md + prototype (Eleva Meta Inner Realm.dc.html), wired to real
-// session counts (server GET /api/state metaSessionCounts) and the user's
-// real pathway instead of the prototype's demo switcher/fake toast.
+// Meta Inner Realm redesign (design_handoff_meta_inner_realm, 12 Agustus) +
+// META target-recommendation follow-up (same day, founder feedback): world
+// map on a scrollable RPG map, visual tokens copied verbatim from the
+// handoff's README.md + prototype - but the CONTENT of each realm's card
+// was rebuilt per the follow-up's own framing, "World Map shows Target,
+// Realm page shows Tools": a card shows the user's real approved target
+// (server/metaTargets.js), not the tool name/session count it used to.
 // Pathway → label/line/glow, copied verbatim from the prototype's PATHWAYS
 // table (final palette per the README's "final, per latest request" note).
 const PATHWAY_META = {
@@ -2582,17 +2587,24 @@ const PATHWAY_META = {
   Pilgrim: { label: "THE PILGRIM", line: "Perjalananmu adalah bukti. Eleva berjalan bersamamu.", glow: "#9b6fd1" },
   Specialist: { label: "THE SPECIALIST", line: "Kedalaman adalah jalanmu. Satu bidang, dikuasai penuh.", glow: "#d4a72c" },
 };
+// Per-realm constants shared between the world-map cluster and the realm
+// detail sub-page (tap target), so the two never drift out of sync.
+const REALM_INFO = {
+  lingua: { accent: "#6EA8FF", icon: "lingua", iconSize: 24, name: "LINGUA", statLabel: "The Growth", desc: "Asah kemampuanmu. Uji, pahami, dan tingkatkan.", left: "50%", top: "14.5%", goalPlaceholder: "IELTS Academic 6.5" },
+  soma: { accent: "#63E38B", icon: "soma", iconSize: 24, name: "SOMA", statLabel: "The Body", desc: "Bangun, jaga, dan kuatkan tubuhmu setiap hari.", left: "22%", top: "39%", goalPlaceholder: "Lari 10K dalam 60 menit" },
+  labora: { accent: "#FFC46E", icon: "labora", iconSize: 22, name: "LABORA", statLabel: "The Livelihood", desc: "Uji dirimu terhadap dunia. Bangun masa depanmu.", left: "79%", top: "40%", goalPlaceholder: "Dapat kerja remote sebagai data analyst" },
+};
 // Custom SVG icon paths, copied verbatim from the prototype (no emoji/icon
-// fonts per the handoff's DO NOT list). SOMA's sprout is reused for BOTH the
-// Activity and Nutrition progress cards below - the handoff only specced one
-// icon per realm (it predates the SOMA Nutrition merge), and the sigil above
-// already carries the "this is SOMA" identity, so the two cards distinguish
-// themselves by title/copy rather than a second invented icon.
+// fonts per the handoff's DO NOT list).
 function realmIconSVG(key, size, color) {
   if (key === "lingua") return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5" style="flex:none"><path d="M12 5.5c-1.8-1.4-4.6-2-7.5-2-.3 0-.5.2-.5.5v12.6c0 .3.2.5.5.5 2.6 0 5.3.5 7.2 1.9.2.1.4.1.6 0 1.9-1.4 4.6-1.9 7.2-1.9.3 0 .5-.2.5-.5V4c0-.3-.2-.5-.5-.5-2.9 0-5.7.6-7.5 2z"></path><path d="M12 5.5v13" stroke-width="1.3"></path><path d="M6.5 6.7c1.6.2 3.2.7 4 1.3M6.5 10c1.6.2 3.2.6 4 1.1M17.5 6.7c-1.6.2-3.2.7-4 1.3M17.5 10c-1.6.2-3.2.6-4 1.1" stroke-width="1.1" stroke-linecap="round"></path></svg>`;
   if (key === "labora") return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5" style="flex:none"><rect x="3" y="7.5" width="18" height="12.5" rx="2"></rect><path d="M8 7.5V6a2.5 2.5 0 0 1 2.5-2.5h3A2.5 2.5 0 0 1 16 6v1.5"></path><path d="M3 12.5h18" stroke-width="1.3"></path><rect x="10.3" y="11.2" width="3.4" height="2.6" rx="0.5" fill="#0d0c12" stroke-width="1.2"></rect></svg>`;
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5" style="flex:none"><path d="M12 21c0-5.5 0-9 0-11"></path><path d="M12 12c0-4 2.5-6.5 7-7 .3 4.3-2 7-7 7z"></path><path d="M12 15c0-3.2-2-5.2-5.5-5.6-.3 3.4 1.6 5.6 5.5 5.6z"></path></svg>`;
 }
+// Generic tappable row (icon + title + subtitle + progress bar + chevron) -
+// used both for the realm detail sub-page's tool rows AND (before the
+// target-recommendation follow-up) the world-map cards themselves. Kept
+// generic/reusable rather than duplicated per screen.
 function realmProgressCardHTML(accent, icon, iconSize, title, sessionsLabel, pct, attrs) {
   return `
     <button class="meta-realm-card" style="border:1px solid ${accent}66" ${attrs}>
@@ -2604,6 +2616,19 @@ function realmProgressCardHTML(accent, icon, iconSize, title, sessionsLabel, pct
       </div>
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="2" style="flex:none"><path d="M9 18l6-6-6-6"></path></svg>
     </button>`;
+}
+// Non-interactive row for a tool that doesn't exist yet (Writing/Speaking,
+// CV/Skill Gap/Interview) - visible-but-unrevealed, same spirit as the
+// world map's locked realm, rather than silently omitted.
+function comingSoonRowHTML(accent, icon, iconSize, label) {
+  return `
+    <div class="meta-realm-card meta-realm-card-soon" style="border:1px solid ${accent}33">
+      ${realmIconSVG(icon, iconSize, `${accent}88`)}
+      <div class="meta-realm-card-content">
+        <div class="meta-realm-card-title">${esc(label)}</div>
+        <div class="meta-realm-card-sessions">Segera hadir</div>
+      </div>
+    </div>`;
 }
 function realmClusterHTML({ left, top, accent, icon, name, statLabel, desc, cardsHTML }) {
   return `
@@ -2618,21 +2643,139 @@ function realmClusterHTML({ left, top, accent, icon, name, statLabel, desc, card
       </div>
     </div>`;
 }
-// Progress bar fill = sessions/7 clamped, copied as-is from the prototype's
-// placeholder formula (the handoff explicitly allows "adjust the denominator
-// if there's a better real target, but keep it simple, no fake milestone
-// data" - a real target would mean inventing a monthly-session number the
-// founder never specified, so this keeps the prototype's literal math).
+// SOMA/LABORA's progress bar (goalTargets-derived) fill = sessions/7
+// clamped, copied as-is from the prototype's placeholder formula (the
+// handoff explicitly allows "adjust the denominator if there's a better
+// real target, but keep it simple, no fake milestone data").
 function metaSessionPct(n) {
   return Math.max(0, Math.min(100, Math.round((n / 7) * 100)));
 }
-function metaScreenHTML(s, allOpenQuests) {
+// The world-map card itself - one of three states from
+// server/metaTargets.js. "active": the user's approved target, tapping
+// opens the realm's tool list. "recommend": a matching goal exists but
+// needs one explicit approve tap (founder: a NEW approve step, distinct
+// from the existing "Target Berikutnya" A/B/C picker). "empty": no matching
+// goal at all yet - inline CTA to add one (reuses the existing goals array,
+// POST /api/goals).
+function targetCardHTML(realm, card, info) {
+  const accent = info.accent;
+  // A realm's tools (Movement/Nutrition/... - the sub-page) must stay
+  // reachable even without an approved target - the target is motivational
+  // framing, not a gate on the underlying functionality. Every state gets a
+  // "Lihat tools →" link into the same detail page an active card opens.
+  const toolsLink = `<button class="meta-realm-card-tools-link" data-meta-realm-open="${realm}" style="color:${accent}">Lihat tools ${esc(info.name)} →</button>`;
+  if (!card || card.status === "empty") {
+    return `
+      <div class="meta-realm-card meta-realm-card-empty" style="border:1px dashed ${accent}44">
+        <div class="meta-realm-card-content" style="flex:1">
+          <div class="meta-realm-card-title">Belum ada perjalanan aktif</div>
+          <div class="meta-realm-card-sessions">Set target ${esc(info.name)} dulu buat mulai perjalanan.</div>
+          <div class="meta-goal-add-row">
+            <input type="text" class="meta-goal-add-input" id="metaGoalInput-${realm}" placeholder="Mis. ${esc(info.goalPlaceholder)}" value="${esc(metaGoalDraft[realm] || "")}" maxlength="200" />
+            <button class="meta-goal-add-btn" data-meta-goal-submit="${realm}" style="color:${accent};border-color:${accent}66" ${metaTargetBusy ? "disabled" : ""}>Set</button>
+          </div>
+          ${toolsLink}
+        </div>
+      </div>`;
+  }
+  if (card.status === "recommend") {
+    return `
+      <div class="meta-realm-card meta-realm-card-recommend" style="border:1px solid ${accent}66">
+        <div class="meta-realm-card-content" style="flex:1">
+          <div class="meta-realm-card-recommend-tag" style="color:${accent}">ELEVA MENYARANKAN</div>
+          <div class="meta-realm-card-title">${esc(card.title)}</div>
+          <div class="meta-realm-card-sessions">${esc(card.subtitle)}</div>
+          <button class="meta-realm-card-approve" data-meta-target-confirm="${realm}" data-meta-target-goal="${card.goalIndex}" style="background:${accent}" ${metaTargetBusy ? "disabled" : ""}>Jadikan target aktif</button>
+          ${toolsLink}
+        </div>
+      </div>`;
+  }
+  return `
+    <button class="meta-realm-card" style="border:1px solid ${accent}66" data-meta-realm-open="${realm}">
+      ${realmIconSVG(info.icon, info.iconSize, accent)}
+      <div class="meta-realm-card-content">
+        <div class="meta-realm-card-title">${esc(card.title)}</div>
+        <div class="meta-realm-card-sessions">${esc(card.subtitle)}</div>
+        <div class="meta-realm-card-track"><div class="meta-realm-card-fill" style="width:${card.pct}%;background:${accent}"></div></div>
+      </div>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="2" style="flex:none"><path d="M9 18l6-6-6-6"></path></svg>
+    </button>`;
+}
+// Realm page's tool list - "Realm page shows Tools" (founder framing).
+// Real, startable tools use the SAME entry points the world map used to
+// (data-soma-mode/data-meta-tool, unmodified underneath); coming-soon rows
+// mark what this app doesn't build yet rather than omitting them silently.
+function metaRealmToolsHTML(realm, s) {
   const counts = s.metaSessionCounts || { lingua: 0, somaActivity: 0, somaNutrition: 0, labora: 0 };
+  if (realm === "soma") {
+    return [
+      realmProgressCardHTML("#63E38B", "soma", 24, "Movement", `Cardio & gym · ${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="activity"`),
+      realmProgressCardHTML("#63E38B", "soma", 24, "Recovery", `Tidur, hidrasi, pemulihan · ${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="recovery"`),
+      realmProgressCardHTML("#63E38B", "soma", 24, "Nutrition", `${counts.somaNutrition} sesi minggu ini`, metaSessionPct(counts.somaNutrition), `data-soma-mode="nutrition"`),
+    ].join("");
+  }
+  if (realm === "lingua") {
+    return [
+      realmProgressCardHTML("#6EA8FF", "lingua", 24, "Reading", `Practice Test · ${counts.lingua} sesi bulan ini`, metaSessionPct(counts.lingua), `data-lingua-track="reading"`),
+      realmProgressCardHTML("#6EA8FF", "lingua", 24, "Listening", `Practice Test · ${counts.lingua} sesi bulan ini`, metaSessionPct(counts.lingua), `data-lingua-track="listening"`),
+      comingSoonRowHTML("#6EA8FF", "lingua", 24, "Writing"),
+      comingSoonRowHTML("#6EA8FF", "lingua", 24, "Speaking"),
+    ].join("");
+  }
+  return [
+    realmProgressCardHTML("#FFC46E", "labora", 22, "Job Match", `${counts.labora} sesi bulan ini`, metaSessionPct(counts.labora), `data-meta-tool="job-match"`),
+    `<div class="meta-realm-card meta-realm-card-info" style="border:1px solid #FFC46E44">
+      ${realmIconSVG("labora", 22, "#FFC46E")}
+      <div class="meta-realm-card-content">
+        <div class="meta-realm-card-title">Applications</div>
+        <div class="meta-realm-card-sessions">Muncul otomatis setelah Job Match Analysis lolos (qualified).</div>
+      </div>
+    </div>`,
+    comingSoonRowHTML("#FFC46E", "labora", 22, "CV"),
+    comingSoonRowHTML("#FFC46E", "labora", 22, "Skill Gap"),
+    comingSoonRowHTML("#FFC46E", "labora", 22, "Interview"),
+  ].join("");
+}
+function metaRealmDetailHTML(realm, s) {
+  const info = REALM_INFO[realm];
+  const card = s.metaTargets?.[realm];
+  return `
+    <div class="meta-realm-detail">
+      <button class="meta-realm-back" id="metaRealmBack">← Kembali ke peta</button>
+      <div class="meta-realm-detail-header">
+        <div class="meta-realm-sigil" style="border:1px solid ${info.accent}88;box-shadow:0 0 14px ${info.accent}33">${realmIconSVG(info.icon, 24, info.accent)}</div>
+        <div>
+          <div class="meta-realm-name" style="color:${info.accent};margin-top:0">${info.name}</div>
+          <div class="meta-realm-stat">${info.statLabel}</div>
+        </div>
+      </div>
+      ${card && card.status === "active" ? `
+      <div class="meta-realm-detail-target">
+        <div class="meta-realm-detail-target-label mono">MENUJU</div>
+        <div class="meta-realm-card-title">${esc(card.title)}</div>
+        <div class="meta-realm-card-sessions">${esc(card.subtitle)}</div>
+      </div>` : ""}
+      ${metaError ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(metaError)}</p>` : ""}
+      <div class="meta-realm-tools">
+        ${metaRealmToolsHTML(realm, s)}
+      </div>
+      ${metaBodyPicking ? `
+      <div class="quest-card fadeUp" style="margin-top:16px">
+        <div class="field">
+          <label>Jenis latihannya apa?</label>
+          <div class="status-row">
+            ${[["cardio", "Cardio"], ["gym", "Gym"]].map(([k, l]) =>
+              `<button class="status-btn" data-meta-body-kind="${k}">${l}</button>`).join("")}
+          </div>
+        </div>
+        <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
+      </div>` : ""}
+    </div>`;
+}
+function metaScreenHTML(s, allOpenQuests) {
+  if (metaRealmOpen) return metaRealmDetailHTML(metaRealmOpen, s);
   const pw = PATHWAY_META[s.pathway] || PATHWAY_META.Pilgrim;
-  const linguaCard = realmProgressCardHTML("#6EA8FF", "lingua", 24, "Practice Test", `${counts.lingua} sesi bulan ini`, metaSessionPct(counts.lingua), `data-meta-tool="practice-test"`);
-  const laboraCard = realmProgressCardHTML("#FFC46E", "labora", 22, "Job Match", `${counts.labora} sesi bulan ini`, metaSessionPct(counts.labora), `data-meta-tool="job-match"`);
-  const somaActivityCard = realmProgressCardHTML("#63E38B", "soma", 24, "Fisik / Lari", `${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="activity"`);
-  const somaNutritionCard = realmProgressCardHTML("#63E38B", "soma", 24, "Nutrition", `${counts.somaNutrition} sesi minggu ini`, metaSessionPct(counts.somaNutrition), `data-soma-mode="nutrition"`);
+  const targets = s.metaTargets || {};
   const bigVignette = `background:radial-gradient(ellipse at center, rgba(3,5,8,.72) 0%, rgba(3,5,8,.44) 40%, rgba(3,5,8,.16) 70%, transparent 100%);width:130%;height:135%`;
   return `
     <div class="meta-realm-wrap">
@@ -2649,9 +2792,9 @@ function metaScreenHTML(s, allOpenQuests) {
         </div>
         <p class="meta-realm-intro">Latihan mandiri di luar Quest. Semua bukti di sini membentuk dirimu, dan memengaruhi langkah Eleva.</p>
 
-        ${realmClusterHTML({ left: "50%", top: "14.5%", accent: "#6EA8FF", icon: "lingua", name: "LINGUA", statLabel: "The Growth", desc: "Asah kemampuanmu. Uji, pahami, dan tingkatkan.", cardsHTML: linguaCard })}
-        ${realmClusterHTML({ left: "22%", top: "39%", accent: "#63E38B", icon: "soma", name: "SOMA", statLabel: "The Body", desc: "Bangun, jaga, dan kuatkan tubuhmu setiap hari.", cardsHTML: somaActivityCard + somaNutritionCard })}
-        ${realmClusterHTML({ left: "79%", top: "40%", accent: "#FFC46E", icon: "labora", name: "LABORA", statLabel: "The Livelihood", desc: "Uji dirimu terhadap dunia. Bangun masa depanmu.", cardsHTML: laboraCard })}
+        ${realmClusterHTML({ ...REALM_INFO.lingua, cardsHTML: targetCardHTML("lingua", targets.lingua, REALM_INFO.lingua) })}
+        ${realmClusterHTML({ ...REALM_INFO.soma, cardsHTML: targetCardHTML("soma", targets.soma, REALM_INFO.soma) })}
+        ${realmClusterHTML({ ...REALM_INFO.labora, cardsHTML: targetCardHTML("labora", targets.labora, REALM_INFO.labora) })}
 
         <div class="meta-realm-avatar-ring">
           <div class="meta-realm-avatar-glow" style="background:radial-gradient(circle, ${pw.glow}40, transparent 70%)"></div>
@@ -2684,17 +2827,6 @@ function metaScreenHTML(s, allOpenQuests) {
           </div>
           <button class="meta-realm-hint-close" id="metaHintClose" aria-label="Tutup">×</button>
         </div>`}
-        ${metaBodyPicking ? `
-        <div class="quest-card fadeUp" style="margin-top:16px">
-          <div class="field">
-            <label>Jenis latihannya apa?</label>
-            <div class="status-row">
-              ${[["cardio", "Cardio"], ["gym", "Gym"], ["recovery", "Recovery"]].map(([k, l]) =>
-                `<button class="status-btn" data-meta-body-kind="${k}">${l}</button>`).join("")}
-            </div>
-          </div>
-          <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
-        </div>` : ""}
       </div>
     </div>`;
 }
@@ -3106,48 +3238,46 @@ function renderDashboard() {
     beginStructuredOrReflectiveFlow(id, quest);
     renderDashboard();
   }));
-  // Meta Inner Realm: tapping the LINGUA/LABORA progress card starts a
+  // Meta Inner Realm: tapping LABORA's Job Match tool row starts a
   // standalone session via POST /api/meta/start, then hands off into the
-  // EXACT SAME flow state a Today's Trial quest of that completionType would
-  // use (practiceTestFlow/jobMatchFlow - see the [data-reflect-id] handler
-  // above and the job-match CV-check it does) - no duplicated UI, just a
-  // different entry point. SOMA no longer routes through here at all (its
-  // two cards go straight to [data-soma-mode] below, skipping the old
-  // Activity/Nutrition mode picker per the founder's world-map decision).
+  // EXACT SAME flow state a Today's Trial job-match-analysis quest would use
+  // (jobMatchFlow, including the CV-check - see the [data-reflect-id]
+  // handler above) - no duplicated UI, just a different entry point. Only
+  // "job-match" reaches this handler now - SOMA/LINGUA's tool rows route
+  // through [data-soma-mode]/[data-lingua-track] below instead (they need a
+  // resume-if-active check or a preset kind first), and the old generic
+  // "practice-test" tool (kind-picker) was replaced by LINGUA's direct
+  // Reading/Listening rows.
   document.querySelectorAll("[data-meta-tool]").forEach((b) => b.addEventListener("click", async () => {
     const tool = b.dataset.metaTool;
     metaError = "";
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
       const { quest } = await api("/api/meta/start", { method: "POST", body: { tool } });
-      if (tool === "practice-test") {
-        practiceTestFlow = { questId: quest.id, step: "kind", answers: {} };
-      } else if (tool === "job-match") {
-        let cv = null;
-        try {
-          const { artifacts } = await api("/api/artifacts");
-          cv = artifacts.find((a) => a.type === "cv") || null;
-        } catch (e) { /* fall through to upload-cv either way */ }
-        jobMatchFlow = { questId: quest.id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
-      }
+      let cv = null;
+      try {
+        const { artifacts } = await api("/api/artifacts");
+        cv = artifacts.find((a) => a.type === "cv") || null;
+      } catch (e) { /* fall through to upload-cv either way */ }
+      jobMatchFlow = { questId: quest.id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
       activeScreen = "home";
     } catch (e) {
       metaError = e.message;
     }
     renderDashboard();
   }));
-  // Meta Inner Realm: SOMA's two realm-cluster cards (Activity/Nutrition)
-  // call straight into here now - "Activity" resumes the existing quest if
-  // one is active, else falls through to the SAME cardio/gym/recovery kind
-  // picker Activity always used; "Nutrition" resumes the existing quest if
-  // active, else starts a brand-new PROGRESSIVE quest directly (no sub-kind
-  // to pick, unlike Activity).
+  // Meta Inner Realm: SOMA's Movement/Recovery/Nutrition tool rows call
+  // straight into here - "activity"/"recovery" resume the existing quest if
+  // one is active (either sub-kind counts as the same "activity" domain),
+  // else "activity" falls through to the cardio/gym kind picker, "recovery"
+  // skips the picker entirely (its kind is already known), "nutrition"
+  // resumes or starts a brand-new PROGRESSIVE quest directly.
   document.querySelectorAll("[data-soma-mode]").forEach((b) => b.addEventListener("click", async () => {
     const mode = b.dataset.somaMode;
-    const active = activeSomaQuest(allOpenQuests, mode);
+    const active = activeSomaQuest(allOpenQuests, mode === "recovery" ? "activity" : mode);
     if (active) {
-      if (mode === "activity") beginStructuredOrReflectiveFlow(active.id, active.quest);
-      else await openNutritionFlow(active);
+      if (mode === "nutrition") await openNutritionFlow(active);
+      else beginStructuredOrReflectiveFlow(active.id, active.quest);
       activeScreen = "home";
       renderDashboard();
       return;
@@ -3159,12 +3289,91 @@ function renderDashboard() {
     }
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
-      const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "nutrition" } });
-      await openNutritionFlow(quest);
+      if (mode === "recovery") {
+        const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "body", kind: "recovery" } });
+        reflectTarget = quest.id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
+        structForm = {}; reflectError = ""; unableQuestId = null;
+        recordMode = true; structKind = "recovery"; structKindAuto = true;
+      } else {
+        const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "nutrition" } });
+        await openNutritionFlow(quest);
+      }
       activeScreen = "home";
     } catch (e) {
       metaError = e.message;
     }
+    renderDashboard();
+  }));
+  // META target-recommendation follow-up: LINGUA's Reading/Listening tool
+  // rows start a META practice-test session with the track PRESET (skips
+  // straight to practiceTestFlow's "track" step instead of asking kind
+  // first) - Writing/Speaking have no row here at all yet (coming-soon).
+  document.querySelectorAll("[data-lingua-track]").forEach((b) => b.addEventListener("click", async () => {
+    const kind = b.dataset.linguaTrack;
+    metaError = "";
+    root.innerHTML = spinnerHTML("Menyiapkan sesi...");
+    try {
+      const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "practice-test" } });
+      practiceTestFlow = { questId: quest.id, step: "track", kind, answers: {} };
+      activeScreen = "home";
+    } catch (e) {
+      metaError = e.message;
+    }
+    renderDashboard();
+  }));
+  // META target-recommendation follow-up: tapping an ACTIVE target card
+  // opens that realm's tool list ("World Map shows Target, Realm page shows
+  // Tools" - founder framing) instead of jumping straight into a flow.
+  document.querySelectorAll("[data-meta-realm-open]").forEach((b) => b.addEventListener("click", () => {
+    metaRealmOpen = b.dataset.metaRealmOpen;
+    metaError = "";
+    renderDashboard();
+  }));
+  document.getElementById("metaRealmBack")?.addEventListener("click", () => {
+    metaRealmOpen = null;
+    metaBodyPicking = false;
+    renderDashboard();
+  });
+  // META target-recommendation follow-up: the founder explicitly wants a
+  // dedicated approve step here, separate from the existing "Target
+  // Berikutnya" A/B/C picker - a "recommend" card only becomes "active" (and
+  // shows up as a real target on the map) after this tap.
+  document.querySelectorAll("[data-meta-target-confirm]").forEach((b) => b.addEventListener("click", async () => {
+    if (metaTargetBusy) return;
+    metaTargetBusy = true;
+    metaError = "";
+    renderDashboard();
+    try {
+      await api("/api/meta/target/confirm", { method: "POST", body: { realm: b.dataset.metaTargetConfirm, goalIndex: Number(b.dataset.metaTargetGoal) } });
+      appState = await api("/api/state");
+    } catch (e) {
+      metaError = e.message;
+    }
+    metaTargetBusy = false;
+    renderDashboard();
+  }));
+  // META target-recommendation follow-up: the empty-state CTA appends a new
+  // First Trial goal (POST /api/goals) - once it exists, domain inference
+  // (server/metaTargets.js) picks it up as a fresh "recommend" candidate on
+  // the next state refresh, no extra wiring needed for that step.
+  document.querySelectorAll("[data-meta-goal-submit]").forEach((b) => b.addEventListener("click", async () => {
+    if (metaTargetBusy) return;
+    const realm = b.dataset.metaGoalSubmit;
+    const input = document.getElementById(`metaGoalInput-${realm}`);
+    const text = (input?.value || "").trim();
+    metaGoalDraft[realm] = text;
+    if (!text) { metaError = "Tulis target dulu."; renderDashboard(); return; }
+    metaTargetBusy = true;
+    metaError = "";
+    renderDashboard();
+    try {
+      await api("/api/goals", { method: "POST", body: { text } });
+      metaGoalDraft[realm] = "";
+      appState = await api("/api/state");
+    } catch (e) {
+      metaError = e.message;
+    }
+    metaTargetBusy = false;
     renderDashboard();
   }));
   // Meta Inner Realm: hint-card dismissal persists via localStorage (see the
@@ -3751,6 +3960,13 @@ function renderDashboard() {
   // Homepage redesign: nav shell + Home-specific new interactions.
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => {
     activeScreen = b.dataset.tab;
+    // META target-recommendation follow-up: re-selecting the META tab
+    // always starts back at the world map, same "tab reselect goes to root"
+    // convention as a native tab bar - metaRealmOpen is a navigational
+    // position, not an in-progress flow with data at stake (unlike
+    // jobMatchFlow/nutritionFlow, which deliberately DON'T reset on tab
+    // switches - see the [data-reflect-id] handler's own comment on that).
+    if (activeScreen === "meta") metaRealmOpen = null;
     renderDashboard();
   }));
   document.getElementById("headerAvatar")?.addEventListener("click", () => { activeScreen = "settings"; renderDashboard(); });

@@ -5,11 +5,11 @@
   "3": "graphify Skill Definition (SKILL.md)",
   "4": "db.js",
   "5": "Goal Capture (v13, bridge to First Trial)",
-  "6": "renderDashboard",
+  "6": "questSummaryCard",
   "7": "Eleva_Prototype.jsx",
   "8": "package.json",
   "9": "render",
-  "10": "statLabel",
+  "10": "attachPolygonHandlers",
   "11": "jobMatch.js",
   "12": "practiceTest.js",
   "13": "practicetest.e2e.js",
@@ -19,6 +19,7 @@
   "17": "Task 6: Prompt Caching",
   "18": "esc",
   "19": "practice-test-flow.md",
+  "20": "metaTargets.js",
   "21": "livelihood.e2e.js",
   "22": "auth.e2e.js",
   "23": "DEPLOY_RAILWAY.md — Railway Deployment Guide",
@@ -29,5 +30,7 @@
   "28": "server/nutrition.js",
   "29": "livelihood-milestone-flow.md",
   "30": "nutrition.e2e.js",
-  "31": "soma-nutrition-flow.md"
+  "31": "soma-nutrition-flow.md",
+  "32": "realmIconSVG",
+  "33": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)"
 }

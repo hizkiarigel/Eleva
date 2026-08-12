@@ -13,6 +13,7 @@ const jobMatch = require("./jobMatch");
 const jobApplication = require("./jobApplication");
 const nutrition = require("./nutrition");
 const nutritionEntry = require("./nutritionEntry");
+const metaTargets = require("./metaTargets");
 
 // Task 14 (Livelihood Milestone, PRD.md section 26): auto-creates the fixed
 // "10 Qualified Applications" milestone the first time a Livelihood goal's
@@ -502,6 +503,14 @@ app.get("/api/state", requireAuth, async (req, res) => {
         somaActivity: await db.countSessionsSince(req.userId, "structured-physical", startOfWeekKey()),
         somaNutrition: await db.countSessionsSince(req.userId, "nutrition-log", startOfWeekKey()),
         labora: await db.countSessionsSince(req.userId, "job-match-analysis", startOfMonthKey()),
+      },
+      // META Inner Realm target-recommendation flow (12 Agustus follow-up):
+      // "World Map shows Target, Realm page shows Tools" - each realm's card
+      // is active/recommend/empty, see server/metaTargets.js.
+      metaTargets: {
+        soma: await metaTargets.cardForRealm(db, req.userId, fresh, "soma"),
+        lingua: await metaTargets.cardForRealm(db, req.userId, fresh, "lingua"),
+        labora: await metaTargets.cardForRealm(db, req.userId, fresh, "labora"),
       },
       aiActive: ai.hasKey(),
     });
@@ -1268,6 +1277,43 @@ app.post("/api/meta/start", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal memulai sesi META." });
+  }
+});
+
+// META Inner Realm target-recommendation flow: the user explicitly approves
+// a "recommend" card (see server/metaTargets.js) as a realm's active target.
+// domainForGoalIndex is re-derived server-side rather than trusted from the
+// client - a stale/tampered request must never lock in a mismatched
+// goalIndex (e.g. confirming a Livelihood goal as the SOMA target).
+app.post("/api/meta/target/confirm", requireAuth, async (req, res) => {
+  try {
+    const { realm, goalIndex } = req.body;
+    if (!metaTargets.REALMS.includes(realm)) return res.status(400).json({ error: "Realm tidak dikenal." });
+    const state = await db.getState(req.userId);
+    const gi = Number(goalIndex);
+    if (!Number.isInteger(gi) || !state.goals?.[gi]) return res.status(400).json({ error: "Goal tidak ditemukan." });
+    if (metaTargets.domainForGoalIndex(state, gi) !== realm) {
+      return res.status(400).json({ error: "Goal ini belum punya data yang cocok untuk realm itu." });
+    }
+    await db.setMetaActiveTarget(req.userId, realm, gi);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal mengonfirmasi target." });
+  }
+});
+
+// META Inner Realm: lets a user add a new First Trial goal after onboarding,
+// from a realm's "No active target" empty-state CTA (server/metaTargets.js).
+// Same cap/validation as onboarding's goal capture, just appending.
+app.post("/api/goals", requireAuth, async (req, res) => {
+  try {
+    const result = await db.addGoal(req.userId, req.body?.text);
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ ok: true, goals: result.goals, goalIndex: result.goalIndex });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menambahkan goal." });
   }
 });
 

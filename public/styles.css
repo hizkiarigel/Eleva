@@ -494,6 +494,36 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .meta-realm-hint-sub { font-size: 12px; color: #948f9c; }
 .meta-realm-hint-close { background: none; border: none; color: #948f9c; font-size: 16px; cursor: pointer; flex: none; line-height: 1; }
 
+/* META target-recommendation follow-up (12 Agustus, founder feedback: "World
+   Map shows Target, Realm page shows Tools") - card states + realm detail
+   sub-page. Same dark .meta-realm- palette as the rest of the redesign. */
+.meta-realm-card-soon .meta-realm-card-title, .meta-realm-card-soon .meta-realm-card-sessions { color: #6f6b78; }
+.meta-realm-card-info .meta-realm-card-sessions { color: #B8B8C0; line-height: 1.4; }
+.meta-realm-card-recommend-tag { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 1px; margin-bottom: 4px; }
+.meta-realm-card-approve {
+  margin-top: 10px; border: none; border-radius: 10px; padding: 9px 14px; color: #0d0c12;
+  font-size: 13px; font-weight: 600; cursor: pointer; width: 100%;
+}
+.meta-realm-card-approve:disabled { opacity: .5; cursor: default; }
+.meta-goal-add-row { display: flex; gap: 8px; margin-top: 10px; }
+.meta-goal-add-input {
+  flex: 1; min-width: 0; background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 8px; padding: 8px 10px; color: #F2F3F7; font-size: 13px; font-family: "Inter", sans-serif;
+}
+.meta-goal-add-input::placeholder { color: #6f6b78; }
+.meta-goal-add-btn { background: none; border: 1px solid; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; flex: none; }
+.meta-goal-add-btn:disabled { opacity: .5; cursor: default; }
+.meta-realm-card-tools-link { background: none; border: none; font-size: 12px; padding: 10px 0 0; cursor: pointer; text-align: left; }
+
+.meta-realm-detail { color: #ece7dc; }
+.meta-realm-back { background: none; border: none; color: #948f9c; font-size: 13px; cursor: pointer; padding: 0 0 18px; }
+.meta-realm-detail-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.meta-realm-detail-target { background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .1); border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; }
+.meta-realm-detail-target-label { font-size: 10px; letter-spacing: 1px; color: #6f6b78; margin-bottom: 6px; }
+.meta-realm-tools { display: flex; flex-direction: column; }
+.meta-realm-tools .meta-realm-card { width: 100%; max-width: none; margin-top: 0; }
+.meta-realm-tools .meta-realm-card + .meta-realm-card { margin-top: 10px; }
+
 @keyframes elevaBreathe { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.015); } }
 @keyframes elevaGlowPulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {

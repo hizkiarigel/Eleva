@@ -131,12 +131,20 @@ async function test(name, fn) {
     await page.click("#ptCancel");
   });
 
-  await test("META practice-test tool still shows the manual picker (deliberate choice, unchanged)", async () => {
+  await test("META Inner Realm's LINGUA detail page starts Reading/Listening directly, presetting kind (12 Agustus target-recommendation follow-up)", async () => {
+    // Superseded scenario: META's old generic "Practice Test" tool (which
+    // showed a Reading/Listening kind-picker) was replaced by two direct
+    // rows on LINGUA's realm detail page - each presets its kind and skips
+    // straight to the track step, same as a goal quest with a full schema.
     await openDashboard();
     await page.click('[data-tab="meta"]');
-    await page.waitForSelector('[data-meta-tool="practice-test"]', { timeout: 20000 });
-    await page.click('[data-meta-tool="practice-test"]');
-    await page.waitForSelector('text=Mau latihan apa dulu?', { timeout: 20000 });
+    await page.waitForSelector('.meta-realm-card-tools-link', { timeout: 20000 });
+    await page.click('[data-meta-realm-open="lingua"]');
+    await page.waitForSelector('[data-lingua-track="reading"]', { timeout: 20000 });
+    assert.ok(await page.locator('[data-lingua-track="listening"]').count(), "Listening row must also be present");
+    await page.click('[data-lingua-track="reading"]');
+    await page.waitForSelector('text=Reading Academic atau General Training?', { timeout: 20000 });
+    assert.strictEqual(await page.locator('text=Mau latihan apa dulu?').count(), 0, "kind picker must be skipped - Reading is already preset");
     await page.click("#ptCancel");
   });
 

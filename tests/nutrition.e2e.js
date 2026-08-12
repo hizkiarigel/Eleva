@@ -148,29 +148,34 @@ async function test(name, fn) {
     assert.ok(await page.locator("text=Meals 1/3").count(), "home card must reflect the persisted progress");
   });
 
-  console.log("E2E: META - Inner Realm world map (12 Agustus redesign) - SOMA cluster");
-  await test("META tab shows the world map with SOMA/LINGUA/LABORA realm names and direct Activity/Nutrition cards (no mode picker)", async () => {
+  console.log("E2E: META - Inner Realm world map (12 Agustus) + target-recommendation follow-up");
+  await test("META tab shows the world map with SOMA/LINGUA/LABORA realm names, each with a 'Lihat tools' link reachable with no active target", async () => {
     await page.click('[data-tab="meta"]');
-    await page.waitForSelector('[data-soma-mode="nutrition"]', { timeout: 20000 });
+    await page.waitForSelector('.meta-realm-card-empty', { timeout: 20000 });
     assert.ok(await page.locator("text=SOMA").count(), "SOMA realm name must be on the map");
     assert.ok(await page.locator("text=LINGUA").count(), "LINGUA realm name must be on the map");
     assert.ok(await page.locator("text=LABORA").count(), "LABORA realm name must be on the map");
-    // SOMA's cluster now shows Activity ("Fisik / Lari") and Nutrition as two
-    // separate progress cards, tappable directly - no more "which one do you
-    // mean?" mode picker in between (founder decision, world-map handoff
-    // predates the SOMA Nutrition merge).
-    assert.ok(await page.locator('[data-soma-mode="activity"]:has-text("Fisik / Lari")').count(), "Activity card must read 'Fisik / Lari'");
-    assert.ok(await page.locator('[data-soma-mode="nutrition"]:has-text("Nutrition")').count(), "Nutrition card must read 'Nutrition'");
-    assert.strictEqual(await page.locator('[data-soma-mode]').count(), 2, "exactly 2 direct SOMA cards, no picker step");
+    // World Map shows Target, Realm page shows Tools (founder feedback,
+    // follow-up to the initial redesign) - with no goal in any domain yet,
+    // every realm shows the empty state, but its tools stay reachable via
+    // the "Lihat tools" link (target approval is motivational framing, not
+    // a gate on the underlying functionality).
+    assert.strictEqual(await page.locator(".meta-realm-card-empty").count(), 3, "all 3 realms start with no active target");
+    assert.strictEqual(await page.locator(".meta-realm-card-tools-link").count(), 3, "every realm's tools stay reachable regardless of target state");
   });
 
-  await test("tapping the Nutrition card starts a fresh META session and opens the Log Meal flow directly", async () => {
+  await test("opening SOMA's tool list from the empty state shows Movement/Recovery/Nutrition, and tapping Nutrition starts a fresh META session", async () => {
+    await page.click('[data-meta-realm-open="soma"]');
+    await page.waitForSelector("#metaRealmBack", { timeout: 20000 });
+    assert.ok(await page.locator('[data-soma-mode="activity"]:has-text("Movement")').count(), "Movement row must be present");
+    assert.ok(await page.locator('[data-soma-mode="recovery"]:has-text("Recovery")').count(), "Recovery row must be present");
+    assert.ok(await page.locator('[data-soma-mode="nutrition"]:has-text("Nutrition")').count(), "Nutrition row must be present");
     await page.click('[data-soma-mode="nutrition"]');
     await page.waitForSelector('text=Waktu makan', { timeout: 20000 });
     assert.ok(await page.locator("text=Meals 0/3").count(), "fresh META nutrition quest should start at 0/3");
   });
 
-  await test("re-opening META and tapping Nutrition again resumes the same active quest directly (no picker, no duplicate)", async () => {
+  await test("re-opening META and drilling back into SOMA's tools resumes the same active Nutrition quest directly (no duplicate)", async () => {
     // Close out of the flow (without resolving it - the META quest stays
     // ACTIVE) via #nfDone, same as any other flow screen - tapping a nav
     // tab alone never dismisses an in-progress flow, matching jobMatchFlow/
@@ -178,6 +183,8 @@ async function test(name, fn) {
     await page.click("#nfDone");
     await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
     await page.click('[data-tab="meta"]');
+    await page.waitForSelector('[data-meta-realm-open="soma"]', { timeout: 20000 });
+    await page.click('[data-meta-realm-open="soma"]');
     await page.waitForSelector('[data-soma-mode="nutrition"]', { timeout: 20000 });
     await page.click('[data-soma-mode="nutrition"]');
     await page.waitForSelector('text=Waktu makan', { timeout: 20000 });

@@ -59,6 +59,13 @@ async function init() {
     -- SEPARATE from goal_targets (that column is a "target to reach and
     -- replace"; this one is a level that only ever increments, never resets).
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS practice_test JSONB DEFAULT '{}'::jsonb;
+    -- META Inner Realm target-recommendation flow (12 Agustus): which
+    -- goalIndex is the CONFIRMED active target for each realm (soma/lingua/
+    -- labora), keyed by realm name as a string. A goal having a target/
+    -- practice-test history does NOT imply it's active here - the founder
+    -- explicitly wants a separate approve step (see server/metaTargets.js),
+    -- this column IS that approval record.
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS meta_active_targets JSONB DEFAULT '{}'::jsonb;
   `);
 
   // Per-goal quest model (founder-reported regression: a goal's quest was
@@ -367,6 +374,11 @@ async function getState(userId) {
     // string like goalTargets - {level, history: [{ts,testKind,track,score,total}]}.
     // Empty object until a goal's first Practice Test is submitted.
     practiceTest: row.practice_test || {},
+    // META Inner Realm: {soma: goalIndex, lingua: goalIndex, labora: goalIndex}
+    // - only the realms the user has actually approved a target for are
+    // present as keys. See server/metaTargets.js for how this is composed
+    // into what the world-map card shows.
+    metaActiveTargets: row.meta_active_targets || {},
     // Homepage redesign: current chapter's full narrative paragraph (Kisahmu
     // screen), and "Kondisi Hari Ini" - a single current value, reset to
     // Normal lazily by index.js whenever a new calendar day is first seen
@@ -546,6 +558,31 @@ async function setPracticeTestState(userId, goalIndex, data) {
     `UPDATE character_state SET practice_test = COALESCE(practice_test, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb) WHERE user_id = $1`,
     [userId, String(goalIndex), JSON.stringify(data)]
   );
+}
+
+// META Inner Realm: records the user's explicit approval of goalIndex as
+// realm's active target. Same jsonb_build_object merge idiom as
+// setGoalTarget/setPracticeTestState - never clobbers another realm's entry.
+async function setMetaActiveTarget(userId, realm, goalIndex) {
+  await pool.query(
+    `UPDATE character_state SET meta_active_targets = COALESCE(meta_active_targets, '{}'::jsonb) || jsonb_build_object($2::text, $3::int) WHERE user_id = $1`,
+    [userId, realm, goalIndex]
+  );
+}
+
+// META Inner Realm: appends a new First Trial goal post-onboarding, from the
+// empty-state "no active target yet" CTA on a realm with no matching goal.
+// Same 1-3 cap / 200-char trim already enforced at onboarding (POST
+// /api/profile) - this just appends instead of replacing the whole array.
+async function addGoal(userId, goalText) {
+  const trimmed = String(goalText || "").trim().slice(0, 200);
+  if (!trimmed) return { ok: false, error: "Goal tidak boleh kosong." };
+  const { rows } = await pool.query(`SELECT goals FROM character_state WHERE user_id = $1`, [userId]);
+  const goals = (rows[0]?.goals || []).slice();
+  if (goals.length >= 3) return { ok: false, error: "Sudah ada 3 goal aktif — maksimal 3." };
+  goals.push(trimmed);
+  await pool.query(`UPDATE character_state SET goals = $2::jsonb WHERE user_id = $1`, [userId, JSON.stringify(goals)]);
+  return { ok: true, goals, goalIndex: goals.length - 1 };
 }
 
 // Task 9: the generated test's answer key (passage/script + questions with
@@ -860,5 +897,5 @@ module.exports = {
   updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
   touchStatActivity, applyDecayIfDue, setShortfallReason, listPendingShortfalls,
   updateQuestProgress, createFoodEntry, listFoodEntriesForQuest, listFoodEntriesForDate,
-  searchFoods, getFoodByBarcode, countSessionsSince,
+  searchFoods, getFoodByBarcode, countSessionsSince, setMetaActiveTarget, addGoal,
 };
