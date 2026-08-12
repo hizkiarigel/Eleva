@@ -475,6 +475,20 @@ let jobApplicationFlow = null;
 // /api/meta/start succeeds or the user backs out.
 let metaBodyPicking = false;
 let metaError = "";
+// SOMA Nutrition Part B item 2: true while the Activity/Nutrition mode
+// picker is showing (shown when 0 or 2+ active SOMA quests exist - exactly
+// 1 active quest skips this and resumes it directly, see activeSomaQuest).
+let metaSomaPicking = false;
+// SOMA Nutrition Part B: "Log Meal" flow state - same "separate flow, not
+// reflectOpen" pattern as jobMatchFlow/jobApplicationFlow.
+// {questId, step, mealType, entries, search:{query,results,error},
+//  picked:null|{foodName,servingAmount,servingUnit,calories,protein,
+//  carbohydrates,fat,source}, photo:{step,image,suggested,error}, error}
+// step: "log" (meal-type + search/photo entry) -> "confirm" (review a
+// picked/suggested item, servingAmount editable, before it's saved as
+// evidence).
+let nutritionFlow = null;
+let nfSearchTimer = null; // debounce handle for the Nutrition page's live food search
 // Task 10a (Artifacts library): sheet state, independent of any quest flow -
 // reachable any time via its own icon, not just from job-match-analysis.
 let artifactsOpen = false;
@@ -1892,6 +1906,125 @@ function jobApplicationFlowHTML() {
   return "";
 }
 
+// SOMA Nutrition Part B: "Log Meal" flow / Nutrition page. Doubles as both
+// per the brief's item 6 (a dedicated screen showing today's totals, meal
+// recorded/not-recorded rows, primary-target emphasis) and the entry UI
+// itself - same "dedicated flow screen reached by tapping Mulai" pattern as
+// jobMatchFlowHTML/practiceTestFlowHTML, not a new permanent nav tab (no nav
+// redesign was asked for). primaryMetric's row is visually emphasized
+// (accent color) per item 6 - "Eleva visual language, not Yazio's" means
+// plain bars/mono numbers matching this app's existing aesthetic, not
+// skeuomorphic rings/icons.
+const MEAL_TYPE_LABEL = { sarapan: "Sarapan", makan_siang: "Makan Siang", makan_malam: "Makan Malam", camilan: "Camilan" };
+const NUTRITION_METRIC_LABEL = { calories: "Kalori", protein: "Protein", carbohydrates: "Karbo", fat: "Lemak" };
+const NUTRITION_METRIC_UNIT = { calories: "kkal", protein: "g", carbohydrates: "g", fat: "g" };
+function nutritionProgressLabel(p) {
+  return `Meals ${p.completedContributions}/${p.requiredContributions} · ${NUTRITION_METRIC_LABEL[p.primaryMetric]} ${Math.round(p.currentValue)}/${p.targetValue}${NUTRITION_METRIC_UNIT[p.primaryMetric]}`;
+}
+function nutritionTotalsHTML(entries, primaryMetric) {
+  const totals = entries.reduce((acc, e) => {
+    acc.calories += e.calories; acc.protein += e.protein; acc.carbohydrates += e.carbohydrates; acc.fat += e.fat;
+    return acc;
+  }, { calories: 0, protein: 0, carbohydrates: 0, fat: 0 });
+  return `
+    <div class="struct-grid" style="margin:0 0 16px">
+      ${["calories", "protein", "carbohydrates", "fat"].map((m) => `
+        <div class="field" style="margin-bottom:0${m === primaryMetric ? ";color:var(--accent)" : ""}">
+          <label style="${m === primaryMetric ? "color:var(--accent)" : ""}">${NUTRITION_METRIC_LABEL[m]}${m === primaryMetric ? " ★" : ""}</label>
+          <div class="mono" style="font-size:16px;font-weight:600">${Math.round(totals[m])}${NUTRITION_METRIC_UNIT[m]}</div>
+        </div>`).join("")}
+    </div>`;
+}
+function nutritionFlowHTML() {
+  const f = nutritionFlow;
+  if (!f) return "";
+  const p = f.quest.progressive;
+  const recordedMeals = new Set(f.entries.map((e) => e.mealType));
+
+  if (f.step === "completed") {
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">NUTRITION</div>
+        <h2 class="fr">Milestone hari ini selesai</h2>
+        <p class="fr" style="font-style:italic;font-size:14.5px;line-height:1.6">${esc(f.completedMessage || "")}</p>
+        <button class="btn-primary full" id="nfClose" style="margin-top:14px">Lanjut</button>
+      </div>`;
+  }
+
+  if (f.step === "confirm") {
+    const it = f.pending;
+    const nf = (k) => esc(it[k] ?? "");
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">NUTRITION — ${esc(MEAL_TYPE_LABEL[f.mealType])}</div>
+        <h2 class="fr">Konfirmasi makanan</h2>
+        ${it.source === "photo" ? `<p class="why">Perkiraan dari foto — koreksi dulu kalau kurang tepat sebelum disimpan.</p>` : ""}
+        <div class="field"><label>Nama makanan</label><input type="text" maxlength="200" data-nf="foodName" value="${nf("foodName")}" /></div>
+        <div class="struct-grid">
+          <div class="field"><label>Jumlah porsi</label><input type="number" min="0.1" step="0.1" data-nf="servingAmount" value="${nf("servingAmount")}" /></div>
+          <div class="field"><label>Satuan</label><input type="text" maxlength="40" data-nf="servingUnit" value="${nf("servingUnit")}" /></div>
+        </div>
+        <div class="struct-grid">
+          <div class="field"><label>Kalori (kkal)</label><input type="number" min="0" data-nf="calories" value="${nf("calories")}" /></div>
+          <div class="field"><label>Protein (g)</label><input type="number" min="0" step="0.1" data-nf="protein" value="${nf("protein")}" /></div>
+        </div>
+        <div class="struct-grid">
+          <div class="field"><label>Karbohidrat (g)</label><input type="number" min="0" step="0.1" data-nf="carbohydrates" value="${nf("carbohydrates")}" /></div>
+          <div class="field"><label>Lemak (g)</label><input type="number" min="0" step="0.1" data-nf="fat" value="${nf("fat")}" /></div>
+        </div>
+        ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+        <button class="btn-primary full" id="nfSave" style="margin-top:14px">Simpan</button>
+        <button class="btn-ghost" id="nfBackToLog" style="margin-top:10px">← Batal</button>
+      </div>`;
+  }
+
+  if (f.step === "photo") {
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">NUTRITION — ${esc(MEAL_TYPE_LABEL[f.mealType])}</div>
+        <h2 class="fr">Upload foto makanan</h2>
+        <p class="why">Eleva coba tebak isi & perkiraan gizinya dari foto — tetap bisa kamu koreksi sebelum disimpan (opsional, cara lebih cepat dibanding cari manual).</p>
+        <input type="file" id="nfPhotoFile" accept="image/png,image/jpeg,image/webp" />
+        ${f.photoError ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.photoError)}</p>` : ""}
+        <button class="btn-ghost" id="nfBackToLog" style="margin-top:14px">← Batal</button>
+      </div>`;
+  }
+
+  // step "log" (default): the Nutrition page itself.
+  return `
+    <div class="quest-card fadeUp">
+      <div class="qlabel mono">NUTRITION</div>
+      <h2 class="fr">${esc(f.quest.title)}</h2>
+      ${p ? `<p class="mono" style="font-size:12.5px;color:var(--muted);margin:0 0 14px">${esc(nutritionProgressLabel(p))}</p>` : ""}
+      ${nutritionTotalsHTML(f.entries, p?.primaryMetric)}
+      <div class="field">
+        <label>Waktu makan</label>
+        <div class="status-row">
+          ${Object.entries(MEAL_TYPE_LABEL).map(([k, l]) =>
+            `<button class="status-btn ${f.mealType === k ? "active" : ""}" data-nf-meal="${k}">${l}${recordedMeals.has(k) ? " ✓" : ""}</button>`).join("")}
+        </div>
+      </div>
+      ${f.mealType ? `
+      <div class="field">
+        <label>Cari makanan</label>
+        <input type="text" id="nfSearchInput" value="${esc(f.search.query)}" placeholder="mis. nasi putih, telur rebus" />
+      </div>
+      ${f.search.results.map((r) => `
+        <div class="quest-card" style="margin-bottom:8px;padding:14px" data-nf-pick="${r.id}">
+          <div style="display:flex;justify-content:space-between;gap:10px"><b style="font-size:14px">${esc(r.name)}</b><span class="mono" style="color:var(--muted);white-space:nowrap">${r.calories} kkal</span></div>
+          <div class="mono" style="font-size:11.5px;color:var(--muted)">${r.servingAmount}${esc(r.servingUnit)} · P${r.protein} K${r.carbohydrates} L${r.fat}</div>
+        </div>`).join("")}
+      ${f.search.error ? `<p style="color:var(--rust);font-size:13px">${esc(f.search.error)}</p>` : ""}
+      <button class="btn-ghost" id="nfPhotoStart" style="margin-top:6px">📷 atau upload foto</button>
+      ` : `<p class="why">Pilih waktu makan dulu.</p>`}
+      ${f.entries.length ? `
+      <div class="eyebrow mono" style="margin-top:20px">TERCATAT HARI INI</div>
+      ${f.entries.map((e) => `<div class="mono" style="font-size:12px;color:var(--muted);padding:6px 0;border-bottom:1px solid var(--hair)">${esc(MEAL_TYPE_LABEL[e.mealType])} · ${esc(e.foodName)} · ${Math.round(e.calories)} kkal</div>`).join("")}` : ""}
+      ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+      <button class="btn-primary full" id="nfDone" style="margin-top:18px">Selesai untuk sekarang</button>
+    </div>`;
+}
+
 // Task 10a: Artifacts library sheet - reachable any time via its own icon,
 // independent of any quest flow (spec: "lihat, tambah, ATAU GANTI artifact
 // kapan saja"). artifactsList is metadata-only (no file bytes - see
@@ -2066,6 +2199,14 @@ function questSummaryCard(q, goalLabel, milestone) {
       <span class="quest-context-primary">◆ Primary Quest: ${esc(goalLabel)}</span>
       ${milestone ? `<span class="quest-context-milestone">→ Milestone: ${esc(milestone)}</span>` : ""}
     </div>` : "";
+  // SOMA Nutrition Part B item 7: a nutrition-log quest never has a single
+  // "Selesai" moment the button triggers (it resolves on its own once both
+  // booleans go true, or lazily at day-end) - the button always reads
+  // "Lanjut Catat", tapping it always means "go add another meal", never
+  // "mark done" (brief: "no completion CTA while unmet"), and a live
+  // progress line shows real state from the persisted quest.progressive.
+  const isNutrition = q.quest?.completionType === "nutrition-log" && !q.isSideQuest;
+  const nutritionProgress = isNutrition && q.quest.progressive ? nutritionProgressLabel(q.quest.progressive) : null;
   return `
     <div class="quest-card">
       ${contextHeader}
@@ -2073,8 +2214,9 @@ function questSummaryCard(q, goalLabel, milestone) {
       <div class="qlabel mono">${label}${q.quest.statFocus ? ` · ${esc(statLabel(q.quest.statFocus))}` : ""}</div>
       <h2 class="fr">${esc(q.quest.title)}</h2>
       <p class="desc">${esc(q.quest.description)}</p>
-      ${remaining != null ? `<p class="countdown mono${expired ? " urgent" : ""}" data-quest-countdown="${q.id}" data-created="${esc(q.createdAt)}">${expired ? "⏳ Waktu buat mulai quest ini udah lewat 24 jam." : `⏳ ${formatCountdown(remaining)}`}</p>` : ""}
-      <button class="btn-primary" data-reflect-id="${q.id}" ${expired ? "disabled" : ""}>${expired ? "Waktu habis" : "Mulai"}</button>
+      ${nutritionProgress ? `<p class="mono" style="font-size:12.5px;color:var(--accent);margin:8px 0 0">${esc(nutritionProgress)}</p>` : ""}
+      ${remaining != null && !isNutrition ? `<p class="countdown mono${expired ? " urgent" : ""}" data-quest-countdown="${q.id}" data-created="${esc(q.createdAt)}">${expired ? "⏳ Waktu buat mulai quest ini udah lewat 24 jam." : `⏳ ${formatCountdown(remaining)}`}</p>` : ""}
+      <button class="btn-primary" data-reflect-id="${q.id}" ${expired && !isNutrition ? "disabled" : ""}>${isNutrition ? "Lanjut Catat" : expired ? "Waktu habis" : "Mulai"}</button>
       <button class="reason-toggle" data-reason-toggle="${q.id}">${reasonOpen ? "Sembunyikan alasan" : "Kenapa Eleva kasih quest ini →"}</button>
       ${reasonOpen ? `<p class="why fadeUp">${esc(q.quest.why)}</p>` : ""}
     </div>`;
@@ -2413,12 +2555,29 @@ function settingsScreenHTML() {
 // those unmodified flows. Extensible: a future 4th tool is just one more
 // entry in META_TOOLS, no structural change needed (per the PRD's explicit
 // "JANGAN di-hardcode ke 3 selamanya").
+// SOMA Nutrition Part B item 1: "body" renamed to "soma" - LABEL only (per
+// the brief: "No stat-name change; Body stat stays as-is"). The box now
+// covers both Activity (the existing cardio/gym/recovery flow, completely
+// unmodified underneath) and the new Nutrition flow, routed via the mode
+// picker below (item 2).
 const META_TOOLS = [
-  { tool: "body", icon: "🏃", label: "Fisik / Lari", desc: "Catat latihan cardio, gym, atau pemulihan — bebas, tanpa target." },
+  { tool: "soma", icon: "🥗", label: "SOMA", desc: "Aktivitas fisik & nutrisi — bebas, tanpa target goal." },
   { tool: "practice-test", icon: "📝", label: "Practice Test", desc: "Latihan soal Reading/Listening, di luar rotasi goal harian." },
   { tool: "job-match", icon: "🗎", label: "Job Match", desc: "Cek kecocokan CV-mu ke lowongan mana pun, kapan aja." },
 ];
-function metaScreenHTML() {
+// SOMA Nutrition Part B item 2: an "active" SOMA quest is an open (no
+// reflection yet) META quest in either domain - Activity quests are USUALLY
+// resolved the instant they're submitted (SESSION lifecycle), but one can
+// still sit open between being started and actually filled in; Nutrition
+// quests (PROGRESSIVE lifecycle) routinely stay open all day.
+function activeSomaQuest(allOpenQuests, mode) {
+  return allOpenQuests.find((q) => q.isMeta && !q.reflection && (
+    mode === "activity" ? q.quest?.completionType === "structured-physical" : q.quest?.completionType === "nutrition-log"
+  )) || null;
+}
+function metaScreenHTML(allOpenQuests) {
+  const activeActivity = activeSomaQuest(allOpenQuests, "activity");
+  const activeNutrition = activeSomaQuest(allOpenQuests, "nutrition");
   return `
     <div class="eyebrow mono">META</div>
     <p style="color:var(--muted);font-size:13px;margin:0 0 18px">Latihan mandiri — nggak menggerakkan Milestone goal manapun, tapi tetap dihitung sebagai bukti pertumbuhan.</p>
@@ -2431,6 +2590,17 @@ function metaScreenHTML() {
           <span class="meta-tool-desc">${esc(t.desc)}</span>
         </button>`).join("")}
     </div>
+    ${metaSomaPicking ? `
+    <div class="quest-card fadeUp" style="margin-top:16px">
+      <div class="field">
+        <label>Mau catat apa?</label>
+        <div class="status-row">
+          <button class="status-btn" data-soma-mode="activity">Activity${activeActivity ? " · sedang aktif" : ""}</button>
+          <button class="status-btn" data-soma-mode="nutrition">Nutrition${activeNutrition ? " · sedang aktif" : ""}</button>
+        </div>
+      </div>
+      <button class="btn-ghost" id="metaSomaCancel">← Batal</button>
+    </div>` : ""}
     ${metaBodyPicking ? `
     <div class="quest-card fadeUp" style="margin-top:16px">
       <div class="field">
@@ -2442,6 +2612,60 @@ function metaScreenHTML() {
       </div>
       <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
     </div>` : ""}`;
+}
+
+// Extracted from the [data-reflect-id] handler (Task 7c/7d cascade) so the
+// SOMA "resume an active Activity quest directly" path (item 2) can reuse
+// the exact same evidenceSchema/structuredKind auto-detection instead of
+// duplicating it - the underlying Activity flow is completely unmodified.
+function beginStructuredOrReflectiveFlow(id, quest) {
+  reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
+  structForm = {}; reflectError = ""; unableQuestId = null;
+  recordMode = quest?.completionType === "structured-physical" || quest?.statFocus === "body";
+  const schema = quest?.evidenceSchema;
+  if (schema?.metricType === "distance") {
+    structKind = "cardio";
+    structKindAuto = true;
+    if (schema.activityType) structForm.jenisAktivitas = schema.activityType;
+  } else if (schema?.metricType === "reps") {
+    structKind = schema.hasWeight ? "gym-alat" : "gym-badan";
+    structKindAuto = true;
+  } else if (schema?.metricType === "recovery") {
+    structKind = "recovery";
+    structKindAuto = true;
+  } else if (quest?.structuredKind === "cardio" || quest?.structuredKind === "gym" || quest?.structuredKind === "recovery") {
+    structKind = quest.structuredKind === "gym" ? "gym-alat" : quest.structuredKind;
+    structKindAuto = true;
+  } else if (quest?.completionType === "structured-physical") {
+    // Structured-physical but no usable tag at all (pre-Task-7b quest,
+    // vanishingly rare by now) - default silently rather than asking.
+    structKind = "cardio";
+    structKindAuto = true;
+  } else {
+    structKind = null;
+    structKindAuto = false;
+  }
+}
+
+// SOMA Nutrition Part B: opens the Log Meal / Nutrition flow for a given
+// nutrition-log quest (fresh or resumed) - fetches today's entries for it
+// so a resumed session shows real prior progress, not an empty slate.
+// `day` is the DB-row wrapper shape ({id, quest: {...title/progressive/etc}})
+// every call site already has on hand - allOpenQuests entries and
+// /api/meta/start's response both look like this, so this function is the
+// one place that unpacks it, rather than each caller re-flattening it
+// slightly differently (a real bug this fixed: two call sites used to pass
+// an already-flattened shape and two passed the wrapper, so nutritionFlow.
+// quest.progressive was undefined half the time).
+async function openNutritionFlow(day) {
+  nutritionFlow = {
+    questId: day.id, quest: day.quest, step: "log", mealType: null, entries: [],
+    search: { query: "", results: [], error: "" }, pending: null, photoError: "", error: "", completedMessage: "",
+  };
+  try {
+    const { entries } = await api(`/api/nutrition/entries?questId=${day.id}`);
+    nutritionFlow.entries = entries;
+  } catch (e) { /* non-critical - resume with an empty list rather than block the flow */ }
 }
 
 function renderDashboard() {
@@ -2627,6 +2851,7 @@ function renderDashboard() {
     : practiceTestFlow ? practiceTestFlowHTML()
     : jobMatchFlow ? jobMatchFlowHTML()
     : jobApplicationFlow ? jobApplicationFlowHTML()
+    : nutritionFlow ? nutritionFlowHTML()
     : reflectOpen ? questSummaryCard(targetDay, goalLabel(targetDay?.goalIndex), milestoneLabel(targetDay?.goalIndex))
     : openQuests.length > 1 ? `
     <div class="quest-carousel">
@@ -2642,8 +2867,23 @@ function renderDashboard() {
   // function) since it closes over a dozen already-computed locals above
   // (questSectionHTML, reflectFormHTML, goals, openQuests, etc.) that aren't
   // worth threading through a separate function signature.
+  // SOMA Nutrition Part B item 9: nutrition-log quests resolve LAZILY (see
+  // resolveNutritionQuest, server/index.js) - there's no synchronous submit
+  // moment for the shortfall picker Task 7d item 6 built for structured-
+  // physical, so GET /api/state surfaces any still-unpicked ones and this
+  // banner shows them here instead. Same fixed-option/no-word-count/no-
+  // reflection-as-proof shape, one small card per pending quest.
+  const nutritionShortfallHTML = (s.pendingNutritionShortfalls || []).map((p) => `
+    <div class="quest-card" style="margin-bottom:10px">
+      <div class="kondisi-label mono">KENAPA TARGET NUTRISI "${esc(p.title)}" BELUM TERCAPAI?</div>
+      <div class="kondisi-chips">
+        ${p.reasons.map((r) => `<button class="kondisi-chip" data-nutrition-shortfall-quest="${p.id}" data-nutrition-shortfall-reason="${esc(r)}">${esc(r)}</button>`).join("")}
+      </div>
+    </div>`).join("");
+
   const homeBodyHTML = `
     ${s.aiActive ? "" : `<div class="banner-warn">Mode tanpa API key — quest masih generik. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.</div>`}
+    ${nutritionShortfallHTML}
     <div class="chapter-header compact">
       <div class="bab mono">BAB ${s.chapterNumber} · ${esc(s.chapterTitle).toUpperCase()}</div>
       <div class="rule"></div>
@@ -2668,7 +2908,7 @@ function renderDashboard() {
   const screenBodyHTML = activeScreen === "kisahmu" ? kisahmuScreenHTML(s)
     : activeScreen === "character" ? characterScreenHTML(s)
     : activeScreen === "settings" ? settingsScreenHTML()
-    : activeScreen === "meta" ? metaScreenHTML()
+    : activeScreen === "meta" ? metaScreenHTML(allOpenQuests)
     : homeBodyHTML;
 
   // Help "?" and Artifacts icons now sit INLINE in the header's icon row
@@ -2770,42 +3010,15 @@ function renderDashboard() {
       renderDashboard();
       return;
     }
-    reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
-    structForm = {}; reflectError = ""; unableQuestId = null;
-    recordMode = quest?.completionType === "structured-physical" || quest?.statFocus === "body";
-    // Task 7c/7d (evidenceSchema): the AI already knows what kind of
-    // evidence this quest wants at generation time - skip the redundant
-    // "Aktivitasnya jenis apa?" question entirely, pre-fill the activity
-    // type for cardio. Task 7d DoD retires the manual picker fallback
-    // ENTIRELY (server/claude.js's normalizeEvidenceSchema now guarantees
-    // every structured-physical quest carries a non-null evidenceSchema) -
-    // the only remaining gap is a quest stored before Task 7c existed at
-    // all, where the evidenceSchema key is missing outright. For that sole
-    // legacy case, fall back to the older structuredKind tag (present since
-    // Task 7b) rather than ever asking the user to pick manually.
-    const schema = quest?.evidenceSchema;
-    if (schema?.metricType === "distance") {
-      structKind = "cardio";
-      structKindAuto = true;
-      if (schema.activityType) structForm.jenisAktivitas = schema.activityType;
-    } else if (schema?.metricType === "reps") {
-      structKind = schema.hasWeight ? "gym-alat" : "gym-badan";
-      structKindAuto = true;
-    } else if (schema?.metricType === "recovery") {
-      structKind = "recovery";
-      structKindAuto = true;
-    } else if (quest?.structuredKind === "cardio" || quest?.structuredKind === "gym" || quest?.structuredKind === "recovery") {
-      structKind = quest.structuredKind === "gym" ? "gym-alat" : quest.structuredKind;
-      structKindAuto = true;
-    } else if (quest?.completionType === "structured-physical") {
-      // Structured-physical but no usable tag at all (pre-Task-7b quest,
-      // vanishingly rare by now) - default silently rather than asking.
-      structKind = "cardio";
-      structKindAuto = true;
-    } else {
-      structKind = null;
-      structKindAuto = false;
+    // SOMA Nutrition Part B: a nutrition-log quest opens the Log Meal flow
+    // directly, same "own flow, not reflectOpen" pattern as every other
+    // non-reflective completionType above.
+    if (quest?.completionType === "nutrition-log") {
+      await openNutritionFlow({ id, quest });
+      renderDashboard();
+      return;
     }
+    beginStructuredOrReflectiveFlow(id, quest);
     renderDashboard();
   }));
   // Task 12 (META): tapping a tool card starts a standalone session via
@@ -2818,8 +3031,24 @@ function renderDashboard() {
   document.querySelectorAll("[data-meta-tool]").forEach((b) => b.addEventListener("click", async () => {
     const tool = b.dataset.metaTool;
     metaError = "";
-    if (tool === "body") {
-      metaBodyPicking = true;
+    // SOMA Nutrition Part B item 2: routing per the brief's exact rule - 0
+    // active SOMA quests -> mode picker; exactly 1 -> skip picker, resume it
+    // directly; 2+ -> mode picker, badged (activeSomaQuest/metaScreenHTML).
+    if (tool === "soma") {
+      const activeActivity = activeSomaQuest(allOpenQuests, "activity");
+      const activeNutrition = activeSomaQuest(allOpenQuests, "nutrition");
+      const activeCount = (activeActivity ? 1 : 0) + (activeNutrition ? 1 : 0);
+      if (activeCount === 1) {
+        if (activeActivity) {
+          beginStructuredOrReflectiveFlow(activeActivity.id, activeActivity.quest);
+        } else {
+          await openNutritionFlow(activeNutrition);
+        }
+        activeScreen = "home";
+        renderDashboard();
+        return;
+      }
+      metaSomaPicking = true;
       renderDashboard();
       return;
     }
@@ -2842,6 +3071,38 @@ function renderDashboard() {
     }
     renderDashboard();
   }));
+  // SOMA mode picker (item 2): "Activity" resumes the existing quest if one
+  // is active, else falls through to the SAME cardio/gym/recovery kind
+  // picker Activity always used; "Nutrition" resumes the existing quest if
+  // active, else starts a brand-new PROGRESSIVE quest directly (no sub-kind
+  // to pick, unlike Activity).
+  document.querySelectorAll("[data-soma-mode]").forEach((b) => b.addEventListener("click", async () => {
+    const mode = b.dataset.somaMode;
+    metaSomaPicking = false;
+    const active = activeSomaQuest(allOpenQuests, mode);
+    if (active) {
+      if (mode === "activity") beginStructuredOrReflectiveFlow(active.id, active.quest);
+      else await openNutritionFlow(active);
+      activeScreen = "home";
+      renderDashboard();
+      return;
+    }
+    if (mode === "activity") {
+      metaBodyPicking = true;
+      renderDashboard();
+      return;
+    }
+    root.innerHTML = spinnerHTML("Menyiapkan sesi...");
+    try {
+      const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "nutrition" } });
+      await openNutritionFlow(quest);
+      activeScreen = "home";
+    } catch (e) {
+      metaError = e.message;
+    }
+    renderDashboard();
+  }));
+  document.getElementById("metaSomaCancel")?.addEventListener("click", () => { metaSomaPicking = false; renderDashboard(); });
   document.querySelectorAll("[data-meta-body-kind]").forEach((b) => b.addEventListener("click", async () => {
     const kind = b.dataset.metaBodyKind;
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
@@ -3048,6 +3309,117 @@ function renderDashboard() {
     renderDashboard();
   });
   document.getElementById("jaCancel")?.addEventListener("click", () => { jobApplicationFlow = null; renderDashboard(); });
+  // SOMA Nutrition Part B: Log Meal / Nutrition page flow.
+  document.querySelectorAll("[data-nf-meal]").forEach((b) => b.addEventListener("click", () => {
+    nutritionFlow.mealType = b.dataset.nfMeal;
+    nutritionFlow.search = { query: "", results: [], error: "" };
+    renderDashboard();
+  }));
+  document.getElementById("nfSearchInput")?.addEventListener("input", (e) => {
+    nutritionFlow.search.query = e.target.value;
+    clearTimeout(nfSearchTimer);
+    const query = e.target.value.trim();
+    if (!query) { nutritionFlow.search.results = []; return; }
+    // Debounced live search - re-renders only once results actually land,
+    // never on every keystroke (same reason [data-tf]/[data-jaf] inputs
+    // don't re-render: would blow away focus/cursor position mid-type).
+    nfSearchTimer = setTimeout(async () => {
+      try {
+        const { foods } = await api(`/api/foods/search?q=${encodeURIComponent(query)}`);
+        if (nutritionFlow && nutritionFlow.search.query === query) {
+          nutritionFlow.search.results = foods;
+          nutritionFlow.search.error = foods.length ? "" : "Tidak ditemukan — coba kata lain atau upload foto.";
+          renderDashboard();
+        }
+      } catch (e) { /* leave prior results showing rather than flash an error mid-type */ }
+    }, 300);
+  });
+  document.querySelectorAll("[data-nf-pick]").forEach((b) => b.addEventListener("click", () => {
+    const food = nutritionFlow.search.results.find((r) => String(r.id) === b.dataset.nfPick);
+    if (!food) return;
+    nutritionFlow.pending = {
+      foodName: food.name, servingAmount: food.servingAmount, servingUnit: food.servingUnit,
+      calories: food.calories, protein: food.protein, carbohydrates: food.carbohydrates, fat: food.fat,
+      source: "search",
+    };
+    nutritionFlow.step = "confirm";
+    nutritionFlow.error = "";
+    renderDashboard();
+  }));
+  document.getElementById("nfPhotoStart")?.addEventListener("click", () => {
+    nutritionFlow.step = "photo";
+    nutritionFlow.photoError = "";
+    renderDashboard();
+  });
+  document.getElementById("nfPhotoFile")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    root.innerHTML = spinnerHTML("Menganalisis foto...");
+    try {
+      const { mimeType, dataBase64 } = await fileToBase64(file);
+      const { suggestion } = await api("/api/nutrition/analyze-photo", { method: "POST", body: { image: { mimeType, dataBase64 } } });
+      nutritionFlow.pending = { ...suggestion, source: "photo" };
+      nutritionFlow.step = "confirm";
+      nutritionFlow.error = "";
+    } catch (e2) {
+      nutritionFlow.step = "photo";
+      nutritionFlow.photoError = e2.message;
+    }
+    renderDashboard();
+  });
+  document.querySelectorAll("[data-nf]").forEach((el) => el.addEventListener("input", (e) => {
+    const key = el.dataset.nf;
+    nutritionFlow.pending[key] = key === "foodName" || key === "servingUnit" ? e.target.value : Number(e.target.value);
+  }));
+  document.getElementById("nfBackToLog")?.addEventListener("click", () => {
+    nutritionFlow.step = "log";
+    nutritionFlow.pending = null;
+    nutritionFlow.error = "";
+    nutritionFlow.photoError = "";
+    renderDashboard();
+  });
+  document.getElementById("nfSave")?.addEventListener("click", async () => {
+    const it = nutritionFlow.pending;
+    if (!it.foodName?.trim() || !it.servingAmount || !it.servingUnit?.trim()) {
+      nutritionFlow.error = "Lengkapi nama makanan, jumlah, dan satuan porsi dulu.";
+      renderDashboard();
+      return;
+    }
+    root.innerHTML = spinnerHTML("Menyimpan...");
+    try {
+      const resp = await api("/api/nutrition/log", {
+        method: "POST",
+        body: { questId: nutritionFlow.questId, mealType: nutritionFlow.mealType, ...it },
+      });
+      nutritionFlow.entries = [...nutritionFlow.entries, resp.entry];
+      if (resp.progressive) nutritionFlow.quest.progressive = resp.progressive;
+      if (resp.resolved) {
+        nutritionFlow.step = "completed";
+        nutritionFlow.completedMessage = resp.resolved.mentorReply || "";
+      } else {
+        nutritionFlow.step = "log";
+        nutritionFlow.pending = null;
+        nutritionFlow.mealType = null;
+        nutritionFlow.search = { query: "", results: [], error: "" };
+      }
+      nutritionFlow.error = "";
+    } catch (e) {
+      nutritionFlow.error = e.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("nfDone")?.addEventListener("click", async () => {
+    nutritionFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state");
+    renderDashboard();
+  });
+  document.getElementById("nfClose")?.addEventListener("click", async () => {
+    nutritionFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state");
+    renderDashboard();
+  });
   // Task 10a: Artifacts sheet.
   document.getElementById("openArtifacts")?.addEventListener("click", async () => {
     artifactsOpen = true; artifactsError = "";
@@ -3112,6 +3484,20 @@ function renderDashboard() {
     renderDashboard();
     try {
       await api("/api/quest/shortfall-reason", { method: "POST", body: { questId: completedResult.questId, reason } });
+    } catch (e) { /* context signal, not critical - silently keep the optimistic UI state */ }
+  }));
+  // SOMA Nutrition Part B item 9: same single-tap-commits pattern as the
+  // structured-physical shortfall chips above, but a LIST of pending quests
+  // (nutrition resolves lazily, several could pile up) - optimistically
+  // drops the tapped quest's card from the banner, doesn't wait for the
+  // POST round trip either.
+  document.querySelectorAll("[data-nutrition-shortfall-reason]").forEach((b) => b.addEventListener("click", async () => {
+    const questId = Number(b.dataset.nutritionShortfallQuest);
+    const reason = b.dataset.nutritionShortfallReason;
+    appState.pendingNutritionShortfalls = (appState.pendingNutritionShortfalls || []).filter((p) => p.id !== questId);
+    renderDashboard();
+    try {
+      await api("/api/quest/shortfall-reason", { method: "POST", body: { questId, reason } });
     } catch (e) { /* context signal, not critical - silently keep the optimistic UI state */ }
   }));
   // Fokus 2.2/2.3: target picker - same pathway-carousel click pattern as
