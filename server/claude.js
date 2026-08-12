@@ -62,6 +62,26 @@ async function callClaude(userContent) {
   return JSON.parse(clean);
 }
 
+// SOMA Nutrition Implementation Brief Part A (12 Agustus): keyword backstop
+// for the founder-reported regression where a recovery/rest/nutrition-
+// themed quest ("Audit Fondasi Pemulihan" was the reported instance)
+// classified as "reflective" instead of structured-physical/recovery, and
+// therefore rendered the free-text 12-word growth-gate form instead of the
+// structured sleep/water/protein/pain fields (server/structured.js,
+// public/app.js recoveryFieldsHTML). The Task 7d prompt instruction (below,
+// generateQuest) already tells the model to classify these correctly - this
+// keyword match is a DEFENSE-IN-DEPTH backstop for when the model doesn't
+// follow it, not a replacement for the instruction. Deliberately simple
+// substring matching (not stemming/NLP) - false positives here just mean an
+// extra quest gets the richer structured form instead of free text, which is
+// never a worse outcome for a Body/recovery-themed Trial (Task 7d's own
+// principle: "no Trial defaults to a free textarea").
+const RECOVERY_KEYWORDS = ["tidur", "hidrasi", "protein", "pemulihan", "cedera", "kram", "makan", "nutrisi"];
+function looksRecoveryThemed(quest) {
+  const text = `${quest.title || ""} ${quest.description || ""}`.toLowerCase();
+  return RECOVERY_KEYWORDS.some((kw) => text.includes(kw));
+}
+
 // Task 7b: the model self-reports which completion flow a quest uses, but
 // the pair is normalized here in code (defense in depth, same principle as
 // every other AI-shaped field): structured-physical REQUIRES a valid
@@ -96,6 +116,15 @@ function normalizeCompletionType(quest) {
   // its own kind. Same "no structuredKind" rule as practice-test/job-match.
   if (quest.completionType === "job-application-submit") {
     quest.structuredKind = null;
+    return quest;
+  }
+  // SOMA Nutrition Implementation Brief Part A: reached here means the model
+  // didn't classify this as one of the known valid combos above - before
+  // downgrading to reflective, check whether the quest itself reads as
+  // recovery-themed and force the correct classification if so.
+  if (looksRecoveryThemed(quest)) {
+    quest.completionType = "structured-physical";
+    quest.structuredKind = "recovery";
     return quest;
   }
   quest.completionType = "reflective";
@@ -877,5 +906,5 @@ module.exports = {
   generateTargetOptions, generatePracticeTest, generateJobMatchAnalysis,
   PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
   normalizeEvidenceSchema, generateSideQuest,
-  normalizeCompletionType, fallbackReflection,
+  normalizeCompletionType, fallbackReflection, looksRecoveryThemed,
 };
