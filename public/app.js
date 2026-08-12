@@ -475,10 +475,19 @@ let jobApplicationFlow = null;
 // /api/meta/start succeeds or the user backs out.
 let metaBodyPicking = false;
 let metaError = "";
-// SOMA Nutrition Part B item 2: true while the Activity/Nutrition mode
-// picker is showing (shown when 0 or 2+ active SOMA quests exist - exactly
-// 1 active quest skips this and resumes it directly, see activeSomaQuest).
-let metaSomaPicking = false;
+// Meta Inner Realm redesign (12 Agustus): SOMA's realm cluster now shows
+// Activity and Nutrition as two separate progress cards (founder decision -
+// the world-map handoff's own prototype only knew about Fisik/Lari, predates
+// the SOMA Nutrition merge) so each routes straight to its
+// activeSomaQuest/data-soma-mode resume-or-start logic - no more "which one
+// do you mean?" mode picker in between (metaSomaPicking retired with it).
+// Hint-card dismissal persistence: this app has no localStorage precedent
+// anywhere else (help sheets are pure in-memory, reset on reload) - the
+// handoff explicitly allows "localStorage or backend flag, whichever this
+// app already uses" and there is no existing one, so localStorage is the
+// simplest option that needs no schema change.
+let metaHintDismissed = false;
+try { metaHintDismissed = localStorage.getItem("elevaMetaHintDismissed") === "1"; } catch (e) { /* private mode etc - just stays visible every load */ }
 // SOMA Nutrition Part B: "Log Meal" flow state - same "separate flow, not
 // reflectOpen" pattern as jobMatchFlow/jobApplicationFlow.
 // {questId, step, mealType, entries, search:{query,results,error},
@@ -2547,24 +2556,6 @@ function settingsScreenHTML() {
     </div>`;
 }
 
-// Task 12 (META tab): grid of 3 on-demand tools, reusing the exact same
-// completion flows a Today's Trial quest of that completionType already
-// uses (structured-physical form, Practice Test, Job Match Analysis) - see
-// the data-meta-tool/data-meta-body-kind handlers in renderDashboard for how
-// a tap here starts a session via POST /api/meta/start and hands off into
-// those unmodified flows. Extensible: a future 4th tool is just one more
-// entry in META_TOOLS, no structural change needed (per the PRD's explicit
-// "JANGAN di-hardcode ke 3 selamanya").
-// SOMA Nutrition Part B item 1: "body" renamed to "soma" - LABEL only (per
-// the brief: "No stat-name change; Body stat stays as-is"). The box now
-// covers both Activity (the existing cardio/gym/recovery flow, completely
-// unmodified underneath) and the new Nutrition flow, routed via the mode
-// picker below (item 2).
-const META_TOOLS = [
-  { tool: "soma", icon: "🥗", label: "SOMA", desc: "Aktivitas fisik & nutrisi — bebas, tanpa target goal." },
-  { tool: "practice-test", icon: "📝", label: "Practice Test", desc: "Latihan soal Reading/Listening, di luar rotasi goal harian." },
-  { tool: "job-match", icon: "🗎", label: "Job Match", desc: "Cek kecocokan CV-mu ke lowongan mana pun, kapan aja." },
-];
 // SOMA Nutrition Part B item 2: an "active" SOMA quest is an open (no
 // reflection yet) META quest in either domain - Activity quests are USUALLY
 // resolved the instant they're submitted (SESSION lifecycle), but one can
@@ -2575,43 +2566,137 @@ function activeSomaQuest(allOpenQuests, mode) {
     mode === "activity" ? q.quest?.completionType === "structured-physical" : q.quest?.completionType === "nutrition-log"
   )) || null;
 }
-function metaScreenHTML(allOpenQuests) {
-  const activeActivity = activeSomaQuest(allOpenQuests, "activity");
-  const activeNutrition = activeSomaQuest(allOpenQuests, "nutrition");
+
+// Meta Inner Realm redesign (design_handoff_meta_inner_realm, 12 Agustus):
+// replaces the old flat 3-card META grid with a scrollable RPG world map -
+// exact colors/spacing/copy/icon paths copied verbatim from the handoff's
+// README.md + prototype (Eleva Meta Inner Realm.dc.html), wired to real
+// session counts (server GET /api/state metaSessionCounts) and the user's
+// real pathway instead of the prototype's demo switcher/fake toast.
+// Pathway → label/line/glow, copied verbatim from the prototype's PATHWAYS
+// table (final palette per the README's "final, per latest request" note).
+const PATHWAY_META = {
+  Architect: { label: "THE ARCHITECT", line: "Setiap langkah tersusun. Yang kau bangun, tetap berdiri.", glow: "#3b6fd6" },
+  Warden: { label: "THE WARDEN", line: "Konsistensimu adalah fondasi. Eleva menjaga bersamamu.", glow: "#b8253f" },
+  Weaver: { label: "THE WEAVER", line: "Setiap koneksi kau rajut. Dunia ini tumbuh lewat kamu.", glow: "#2f9e5c" },
+  Pilgrim: { label: "THE PILGRIM", line: "Perjalananmu adalah bukti. Eleva berjalan bersamamu.", glow: "#9b6fd1" },
+  Specialist: { label: "THE SPECIALIST", line: "Kedalaman adalah jalanmu. Satu bidang, dikuasai penuh.", glow: "#d4a72c" },
+};
+// Custom SVG icon paths, copied verbatim from the prototype (no emoji/icon
+// fonts per the handoff's DO NOT list). SOMA's sprout is reused for BOTH the
+// Activity and Nutrition progress cards below - the handoff only specced one
+// icon per realm (it predates the SOMA Nutrition merge), and the sigil above
+// already carries the "this is SOMA" identity, so the two cards distinguish
+// themselves by title/copy rather than a second invented icon.
+function realmIconSVG(key, size, color) {
+  if (key === "lingua") return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5" style="flex:none"><path d="M12 5.5c-1.8-1.4-4.6-2-7.5-2-.3 0-.5.2-.5.5v12.6c0 .3.2.5.5.5 2.6 0 5.3.5 7.2 1.9.2.1.4.1.6 0 1.9-1.4 4.6-1.9 7.2-1.9.3 0 .5-.2.5-.5V4c0-.3-.2-.5-.5-.5-2.9 0-5.7.6-7.5 2z"></path><path d="M12 5.5v13" stroke-width="1.3"></path><path d="M6.5 6.7c1.6.2 3.2.7 4 1.3M6.5 10c1.6.2 3.2.6 4 1.1M17.5 6.7c-1.6.2-3.2.7-4 1.3M17.5 10c-1.6.2-3.2.6-4 1.1" stroke-width="1.1" stroke-linecap="round"></path></svg>`;
+  if (key === "labora") return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5" style="flex:none"><rect x="3" y="7.5" width="18" height="12.5" rx="2"></rect><path d="M8 7.5V6a2.5 2.5 0 0 1 2.5-2.5h3A2.5 2.5 0 0 1 16 6v1.5"></path><path d="M3 12.5h18" stroke-width="1.3"></path><rect x="10.3" y="11.2" width="3.4" height="2.6" rx="0.5" fill="#0d0c12" stroke-width="1.2"></rect></svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5" style="flex:none"><path d="M12 21c0-5.5 0-9 0-11"></path><path d="M12 12c0-4 2.5-6.5 7-7 .3 4.3-2 7-7 7z"></path><path d="M12 15c0-3.2-2-5.2-5.5-5.6-.3 3.4 1.6 5.6 5.5 5.6z"></path></svg>`;
+}
+function realmProgressCardHTML(accent, icon, iconSize, title, sessionsLabel, pct, attrs) {
   return `
-    <div class="eyebrow mono">META</div>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 18px">Latihan mandiri — nggak menggerakkan Milestone goal manapun, tapi tetap dihitung sebagai bukti pertumbuhan.</p>
-    ${metaError ? `<p style="color:var(--rust);font-size:13px;margin:0 0 14px">${esc(metaError)}</p>` : ""}
-    <div class="meta-grid">
-      ${META_TOOLS.map((t) => `
-        <button class="meta-tool-card" data-meta-tool="${t.tool}">
-          <span class="meta-tool-icon">${t.icon}</span>
-          <span class="meta-tool-label">${esc(t.label)}</span>
-          <span class="meta-tool-desc">${esc(t.desc)}</span>
-        </button>`).join("")}
-    </div>
-    ${metaSomaPicking ? `
-    <div class="quest-card fadeUp" style="margin-top:16px">
-      <div class="field">
-        <label>Mau catat apa?</label>
-        <div class="status-row">
-          <button class="status-btn" data-soma-mode="activity">Activity${activeActivity ? " · sedang aktif" : ""}</button>
-          <button class="status-btn" data-soma-mode="nutrition">Nutrition${activeNutrition ? " · sedang aktif" : ""}</button>
+    <button class="meta-realm-card" style="border:1px solid ${accent}66" ${attrs}>
+      ${realmIconSVG(icon, iconSize, accent)}
+      <div class="meta-realm-card-content">
+        <div class="meta-realm-card-title">${esc(title)}</div>
+        <div class="meta-realm-card-sessions">${esc(sessionsLabel)}</div>
+        <div class="meta-realm-card-track"><div class="meta-realm-card-fill" style="width:${pct}%;background:${accent}"></div></div>
+      </div>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="2" style="flex:none"><path d="M9 18l6-6-6-6"></path></svg>
+    </button>`;
+}
+function realmClusterHTML({ left, top, accent, icon, name, statLabel, desc, cardsHTML }) {
+  return `
+    <div class="meta-realm-cluster" style="left:${left};top:${top}">
+      <div class="meta-realm-vignette"></div>
+      <div class="meta-realm-cluster-body">
+        <div class="meta-realm-sigil" style="border:1px solid ${accent}88;box-shadow:0 0 14px ${accent}33">${realmIconSVG(icon, 24, accent)}</div>
+        <div class="meta-realm-name" style="color:${accent}">${esc(name)}</div>
+        <div class="meta-realm-stat">${esc(statLabel)}</div>
+        <div class="meta-realm-desc">${esc(desc)}</div>
+        ${cardsHTML}
+      </div>
+    </div>`;
+}
+// Progress bar fill = sessions/7 clamped, copied as-is from the prototype's
+// placeholder formula (the handoff explicitly allows "adjust the denominator
+// if there's a better real target, but keep it simple, no fake milestone
+// data" - a real target would mean inventing a monthly-session number the
+// founder never specified, so this keeps the prototype's literal math).
+function metaSessionPct(n) {
+  return Math.max(0, Math.min(100, Math.round((n / 7) * 100)));
+}
+function metaScreenHTML(s, allOpenQuests) {
+  const counts = s.metaSessionCounts || { lingua: 0, somaActivity: 0, somaNutrition: 0, labora: 0 };
+  const pw = PATHWAY_META[s.pathway] || PATHWAY_META.Pilgrim;
+  const linguaCard = realmProgressCardHTML("#6EA8FF", "lingua", 24, "Practice Test", `${counts.lingua} sesi bulan ini`, metaSessionPct(counts.lingua), `data-meta-tool="practice-test"`);
+  const laboraCard = realmProgressCardHTML("#FFC46E", "labora", 22, "Job Match", `${counts.labora} sesi bulan ini`, metaSessionPct(counts.labora), `data-meta-tool="job-match"`);
+  const somaActivityCard = realmProgressCardHTML("#63E38B", "soma", 24, "Fisik / Lari", `${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="activity"`);
+  const somaNutritionCard = realmProgressCardHTML("#63E38B", "soma", 24, "Nutrition", `${counts.somaNutrition} sesi minggu ini`, metaSessionPct(counts.somaNutrition), `data-soma-mode="nutrition"`);
+  const bigVignette = `background:radial-gradient(ellipse at center, rgba(3,5,8,.72) 0%, rgba(3,5,8,.44) 40%, rgba(3,5,8,.16) 70%, transparent 100%);width:130%;height:135%`;
+  return `
+    <div class="meta-realm-wrap">
+      <div class="meta-realm-map">
+        <img src="/assets/meta-world-map.png" alt="Peta dunia Eleva" />
+        <div class="meta-realm-map-shade"></div>
+        <div class="meta-realm-header">
+          <div class="meta-realm-title">META</div>
+          <div class="meta-realm-subtitle-row">
+            <span class="meta-realm-rule"></span>
+            <span class="meta-realm-subtitle">The Inner Realm</span>
+            <span class="meta-realm-rule"></span>
+          </div>
+        </div>
+        <p class="meta-realm-intro">Latihan mandiri di luar Quest. Semua bukti di sini membentuk dirimu, dan memengaruhi langkah Eleva.</p>
+
+        ${realmClusterHTML({ left: "50%", top: "14.5%", accent: "#6EA8FF", icon: "lingua", name: "LINGUA", statLabel: "The Growth", desc: "Asah kemampuanmu. Uji, pahami, dan tingkatkan.", cardsHTML: linguaCard })}
+        ${realmClusterHTML({ left: "22%", top: "39%", accent: "#63E38B", icon: "soma", name: "SOMA", statLabel: "The Body", desc: "Bangun, jaga, dan kuatkan tubuhmu setiap hari.", cardsHTML: somaActivityCard + somaNutritionCard })}
+        ${realmClusterHTML({ left: "79%", top: "40%", accent: "#FFC46E", icon: "labora", name: "LABORA", statLabel: "The Livelihood", desc: "Uji dirimu terhadap dunia. Bangun masa depanmu.", cardsHTML: laboraCard })}
+
+        <div class="meta-realm-avatar-ring">
+          <div class="meta-realm-avatar-glow" style="background:radial-gradient(circle, ${pw.glow}40, transparent 70%)"></div>
+          <div class="meta-realm-avatar-inner" style="border:1px solid ${pw.glow}70"></div>
+        </div>
+        <div class="meta-realm-avatar-label-wrap">
+          <div class="meta-realm-vignette" style="${bigVignette}"></div>
+          <div style="position:relative;z-index:1">
+            <div class="meta-realm-avatar-label" style="color:${pw.glow}">${esc(pw.label)}</div>
+            <div class="meta-realm-avatar-line">${esc(pw.line)}</div>
+          </div>
+        </div>
+
+        <div class="meta-realm-locked">
+          <div class="meta-realm-vignette" style="${bigVignette}"></div>
+          <div style="position:relative;z-index:1">
+            <div class="meta-realm-locked-mark mono">???</div>
+            <div class="meta-realm-locked-caption">Belum terungkap. Terus bertumbuh.</div>
+          </div>
         </div>
       </div>
-      <button class="btn-ghost" id="metaSomaCancel">← Batal</button>
-    </div>` : ""}
-    ${metaBodyPicking ? `
-    <div class="quest-card fadeUp" style="margin-top:16px">
-      <div class="field">
-        <label>Jenis latihannya apa?</label>
-        <div class="status-row">
-          ${[["cardio", "Cardio"], ["gym", "Gym"], ["recovery", "Recovery"]].map(([k, l]) =>
-            `<button class="status-btn" data-meta-body-kind="${k}">${l}</button>`).join("")}
-        </div>
+
+      <div style="padding:0 24px">
+        ${metaError ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(metaError)}</p>` : ""}
+        ${metaHintDismissed ? "" : `
+        <div class="meta-realm-hint fadeUp">
+          <div>
+            <div class="meta-realm-hint-title">Geser peta untuk menjelajahi dunia Eleva.</div>
+            <div class="meta-realm-hint-sub">Ketuk wilayah untuk melihat detail.</div>
+          </div>
+          <button class="meta-realm-hint-close" id="metaHintClose" aria-label="Tutup">×</button>
+        </div>`}
+        ${metaBodyPicking ? `
+        <div class="quest-card fadeUp" style="margin-top:16px">
+          <div class="field">
+            <label>Jenis latihannya apa?</label>
+            <div class="status-row">
+              ${[["cardio", "Cardio"], ["gym", "Gym"], ["recovery", "Recovery"]].map(([k, l]) =>
+                `<button class="status-btn" data-meta-body-kind="${k}">${l}</button>`).join("")}
+            </div>
+          </div>
+          <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
+        </div>` : ""}
       </div>
-      <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
-    </div>` : ""}`;
+    </div>`;
 }
 
 // Extracted from the [data-reflect-id] handler (Task 7c/7d cascade) so the
@@ -2908,7 +2993,7 @@ function renderDashboard() {
   const screenBodyHTML = activeScreen === "kisahmu" ? kisahmuScreenHTML(s)
     : activeScreen === "character" ? characterScreenHTML(s)
     : activeScreen === "settings" ? settingsScreenHTML()
-    : activeScreen === "meta" ? metaScreenHTML(allOpenQuests)
+    : activeScreen === "meta" ? metaScreenHTML(s, allOpenQuests)
     : homeBodyHTML;
 
   // Help "?" and Artifacts icons now sit INLINE in the header's icon row
@@ -3021,37 +3106,17 @@ function renderDashboard() {
     beginStructuredOrReflectiveFlow(id, quest);
     renderDashboard();
   }));
-  // Task 12 (META): tapping a tool card starts a standalone session via
-  // POST /api/meta/start, then hands off into the EXACT SAME flow state a
-  // Today's Trial quest of that completionType would use (practiceTestFlow/
-  // jobMatchFlow/reflectTarget - see the [data-reflect-id] handler above and
-  // the job-match CV-check it does) - no duplicated UI, just a different
-  // entry point. Body needs a kind picked first (cardio/gym/recovery, no AI
-  // tag to infer from since there's no quest generation for a free session).
+  // Meta Inner Realm: tapping the LINGUA/LABORA progress card starts a
+  // standalone session via POST /api/meta/start, then hands off into the
+  // EXACT SAME flow state a Today's Trial quest of that completionType would
+  // use (practiceTestFlow/jobMatchFlow - see the [data-reflect-id] handler
+  // above and the job-match CV-check it does) - no duplicated UI, just a
+  // different entry point. SOMA no longer routes through here at all (its
+  // two cards go straight to [data-soma-mode] below, skipping the old
+  // Activity/Nutrition mode picker per the founder's world-map decision).
   document.querySelectorAll("[data-meta-tool]").forEach((b) => b.addEventListener("click", async () => {
     const tool = b.dataset.metaTool;
     metaError = "";
-    // SOMA Nutrition Part B item 2: routing per the brief's exact rule - 0
-    // active SOMA quests -> mode picker; exactly 1 -> skip picker, resume it
-    // directly; 2+ -> mode picker, badged (activeSomaQuest/metaScreenHTML).
-    if (tool === "soma") {
-      const activeActivity = activeSomaQuest(allOpenQuests, "activity");
-      const activeNutrition = activeSomaQuest(allOpenQuests, "nutrition");
-      const activeCount = (activeActivity ? 1 : 0) + (activeNutrition ? 1 : 0);
-      if (activeCount === 1) {
-        if (activeActivity) {
-          beginStructuredOrReflectiveFlow(activeActivity.id, activeActivity.quest);
-        } else {
-          await openNutritionFlow(activeNutrition);
-        }
-        activeScreen = "home";
-        renderDashboard();
-        return;
-      }
-      metaSomaPicking = true;
-      renderDashboard();
-      return;
-    }
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
       const { quest } = await api("/api/meta/start", { method: "POST", body: { tool } });
@@ -3071,14 +3136,14 @@ function renderDashboard() {
     }
     renderDashboard();
   }));
-  // SOMA mode picker (item 2): "Activity" resumes the existing quest if one
-  // is active, else falls through to the SAME cardio/gym/recovery kind
+  // Meta Inner Realm: SOMA's two realm-cluster cards (Activity/Nutrition)
+  // call straight into here now - "Activity" resumes the existing quest if
+  // one is active, else falls through to the SAME cardio/gym/recovery kind
   // picker Activity always used; "Nutrition" resumes the existing quest if
   // active, else starts a brand-new PROGRESSIVE quest directly (no sub-kind
   // to pick, unlike Activity).
   document.querySelectorAll("[data-soma-mode]").forEach((b) => b.addEventListener("click", async () => {
     const mode = b.dataset.somaMode;
-    metaSomaPicking = false;
     const active = activeSomaQuest(allOpenQuests, mode);
     if (active) {
       if (mode === "activity") beginStructuredOrReflectiveFlow(active.id, active.quest);
@@ -3102,7 +3167,14 @@ function renderDashboard() {
     }
     renderDashboard();
   }));
-  document.getElementById("metaSomaCancel")?.addEventListener("click", () => { metaSomaPicking = false; renderDashboard(); });
+  // Meta Inner Realm: hint-card dismissal persists via localStorage (see the
+  // metaHintDismissed declaration up top for why - no existing backend flag
+  // pattern in this app to reuse instead).
+  document.getElementById("metaHintClose")?.addEventListener("click", () => {
+    metaHintDismissed = true;
+    try { localStorage.setItem("elevaMetaHintDismissed", "1"); } catch (e) { /* private mode etc - just won't persist across reloads */ }
+    renderDashboard();
+  });
   document.querySelectorAll("[data-meta-body-kind]").forEach((b) => b.addEventListener("click", async () => {
     const kind = b.dataset.metaBodyKind;
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");

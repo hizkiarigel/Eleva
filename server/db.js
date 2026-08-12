@@ -669,6 +669,25 @@ async function allHistory(userId, limit = 8) {
   return rows.map(rowToQuest);
 }
 
+// Meta Inner Realm redesign (12 Agustus): real per-realm session counts for
+// the world-map progress cards - a "session" is any resolved (reflection
+// saved) quest of that completionType, META free-session OR Today's Trial
+// goal-tied alike (the brief's own wording is "real practice-test/run/
+// job-match session count", not scoped to META-only). sinceDateKey is a
+// YYYY-MM-DD string computed by the caller (see startOfWeekKey/
+// startOfMonthKey in index.js) - `date` is a TEXT column in that same
+// server-local day-key format everywhere else in this file, so a plain
+// string >= comparison is correct and avoids a second date dialect.
+async function countSessionsSince(userId, completionType, sinceDateKey) {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM days
+     WHERE user_id = $1 AND quest->>'completionType' = $2
+       AND reflection IS NOT NULL AND date >= $3`,
+    [userId, completionType, sinceDateKey]
+  );
+  return rows[0].n;
+}
+
 // SOMA Nutrition Part B item 9: nutrition-log quests resolve LAZILY (GET
 // /api/state's end-of-day check, see resolveNutritionQuest in index.js) -
 // there's no synchronous moment right after completion for the user to pick
@@ -841,5 +860,5 @@ module.exports = {
   updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
   touchStatActivity, applyDecayIfDue, setShortfallReason, listPendingShortfalls,
   updateQuestProgress, createFoodEntry, listFoodEntriesForQuest, listFoodEntriesForDate,
-  searchFoods, getFoodByBarcode,
+  searchFoods, getFoodByBarcode, countSessionsSince,
 };

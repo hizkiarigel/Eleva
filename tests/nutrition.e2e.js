@@ -148,28 +148,29 @@ async function test(name, fn) {
     assert.ok(await page.locator("text=Meals 1/3").count(), "home card must reflect the persisted progress");
   });
 
-  console.log("E2E: SOMA META box (item 1/2) - renamed label + mode picker");
-  await test("META tab shows SOMA (not 'Fisik / Lari') and 2+ active quests badge the mode picker", async () => {
+  console.log("E2E: META - Inner Realm world map (12 Agustus redesign) - SOMA cluster");
+  await test("META tab shows the world map with SOMA/LINGUA/LABORA realm names and direct Activity/Nutrition cards (no mode picker)", async () => {
     await page.click('[data-tab="meta"]');
-    await page.waitForSelector('[data-meta-tool="soma"]', { timeout: 20000 });
-    assert.ok(await page.locator("text=SOMA").count(), "META box must be relabeled SOMA");
-    assert.strictEqual(await page.locator("text=Fisik / Lari").count(), 0, "old label must be gone");
-    await page.click('[data-meta-tool="soma"]');
-    await page.waitForSelector('[data-soma-mode="nutrition"]', { timeout: 10000 });
-    // The goal-tied nutrition quest above is a Today's Trial quest, not a
-    // META one, so it does NOT count as an "active META SOMA quest" here -
-    // 0 active META quests still shows the picker (not skipped to 1-active).
-    assert.ok(await page.locator('text=Activity').count());
-    assert.ok(await page.locator('text=Nutrition').count());
+    await page.waitForSelector('[data-soma-mode="nutrition"]', { timeout: 20000 });
+    assert.ok(await page.locator("text=SOMA").count(), "SOMA realm name must be on the map");
+    assert.ok(await page.locator("text=LINGUA").count(), "LINGUA realm name must be on the map");
+    assert.ok(await page.locator("text=LABORA").count(), "LABORA realm name must be on the map");
+    // SOMA's cluster now shows Activity ("Fisik / Lari") and Nutrition as two
+    // separate progress cards, tappable directly - no more "which one do you
+    // mean?" mode picker in between (founder decision, world-map handoff
+    // predates the SOMA Nutrition merge).
+    assert.ok(await page.locator('[data-soma-mode="activity"]:has-text("Fisik / Lari")').count(), "Activity card must read 'Fisik / Lari'");
+    assert.ok(await page.locator('[data-soma-mode="nutrition"]:has-text("Nutrition")').count(), "Nutrition card must read 'Nutrition'");
+    assert.strictEqual(await page.locator('[data-soma-mode]').count(), 2, "exactly 2 direct SOMA cards, no picker step");
   });
 
-  await test("choosing Nutrition from the picker starts a fresh META session and opens the Log Meal flow", async () => {
+  await test("tapping the Nutrition card starts a fresh META session and opens the Log Meal flow directly", async () => {
     await page.click('[data-soma-mode="nutrition"]');
     await page.waitForSelector('text=Waktu makan', { timeout: 20000 });
     assert.ok(await page.locator("text=Meals 0/3").count(), "fresh META nutrition quest should start at 0/3");
   });
 
-  await test("re-opening SOMA now skips the picker (exactly 1 active quest) and resumes directly", async () => {
+  await test("re-opening META and tapping Nutrition again resumes the same active quest directly (no picker, no duplicate)", async () => {
     // Close out of the flow (without resolving it - the META quest stays
     // ACTIVE) via #nfDone, same as any other flow screen - tapping a nav
     // tab alone never dismisses an in-progress flow, matching jobMatchFlow/
@@ -177,10 +178,10 @@ async function test(name, fn) {
     await page.click("#nfDone");
     await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
     await page.click('[data-tab="meta"]');
-    await page.waitForSelector('[data-meta-tool="soma"]', { timeout: 20000 });
-    await page.click('[data-meta-tool="soma"]');
+    await page.waitForSelector('[data-soma-mode="nutrition"]', { timeout: 20000 });
+    await page.click('[data-soma-mode="nutrition"]');
     await page.waitForSelector('text=Waktu makan', { timeout: 20000 });
-    assert.strictEqual(await page.locator('[data-soma-mode]').count(), 0, "picker must be skipped with exactly 1 active quest");
+    assert.ok(await page.locator("text=Meals 0/3").count(), "resumed quest keeps its own progress, still 0/3 (only the confirm-and-save flow above advances it)");
   });
 
   await browser.close();

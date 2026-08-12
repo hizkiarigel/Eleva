@@ -408,22 +408,97 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .pt-obs-label.strong { color: var(--growth); }
 .pt-obs-label.unstable { color: var(--rust); }
 
-/* Task 12 (META tab) */
-.meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.meta-tool-card {
-  background: var(--surface2); border: 1px solid var(--hair); border-radius: 12px;
-  padding: 18px 12px; display: flex; flex-direction: column; align-items: center;
-  text-align: center; gap: 6px; cursor: pointer;
-}
-.meta-tool-card:active { border-color: var(--accent-bright); }
-.meta-tool-icon { font-size: 24px; }
-.meta-tool-label { font-size: 13px; font-weight: 600; }
-.meta-tool-desc { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
-@media (max-width: 420px) {
-  .meta-grid { grid-template-columns: 1fr; }
-  .meta-tool-card { flex-direction: row; text-align: left; padding: 14px; }
-}
 .settings-soon { font-size: 11px; color: var(--muted-dim); }
+
+/* ===========================================================================
+   META — Inner Realm (design handoff 12 Agustus,
+   design_handoff_meta_inner_realm) — scrollable world-map hub replacing the
+   old flat 3-card META grid. Scoped to .meta-realm- namespace, own dark
+   background/palette (own art, not the app's --bg/--accent tokens) — same
+   pattern as .auth- for the cinematic login screen. Values copied verbatim
+   from the handoff's README.md + prototype (Eleva Meta Inner Realm.dc.html).
+   =========================================================================== */
+.meta-realm-wrap { margin: 0 -24px; background: #0d0c12; }
+/* aspect-ratio is intentionally taller than the source art's native 853:1844
+   (see the top-offset comment on .meta-realm-cluster below for why) - with
+   object-fit:cover + object-position:center top on the <img>, the browser
+   scales to satisfy the taller box, so every %-based position below still
+   lands on the SAME point in the source art (only the sides crop in a
+   little tighter) - nothing here misaligns against the artwork. */
+.meta-realm-map { position: relative; width: 100%; aspect-ratio: 853 / 2650; overflow: hidden; background: #0d0c12; }
+.meta-realm-map img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top; }
+.meta-realm-map-shade {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(5, 5, 9, .55) 0%, rgba(5, 5, 9, 0) 14%, rgba(5, 5, 9, 0) 82%, rgba(13, 12, 18, .9) 100%);
+}
+.meta-realm-header { position: absolute; left: 0; right: 0; top: 0; padding: 22px clamp(16px, 5vw, 28px) 0; }
+.meta-realm-title {
+  font-family: "Fraunces", serif; font-weight: 600; font-size: clamp(26px, 7vw, 36px);
+  letter-spacing: 4px; color: #ece7dc; line-height: 1;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, .95), 0 1px 4px rgba(0, 0, 0, 1);
+}
+.meta-realm-subtitle-row { display: flex; align-items: center; gap: 8px; margin: 7px 0 10px; }
+.meta-realm-rule { width: 14px; height: 1px; background: #d8a355; }
+.meta-realm-subtitle { font-family: "Fraunces", serif; font-style: italic; font-size: 15.5px; color: #e8b768; letter-spacing: .5px; text-shadow: 0 2px 10px rgba(0, 0, 0, .9); }
+.meta-realm-intro {
+  position: absolute; left: 0; right: 0; top: clamp(80px, 17vw, 108px); padding: 0 clamp(16px, 5vw, 28px);
+  font-size: 14px; line-height: 1.5; color: #ece7dc; margin: 0; max-width: 290px; text-shadow: 0 1px 6px rgba(0, 0, 0, .95);
+}
+
+/* Vertical anchors (top:, set inline per-cluster in public/app.js) are NOT
+   the handoff's literal 16/36/37/47/56/73.5% - at real single-column phone
+   widths those percentages put LINGUA's card into SOMA's header and put
+   SOMA/LABORA's card into the pathway avatar (measured directly with
+   Playwright while implementing this - the design's own screenshots were
+   apparently captured at a much wider preview pane, where the same
+   percentages translate to far more breathing room in absolute px, hiding
+   the overlap). Recomputed from real rendered content heights instead, with
+   the map made taller (see .meta-realm-map) so there's room - horizontal
+   anchors (left:) and every other visual token are untouched. */
+.meta-realm-cluster { position: absolute; transform: translateX(-50%); width: clamp(220px, 60vw, 260px); }
+.meta-realm-vignette {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 125%; height: 130%; pointer-events: none; z-index: 0;
+  background: radial-gradient(ellipse at center, rgba(3, 5, 8, .78) 0%, rgba(3, 5, 8, .50) 40%, rgba(3, 5, 8, .18) 70%, transparent 100%);
+}
+.meta-realm-cluster-body { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.meta-realm-sigil { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(5, 8, 12, .6); }
+.meta-realm-name { font-family: "Fraunces", serif; font-weight: 600; font-size: 28px; letter-spacing: 2px; line-height: 1.05; text-shadow: 0 2px 10px rgba(0, 0, 0, .9); margin-top: 11px; }
+.meta-realm-stat { font-size: 15.5px; font-weight: 500; color: #F2F3F7; margin-top: 5px; text-shadow: 0 2px 10px rgba(0, 0, 0, .9); }
+.meta-realm-desc { font-size: 13.5px; line-height: 1.48; color: #D0D1D5; margin-top: 8px; max-width: 210px; text-shadow: 0 1px 6px rgba(0, 0, 0, .95); }
+
+.meta-realm-card {
+  position: relative; display: flex; align-items: center; gap: 11px; width: 240px; max-width: min(240px, 80vw);
+  text-align: left; background: linear-gradient(180deg, rgba(10, 13, 18, .90), rgba(5, 7, 10, .94));
+  border-radius: 16px; padding: 12px 16px; cursor: pointer; margin-top: 13px; font: inherit; color: inherit;
+}
+.meta-realm-card + .meta-realm-card { margin-top: 10px; }
+.meta-realm-card-content { flex: 1; min-width: 0; }
+.meta-realm-card-title { font-size: 16px; font-weight: 600; color: #F2F3F7; line-height: 1.2; }
+.meta-realm-card-sessions { font-size: 13px; color: #B8B8C0; line-height: 1.3; margin-top: 4px; }
+.meta-realm-card-track { height: 5px; border-radius: 999px; background: rgba(255, 255, 255, .12); overflow: hidden; margin-top: 10px; }
+.meta-realm-card-fill { height: 100%; border-radius: 999px; }
+
+.meta-realm-avatar-ring { position: absolute; left: 50%; top: 72%; transform: translateX(-50%); width: 110px; height: 110px; }
+.meta-realm-avatar-glow { position: absolute; inset: 0; border-radius: 50%; animation: elevaGlowPulse 3.2s ease-in-out infinite; }
+.meta-realm-avatar-inner { position: absolute; inset: 22px; border-radius: 50%; animation: elevaBreathe 4.5s ease-in-out infinite; }
+.meta-realm-avatar-label-wrap { position: absolute; left: 50%; top: 78%; transform: translateX(-50%); width: clamp(220px, 66vw, 280px); text-align: center; }
+.meta-realm-avatar-label { font-family: "Fraunces", serif; font-weight: 600; font-size: 22px; letter-spacing: 3px; text-shadow: 0 2px 10px rgba(0, 0, 0, .9); }
+.meta-realm-avatar-line { font-size: 14.5px; line-height: 1.55; color: #F2F3F7; margin-top: 7px; text-shadow: 0 1px 6px rgba(0, 0, 0, .95); }
+
+.meta-realm-locked { position: absolute; left: 50%; top: 87.5%; transform: translateX(-50%); width: clamp(190px, 60vw, 240px); text-align: center; }
+.meta-realm-locked-mark { font-size: 17px; letter-spacing: 2px; color: #ece7dc; text-shadow: 0 2px 10px rgba(0, 0, 0, .9); }
+.meta-realm-locked-caption { font-size: 13.5px; line-height: 1.5; color: #D0D1D5; margin-top: 6px; text-shadow: 0 1px 6px rgba(0, 0, 0, .95); }
+
+.meta-realm-hint { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; background: #131019; border: 1px solid rgba(255, 255, 255, .1); border-radius: 12px; padding: 14px 16px; margin: 18px 0 0; }
+.meta-realm-hint-title { font-size: 13px; color: #ece7dc; margin-bottom: 3px; }
+.meta-realm-hint-sub { font-size: 12px; color: #948f9c; }
+.meta-realm-hint-close { background: none; border: none; color: #948f9c; font-size: 16px; cursor: pointer; flex: none; line-height: 1; }
+
+@keyframes elevaBreathe { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.015); } }
+@keyframes elevaGlowPulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .meta-realm-avatar-glow, .meta-realm-avatar-inner { animation: none; }
+}
 
 /* ===========================================================================
    Cinematic auth (design handoff 12 Agustus, design_handoff_cinematic_login)

@@ -62,6 +62,20 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 function todayKey(d) {
   return (d ? new Date(d) : new Date()).toLocaleDateString("en-CA"); // YYYY-MM-DD, server local time
 }
+// Meta Inner Realm redesign: date-key window starts for the world-map
+// progress cards (db.countSessionsSince) - Monday-start calendar week for
+// SOMA ("X sesi minggu ini" per the handoff's own prototype copy), calendar
+// month for LINGUA/LABORA ("X sesi bulan ini"). Same todayKey day-key format
+// so the plain string comparison in countSessionsSince stays correct.
+function startOfWeekKey(d = new Date()) {
+  const day = d.getDay(); // 0=Sun..6=Sat
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  return todayKey(monday);
+}
+function startOfMonthKey(d = new Date()) {
+  return todayKey(new Date(d.getFullYear(), d.getMonth(), 1));
+}
 function wordCount(text) {
   return (text || "").trim().split(/\s+/).filter(Boolean).length;
 }
@@ -467,6 +481,7 @@ app.get("/api/state", requireAuth, async (req, res) => {
       chapterNarrative: fresh.chapterNarrative,
       chapters,
       growthSessions: fresh.growthSessions,
+      pathway: fresh.pathway,
       pathwayNoun: fresh.pathwayNoun,
       pathwayStatus: fresh.pathwayStatus,
       goals: fresh.goals,
@@ -479,6 +494,15 @@ app.get("/api/state", requireAuth, async (req, res) => {
       pendingNutritionShortfalls: (await db.listPendingShortfalls(req.userId, "nutrition-log")).map((q) => ({
         id: q.id, title: q.quest.title, reasons: q.reflection.shortfallPrompt.reasons,
       })),
+      // Meta Inner Realm redesign: real session counts backing the world-map
+      // progress cards (public/app.js metaScreenHTML) - see
+      // db.countSessionsSince/startOfWeekKey/startOfMonthKey above.
+      metaSessionCounts: {
+        lingua: await db.countSessionsSince(req.userId, "practice-test", startOfMonthKey()),
+        somaActivity: await db.countSessionsSince(req.userId, "structured-physical", startOfWeekKey()),
+        somaNutrition: await db.countSessionsSince(req.userId, "nutrition-log", startOfWeekKey()),
+        labora: await db.countSessionsSince(req.userId, "job-match-analysis", startOfMonthKey()),
+      },
       aiActive: ai.hasKey(),
     });
   } catch (e) {
