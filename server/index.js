@@ -11,6 +11,8 @@ const targets = require("./targets");
 const practiceTestLib = require("./practiceTest");
 const jobMatch = require("./jobMatch");
 const jobApplication = require("./jobApplication");
+const nutrition = require("./nutrition");
+const nutritionEntry = require("./nutritionEntry");
 
 // Task 14 (Livelihood Milestone, PRD.md section 26): auto-creates the fixed
 // "10 Qualified Applications" milestone the first time a Livelihood goal's
@@ -105,6 +107,58 @@ function computeShortfallPrompt(quest, structuredClean) {
     : null;
   if (actual == null) return null;
   return actual / schema.target < SHORTFALL_THRESHOLD ? { reasons: SHORTFALL_REASONS } : null;
+}
+
+// SOMA Nutrition Part B item 8: shared resolution for a PROGRESSIVE
+// nutrition quest reaching a terminal status - reuses the SAME
+// ai.processReflection call every other completion type funnels growth
+// through (Task 7d's "no arbitrary points" precedent - job-match-analysis
+// was the one FLAT-bump holdout, Task 14 already closed that, this doesn't
+// reopen it with a new one), fed a nutrition-shaped ctx instead of free
+// text. Called from two places: POST /api/nutrition/log (the instant both
+// evidenceComplete+targetMet go true, mid-day, brief item 8's "no manual
+// confirm") and GET /api/state's lazy end-of-day check (a quest whose date
+// has rolled past and never hit both booleans while ACTIVE).
+async function resolveNutritionQuest(userId, dayId, quest, state) {
+  const progressive = quest.progressive;
+  const effectiveStatus = progressive.status === "COMPLETED" ? "done" : progressive.status === "ATTEMPTED" ? "partial" : "skipped";
+  const ctx = {
+    profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
+    quest, status: effectiveStatus, nutritionResult: progressive,
+    stats: state.stats, growthSessions: state.growthSessions,
+  };
+  const result = await ai.processReflection(ctx);
+  // Compliance (evidenceComplete) and target-achievement (targetMet) stay
+  // separate booleans (brief item 8) all the way down to the growth gate -
+  // logged every required meal but missed the metric target still grows.
+  const deltas = progressive.evidenceComplete ? (result.statDeltas || {}) : {};
+  const newStats = { ...state.stats };
+  Object.entries(deltas).forEach(([k, v]) => {
+    if (newStats[k] !== undefined && typeof v === "number") {
+      newStats[k] = Math.max(0, Math.min(100, newStats[k] + Math.max(0, Math.min(5, Math.round(v)))));
+    }
+  });
+  const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+
+  const reflection = {
+    status: effectiveStatus, text: "",
+    nutritionResult: progressive,
+    deltas, mentorReply: result.mentorReply, interpretation: result.interpretation || null,
+    // Brief item 9: fixed-option shortfall reason, ATTEMPTED/INCOMPLETE
+    // only - reuses the SAME SHORTFALL_REASONS/setShortfallReason mechanism
+    // Task 7d item 6 already built for structured-physical, surfaced on the
+    // Nutrition page (public/app.js) since this resolution can happen lazily,
+    // not always right after a user action there's a screen open for.
+    shortfallPrompt: progressive.status !== "COMPLETED" ? { reasons: SHORTFALL_REASONS } : null,
+    timestamp: new Date().toISOString(),
+  };
+  await db.saveReflection(userId, dayId, reflection);
+  await db.touchStatActivity(userId, Object.keys(deltas));
+  await db.updateState(userId, {
+    stats: newStats, chapterNumber: state.chapterNumber, chapterTitle: state.chapterTitle,
+    growthSessions: newGrowthSessions, pathwayNoun: state.pathwayNoun,
+  });
+  return reflection;
 }
 
 // Kisahmu: archives the chapter that's about to be superseded, BEFORE the
@@ -233,6 +287,25 @@ app.get("/api/state", requireAuth, async (req, res) => {
     // without any quest at all.
     const goals = state.goals || [];
     let openQuests = await db.getOpenQuests(req.userId);
+
+    // SOMA Nutrition Part B item 8: lazy end-of-day evaluation, same idiom
+    // as the kondisi/Decay lazy checks above - no cron infra in this app, so
+    // a PROGRESSIVE quest only ever resolves the next time something reads
+    // state after its `date` has rolled past. COMPLETED already resolves
+    // itself synchronously in POST /api/nutrition/log the instant both
+    // booleans go true; this only ever catches ATTEMPTED/INCOMPLETE (a quest
+    // still ACTIVE once its day is over).
+    let resolvedAnyNutrition = false;
+    for (const q of openQuests) {
+      if (q.quest?.lifecycleType !== "progressive" || q.quest?.progressive?.status !== "ACTIVE") continue;
+      if (q.date === todayKey()) continue; // still today, not due yet
+      const evaluated = nutrition.evaluateEndOfDay(q.quest.progressive);
+      await resolveNutritionQuest(req.userId, q.id, { ...q.quest, progressive: evaluated }, state);
+      resolvedAnyNutrition = true;
+    }
+    if (resolvedAnyNutrition) {
+      openQuests = await db.getOpenQuests(req.userId); // re-fetch: resolved rows must drop out of "open"
+    }
     const goalSlots = goals.length ? goals.map((_, i) => i) : [null];
     // Task 12 (META): a META row must never count as "this slot has an open
     // quest" - a goal_index-null META session would otherwise satisfy a
@@ -403,6 +476,9 @@ app.get("/api/state", requireAuth, async (req, res) => {
       kondisiStatus: fresh.kondisiStatus,
       kondisiNote: fresh.kondisiNote,
       history: await db.allHistory(req.userId, 8),
+      pendingNutritionShortfalls: (await db.listPendingShortfalls(req.userId, "nutrition-log")).map((q) => ({
+        id: q.id, title: q.quest.title, reasons: q.reflection.shortfallPrompt.reasons,
+      })),
       aiActive: ai.hasKey(),
     });
   } catch (e) {
@@ -1146,6 +1222,20 @@ app.post("/api/meta/start", requireAuth, async (req, res) => {
         description: "Cek kecocokan lowongan bebas dari META, di luar rotasi goal harian.",
         why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
       };
+    } else if (tool === "nutrition") {
+      // SOMA Nutrition Part B: a META Nutrition session has no goal-specific
+      // target to derive a metric/count from (unlike a goal-generated
+      // nutrition quest, see generateQuest's nutrition branch) - sensible
+      // MVP defaults, same "free session, no Milestone" spirit as META Body.
+      quest = {
+        completionType: "nutrition-log",
+        lifecycleType: "progressive",
+        statFocus: "body",
+        title: "Catat Nutrisi Mandiri",
+        description: "Catat makanmu bebas dari META — tidak terikat ke goal atau Milestone manapun.",
+        why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
+        progressive: nutrition.initProgressiveState({ requiredContributions: 3, primaryMetric: "protein", targetValue: 60 }),
+      };
     } else {
       return res.status(400).json({ error: "Tools tidak dikenal." });
     }
@@ -1154,6 +1244,103 @@ app.post("/api/meta/start", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal memulai sesi META." });
+  }
+});
+
+// SOMA Nutrition Part B item 5: food search MVP - plain substring match
+// against the curated seed list, no external API this round.
+app.get("/api/foods/search", requireAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    if (!q) return res.json({ foods: [] });
+    res.json({ foods: await db.searchFoods(q) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal mencari makanan." });
+  }
+});
+
+// Barcode lookup - the "architecture ready, scanning infra not wired" half
+// of item 5: works today against a typed/pasted code, no camera capture UI.
+app.get("/api/foods/barcode/:code", requireAuth, async (req, res) => {
+  try {
+    const food = await db.getFoodByBarcode(req.params.code);
+    if (!food) return res.status(404).json({ error: "Barcode tidak ditemukan." });
+    res.json({ food });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal mencari barcode." });
+  }
+});
+
+// SOMA Nutrition Part B item 4/8: log one meal as durable evidence, and (if
+// tied to an active PROGRESSIVE quest) fold it into that quest's running
+// total - COMPLETED fires here, mid-day, the instant evidenceComplete AND
+// targetMet both go true (brief: "no manual confirm").
+app.post("/api/nutrition/log", requireAuth, async (req, res) => {
+  try {
+    const validated = nutritionEntry.validateFoodEntry(req.body);
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
+    const source = ["search", "photo"].includes(req.body.source) ? req.body.source : "search";
+
+    let quest = null;
+    if (req.body.questId != null) {
+      quest = await db.getQuestById(req.userId, req.body.questId);
+      if (!quest) return res.status(400).json({ error: "Quest tidak ditemukan." });
+      if (quest.quest?.completionType !== "nutrition-log") return res.status(400).json({ error: "Quest ini bukan tipe Nutrition." });
+      if (quest.reflection) return res.status(400).json({ error: "Quest ini sudah selesai." });
+    }
+
+    const entry = await db.createFoodEntry(req.userId, {
+      questId: quest ? quest.id : null, ...validated.clean, source, date: todayKey(),
+    });
+
+    let progressive = null;
+    let resolved = null;
+    if (quest) {
+      progressive = nutrition.applyContribution(quest.quest.progressive, validated.clean);
+      await db.updateQuestProgress(req.userId, quest.id, { progressive });
+      if (progressive.status === "COMPLETED") {
+        const state = await db.getState(req.userId);
+        resolved = await resolveNutritionQuest(req.userId, quest.id, { ...quest.quest, progressive }, state);
+      }
+    }
+
+    res.json({ ok: true, entry, progressive, resolved: resolved ? { status: resolved.status, mentorReply: resolved.mentorReply } : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan catatan makan." });
+  }
+});
+
+// Entries for one quest (resuming an active session's log) or for a whole
+// date (Nutrition page totals - not scoped to any one quest, a user's real
+// intake counts regardless of whether a Nutrition Trial is running today).
+app.get("/api/nutrition/entries", requireAuth, async (req, res) => {
+  try {
+    const { questId, date } = req.query;
+    if (questId != null) return res.json({ entries: await db.listFoodEntriesForQuest(req.userId, Number(questId)) });
+    res.json({ entries: await db.listFoodEntriesForDate(req.userId, date || todayKey()) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal memuat catatan makan." });
+  }
+});
+
+// Photo-based entry (secondary/optional path alongside search, per founder
+// decision) - AI only ever SUGGESTS, never persists; the client reviews/
+// edits the suggestion, then submits it through the SAME /api/nutrition/log
+// as a search-based entry (one evidence-writing path, two ways to arrive at
+// the payload).
+app.post("/api/nutrition/analyze-photo", requireAuth, async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image || !image.mimeType || !image.dataBase64) return res.status(400).json({ error: "Foto wajib diupload." });
+    const suggestion = await ai.analyzeNutritionPhoto({ image });
+    res.json({ ok: true, suggestion });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menganalisis foto." });
   }
 });
 
