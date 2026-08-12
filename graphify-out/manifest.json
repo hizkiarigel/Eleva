@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786509186.287243,
-    "ast_hash": "2f30384e659f025b0f53c99031cd895e",
+    "mtime": 1786519180.4967263,
+    "ast_hash": "4475114068c89c75b2feb8fbf635f048",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -25,8 +25,8 @@
     "semantic_hash": "20fd1243671a1310360b35ac9f823ada"
   },
   "server/claude.js": {
-    "mtime": 1786507779.167815,
-    "ast_hash": "b03d429b6c7009ddb8f63b4cba9a977e",
+    "mtime": 1786518831.428734,
+    "ast_hash": "6a363bd0ed8cfe692d1b9dddad367b06",
     "semantic_hash": ""
   },
   "server/db.js": {
@@ -35,14 +35,14 @@
     "semantic_hash": ""
   },
   "server/index.js": {
-    "mtime": 1786507875.1918206,
-    "ast_hash": "8d3982ae62cda4abdfd77682e0eadd97",
+    "mtime": 1786518990.5367305,
+    "ast_hash": "cb31a74d4410b7a7c757518cc246417c",
     "semantic_hash": ""
   },
   "server/jobMatch.js": {
-    "mtime": 1786461864.4157665,
-    "ast_hash": "9a6bc05d9544addd6f2d69bfbb303664",
-    "semantic_hash": "9a6bc05d9544addd6f2d69bfbb303664"
+    "mtime": 1786518731.0647364,
+    "ast_hash": "03e351ce559d03d1f9893a7383e66c5f",
+    "semantic_hash": ""
   },
   "server/practiceTest.js": {
     "mtime": 1786508079.3518329,
@@ -60,9 +60,9 @@
     "semantic_hash": "d53f9b49de06de7f45ef2c3713c29597"
   },
   "server/targets.js": {
-    "mtime": 1786461864.4157665,
-    "ast_hash": "e1ddc18d0941bdabce89172eb4040184",
-    "semantic_hash": "e1ddc18d0941bdabce89172eb4040184"
+    "mtime": 1786518717.7807367,
+    "ast_hash": "82fe7b9c45ee8da169ed59ea27cb7796",
+    "semantic_hash": ""
   },
   ".claude/CLAUDE.md": {
     "mtime": 1786464183.8445706,
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786509366.9072535,
-    "ast_hash": "8161604390b9cc56d0d5071ce0a03061",
+    "mtime": 1786519703.9407141,
+    "ast_hash": "9f7e588e6de5c58d0cab912a06bd41ed",
     "semantic_hash": ""
   },
   "README.md": {
@@ -167,6 +167,26 @@
   "docs/practice-test-flow.md": {
     "mtime": 1786509243.3512464,
     "ast_hash": "1db08ae16c726ede7b4afc377fb8171c",
+    "semantic_hash": ""
+  },
+  "server/jobApplication.js": {
+    "mtime": 1786518852.9967337,
+    "ast_hash": "29b929bd0c729cfe9bff6787e6e4d03e",
+    "semantic_hash": ""
+  },
+  "tests/livelihood.e2e.js": {
+    "mtime": 1786519468.5207195,
+    "ast_hash": "9468ec76952c305cc030d595e645068d",
+    "semantic_hash": ""
+  },
+  "tests/livelihood.js": {
+    "mtime": 1786519386.8367214,
+    "ast_hash": "032c217ef74a339646e984fba5ff9fcf",
+    "semantic_hash": ""
+  },
+  "docs/livelihood-milestone-flow.md": {
+    "mtime": 1786519267.276724,
+    "ast_hash": "0513ab62060fd85d81feac7b79493427",
     "semantic_hash": ""
   }
 }
