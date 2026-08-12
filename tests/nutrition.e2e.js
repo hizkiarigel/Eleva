@@ -1,0 +1,194 @@
+// Playwright e2e for SOMA Nutrition Implementation Brief Part B (12
+// Agustus). Boots the real server keyless against the scratch Postgres DB,
+// seeds a goal-generated nutrition-log quest straight into `days` (the
+// keyless AI path can never produce this completionType, same reason
+// tests/practicetest.e2e.js seeds its own quest shapes), drives a real
+// Chromium through the renamed SOMA META box, the mode picker, the Log Meal
+// flow (search + confirm), and the home quest card's live progress line.
+//
+// Run: node tests/nutrition.e2e.js
+// Requires: local Postgres (same TEST_DATABASE_URL convention as
+// tests/practicetest.js) and the preinstalled Playwright Chromium at
+// /opt/pw-browsers/chromium.
+
+const assert = require("assert");
+const { spawn } = require("child_process");
+const { chromium } = require("playwright-core");
+const { Client } = require("pg");
+
+const PORT = 3991;
+const BASE = `http://localhost:${PORT}`;
+const CHROMIUM = process.env.CHROMIUM_PATH || "/opt/pw-browsers/chromium";
+
+let failures = 0;
+async function test(name, fn) {
+  try {
+    await fn();
+    console.log(`  ok - ${name}`);
+  } catch (e) {
+    failures += 1;
+    console.error(`  FAIL - ${name}: ${e.message}`);
+  }
+}
+
+(async () => {
+  const env = {
+    ...process.env,
+    DATABASE_URL: process.env.TEST_DATABASE_URL || "postgres://postgres:testpass@localhost:5432/eleva_test",
+    SESSION_SECRET: "testsecret", BETA_CODE: "TESTCODE", PORT: String(PORT),
+  };
+  delete env.ANTHROPIC_API_KEY;
+
+  const server = spawn("node", ["server/index.js"], { env, stdio: ["ignore", "pipe", "pipe"] });
+  let serverLog = "";
+  server.stdout.on("data", (d) => { serverLog += d; });
+  server.stderr.on("data", (d) => { serverLog += d; });
+  await new Promise((resolve, reject) => {
+    const deadline = Date.now() + 15000;
+    (function poll() {
+      fetch(`${BASE}/`).then(() => resolve()).catch(() => {
+        if (Date.now() > deadline) return reject(new Error(`server never came up:\n${serverLog}`));
+        setTimeout(poll, 300);
+      });
+    })();
+  });
+
+  const email = `nutri-e2e-${Date.now()}@example.com`;
+  let cookieHeader = "";
+  async function call(path, body, method) {
+    const res = await fetch(`${BASE}${path}`, {
+      method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json", cookie: cookieHeader },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const setCookie = res.headers.getSetCookie?.() || [];
+    if (setCookie.length) cookieHeader = setCookie.map((c) => c.split(";")[0]).join("; ");
+    return res.json().catch(() => ({}));
+  }
+  await call("/api/signup", { email, password: "password123", betaCode: "TESTCODE" });
+  await call("/api/profile", {
+    name: "SOMA E2E",
+    radarSnapshot: { body: 5, growth: 5, livelihood: 5, emotional: 5, social: 5, purpose: 5, autonomy: 5 },
+    pathway: "Architect",
+    goals: ["Makan lebih sehat dan cukup protein"],
+  });
+
+  const sql = new Client({ connectionString: env.DATABASE_URL });
+  await sql.connect();
+  const { rows: userRows } = await sql.query("SELECT id FROM users WHERE email = $1", [email]);
+  const userId = userRows[0].id;
+
+  // Seed a goal-generated nutrition quest directly (keyless fallbackQuest
+  // always returns "reflective", same limitation practicetest.e2e.js works
+  // around for practice-test quests) so the home quest card's live-progress
+  // rendering (item 7) has a real PROGRESSIVE quest to show.
+  const nutritionQuest = {
+    mode: "quest", completionType: "nutrition-log", lifecycleType: "progressive", structuredKind: null,
+    title: "Catat 3 Kali Makan Hari Ini", description: "Catat sarapan, makan siang, dan makan malam.",
+    statFocus: "body", why: "test", goalIndex: 0,
+    progressive: { requiredContributions: 3, completedContributions: 0, primaryMetric: "protein", targetValue: 60, currentValue: 0, evidenceComplete: false, targetMet: false, status: "ACTIVE" },
+  };
+  const { rows } = await sql.query(
+    `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest, is_meta)
+     VALUES ($1, 0, '2026-08-12', $2, NULL, NULL, false, false) RETURNING id`,
+    [userId, nutritionQuest]
+  );
+  const goalQuestId = rows[0].id;
+
+  const browser = await chromium.launch({ executablePath: CHROMIUM, headless: true });
+  const context = await browser.newContext({ baseURL: BASE });
+  const cookies = cookieHeader.split("; ").map((pair) => {
+    const eq = pair.indexOf("=");
+    return { name: pair.slice(0, eq), value: pair.slice(eq + 1), url: BASE };
+  });
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+
+  async function openDashboard() {
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+  }
+
+  console.log("E2E: home quest card live progress (item 7)");
+  await test("Today's Trial nutrition quest shows the progress line and 'Lanjut Catat' button, not 'Mulai'", async () => {
+    await openDashboard();
+    assert.ok(await page.locator("text=Meals 0/3").count(), "progress line missing");
+    assert.ok(await page.locator("text=Lanjut Catat").count(), "button must read 'Lanjut Catat', not 'Mulai'");
+    assert.strictEqual(await page.locator(`[data-reflect-id="${goalQuestId}"]:has-text("Mulai")`).count(), 0, "must never show a completion-style CTA while unmet");
+  });
+
+  console.log("E2E: Log Meal flow (search-based, item 4/5/6)");
+  await test("tapping the quest opens the Nutrition page with meal-time picker and totals", async () => {
+    await page.click(`[data-reflect-id="${goalQuestId}"]`);
+    await page.waitForSelector('text=Waktu makan', { timeout: 20000 });
+    assert.ok(await page.locator("text=Sarapan").count());
+    assert.ok(await page.locator("text=Makan Siang").count());
+    assert.ok(await page.locator("text=Makan Malam").count());
+    assert.ok(await page.locator("text=Camilan").count());
+  });
+
+  await test("picking a meal time reveals search, and a search result can be picked into the confirm step", async () => {
+    await page.click('[data-nf-meal="sarapan"]');
+    await page.waitForSelector("#nfSearchInput", { timeout: 10000 });
+    await page.fill("#nfSearchInput", "telur"); // substring match - "Telur ayam rebus" contains "telur", not "telur rebus"
+    await page.waitForSelector("[data-nf-pick]", { timeout: 10000 });
+    await page.click("[data-nf-pick]");
+    await page.waitForSelector("#nfSave", { timeout: 10000 });
+    assert.ok(await page.locator('text=Konfirmasi makanan').count());
+  });
+
+  await test("saving the confirmed entry updates the running progress and returns to the log step", async () => {
+    await page.click("#nfSave");
+    await page.waitForSelector('text=TERCATAT HARI INI', { timeout: 20000 });
+    assert.ok(await page.locator("text=Meals 1/3").count(), "progress did not advance after logging");
+  });
+
+  await test("closing the flow returns to the dashboard with the updated progress line visible", async () => {
+    await page.click("#nfDone");
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    assert.ok(await page.locator("text=Meals 1/3").count(), "home card must reflect the persisted progress");
+  });
+
+  console.log("E2E: SOMA META box (item 1/2) - renamed label + mode picker");
+  await test("META tab shows SOMA (not 'Fisik / Lari') and 2+ active quests badge the mode picker", async () => {
+    await page.click('[data-tab="meta"]');
+    await page.waitForSelector('[data-meta-tool="soma"]', { timeout: 20000 });
+    assert.ok(await page.locator("text=SOMA").count(), "META box must be relabeled SOMA");
+    assert.strictEqual(await page.locator("text=Fisik / Lari").count(), 0, "old label must be gone");
+    await page.click('[data-meta-tool="soma"]');
+    await page.waitForSelector('[data-soma-mode="nutrition"]', { timeout: 10000 });
+    // The goal-tied nutrition quest above is a Today's Trial quest, not a
+    // META one, so it does NOT count as an "active META SOMA quest" here -
+    // 0 active META quests still shows the picker (not skipped to 1-active).
+    assert.ok(await page.locator('text=Activity').count());
+    assert.ok(await page.locator('text=Nutrition').count());
+  });
+
+  await test("choosing Nutrition from the picker starts a fresh META session and opens the Log Meal flow", async () => {
+    await page.click('[data-soma-mode="nutrition"]');
+    await page.waitForSelector('text=Waktu makan', { timeout: 20000 });
+    assert.ok(await page.locator("text=Meals 0/3").count(), "fresh META nutrition quest should start at 0/3");
+  });
+
+  await test("re-opening SOMA now skips the picker (exactly 1 active quest) and resumes directly", async () => {
+    // Close out of the flow (without resolving it - the META quest stays
+    // ACTIVE) via #nfDone, same as any other flow screen - tapping a nav
+    // tab alone never dismisses an in-progress flow, matching jobMatchFlow/
+    // jobApplicationFlow's existing behavior.
+    await page.click("#nfDone");
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click('[data-tab="meta"]');
+    await page.waitForSelector('[data-meta-tool="soma"]', { timeout: 20000 });
+    await page.click('[data-meta-tool="soma"]');
+    await page.waitForSelector('text=Waktu makan', { timeout: 20000 });
+    assert.strictEqual(await page.locator('[data-soma-mode]').count(), 0, "picker must be skipped with exactly 1 active quest");
+  });
+
+  await browser.close();
+  await sql.end();
+  server.kill();
+  console.log(failures ? `\n${failures} E2E FAILURE(S)` : "\nALL E2E TESTS PASSED");
+  process.exit(failures ? 1 : 0);
+})().catch((e) => {
+  console.error("E2E run crashed:", e);
+  process.exit(1);
+});
