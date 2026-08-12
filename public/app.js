@@ -464,6 +464,12 @@ let practiceTestFlow = null;
 // step: "upload-cv" (skipped straight to "upload-job" if a CV artifact
 // already exists in the library) -> "upload-job".
 let jobMatchFlow = null;
+// Task 14 (Livelihood Milestone, PRD.md section 26 point 5): "Submit
+// Application" flow - same "separate flow, not reflectOpen" pattern as
+// jobMatchFlow. {questId, step, cvArtifact, form:{companyName,roleTitle,
+// dateApplied,submissionProof}, error}. step: "cv" (skipped straight to
+// "form" if a CV artifact already exists) -> "form".
+let jobApplicationFlow = null;
 // Task 12 (META): true while the inline Cardio/Gym/Recovery picker for the
 // "Body" META box is showing (tapped but no kind chosen yet). Reset after
 // /api/meta/start succeeds or the user backs out.
@@ -1610,6 +1616,46 @@ function jobMatchFlowHTML() {
   return "";
 }
 
+// Task 14 point 5: "Submit Application" - structured evidence FORM (not
+// free text), same "separate flow" pattern as jobMatchFlowHTML. Reuses the
+// Artifacts library for cvVersionUsed exactly like Job Match Analysis does
+// (a returning user's default CV is pre-selected, "Ganti CV" reopens the
+// picker) - no new CV-upload UI needed, this step always follows a
+// job-match-analysis quest that already required one.
+function jobApplicationFlowHTML() {
+  const f = jobApplicationFlow;
+  if (!f) return "";
+  if (f.step === "cv") {
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">SUBMIT APPLICATION</div>
+        <h2 class="fr">Upload CV dulu</h2>
+        <p class="why">Belum ada CV tersimpan di Artifacts. Upload sekali di sini sebagai versi CV yang dipakai untuk lamaran ini.</p>
+        <input type="file" id="jaCvFile" accept=".pdf,.docx,image/png,image/jpeg,image/webp" />
+        ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+        <button class="btn-ghost" id="jaCancel" style="margin-top:14px">← Batal</button>
+      </div>`;
+  }
+  if (f.step === "form") {
+    const ff = (k) => esc(f.form[k] ?? "");
+    return `
+      <div class="quest-card fadeUp">
+        <div class="qlabel mono">SUBMIT APPLICATION</div>
+        <h2 class="fr">Catat lamaran yang barusan disubmit</h2>
+        <p class="why">CV: ${esc(f.cvArtifact?.content?.filename || "tersimpan")} ✓ — Bukti submit wajib diisi supaya tercatat sebagai Qualified Application beneran, bukan klaim kosong.</p>
+        <div class="field"><label>Nama perusahaan</label><input type="text" maxlength="200" data-jaf="companyName" value="${ff("companyName")}" placeholder="mis. Acme Corp" /></div>
+        <div class="field"><label>Judul role</label><input type="text" maxlength="200" data-jaf="roleTitle" value="${ff("roleTitle")}" placeholder="mis. Data Analyst" /></div>
+        <div class="field"><label>Tanggal apply</label><input type="date" data-jaf="dateApplied" value="${ff("dateApplied")}" /></div>
+        <div class="field"><label>Bukti submit</label><textarea rows="3" maxlength="500" data-jaf="submissionProof" placeholder="Link konfirmasi, isi email dari HR/portal, atau nomor referensi aplikasi">${ff("submissionProof")}</textarea></div>
+        ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+        <button class="btn-primary full" id="jaSubmit" style="margin-top:14px">Simpan lamaran</button>
+        <button class="btn-ghost" id="jaChangeCv" style="margin-top:10px">Ganti CV</button>
+        <button class="btn-ghost" id="jaCancel">← Batal</button>
+      </div>`;
+  }
+  return "";
+}
+
 // Task 10a: Artifacts library sheet - reachable any time via its own icon,
 // independent of any quest flow (spec: "lihat, tambah, ATAU GANTI artifact
 // kapan saja"). artifactsList is metadata-only (no file bytes - see
@@ -1702,11 +1748,23 @@ function practiceTestResultHTML(pt) {
 
 // Task 10b: Job Match Analysis results - match table + honest verdict +
 // relevance-to-goal + one next step. No AI mentorReply here (see index.js
-// route comment: growth is a deterministic bump, not a second AI call), so
-// this card's "verdict" text stands in for it.
+// route comment), so this card's "verdict" text stands in for it.
+// Task 14 (PRD.md section 26): matchScore + qualified are new - qualified is
+// COMPUTED SERVER-SIDE from matchScore>=70 (jobMatch.cleanJobMatchResult),
+// never the AI's free claim, so this block is the honest pass/fail line the
+// old flat "Livelihood +3" badge used to stand in for. verdict/relevanceNote/
+// nextStep/matchTable are UNCHANGED from Task 10b (PRD section 26 point 3:
+// "existing narrative stays").
 const JOB_MATCH_STATUS_COLOR = { "ada bukti": "var(--growth)", "disebut tapi lemah": "var(--accent)", "tidak ada": "var(--rust)" };
 function jobMatchResultHTML(jm) {
+  const qualified = jm.qualified === true;
   return `
+    ${typeof jm.matchScore === "number" ? `
+    <div class="pt-block">
+      <div class="eyebrow mono">MATCH SCORE</div>
+      <p class="pt-band mono">${jm.matchScore}/100</p>
+      <p class="mono pt-band-meta" style="color:${qualified ? "var(--growth)" : "var(--rust)"}">${qualified ? "LOLOS — lanjut ke Submit Application" : "BELUM LOLOS — belum masuk hitungan Milestone"}</p>
+    </div>` : ""}
     <div style="margin:0 0 16px">
       <div class="eyebrow mono" style="margin:0 0 8px">KECOCOKAN SKILL</div>
       ${jm.matchTable.map((row) => `
@@ -1718,6 +1776,13 @@ function jobMatchResultHTML(jm) {
     <p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 12px;line-height:1.6">${esc(jm.verdict)}</p>
     ${jm.relevanceNote ? `<p class="why" style="margin:0 0 12px">${esc(jm.relevanceNote)}</p>` : ""}
     <div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 16px">LANGKAH BERIKUTNYA: ${esc(jm.nextStep)}</div>`;
+}
+
+// Task 14 point 5: confirmation summary for a completed Submit Application
+// Trial - same "quiet mono line above the deltas" slot structuredData
+// already uses (structSummary), not a new component.
+function jobApplicationSummary(ja) {
+  return `${ja.companyName} · ${ja.roleTitle} · Applied ${ja.dateApplied}`;
 }
 
 // Renders one open quest as a card - every card is equally "current" now
@@ -1820,6 +1885,14 @@ function targetManualFormHTML(kind) {
         <div class="field"><label>Durasi target (menit)</label><input type="number" min="1" data-tf="durasiMenit" value="${tf("durasiMenit")}" placeholder="28" /></div>
       </div>`;
   }
+  // Task 14 point 7: Livelihood Milestone #2+ manual override - a named
+  // funnel metric + target value, same "still numeric/measurable, not free
+  // text" rule as every other Opsi C.
+  if (kind === "livelihood-funnel") {
+    return `
+      <div class="field"><label>Nama metrik</label><input type="text" maxlength="80" data-tf="metricLabel" value="${tf("metricLabel")}" placeholder="mis. Response Rate" /></div>
+      <div class="field"><label>Target angka</label><input type="number" min="1" step="1" data-tf="targetValue" value="${tf("targetValue")}" placeholder="50" /></div>`;
+  }
   return `
     <div class="struct-grid">
       <div class="field"><label>Set</label><input type="number" min="1" data-tf="set" value="${tf("set")}" placeholder="4" /></div>
@@ -1896,6 +1969,7 @@ function completedResultCardHTML(r) {
         ${r.status === "done" ? "SELESAI" : r.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
       </div>
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
+      ${r.jobApplication ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(jobApplicationSummary(r.jobApplication))}</div>` : ""}
       ${r.practiceTest ? practiceTestResultHTML(r.practiceTest) : ""}
       ${r.jobMatch ? jobMatchResultHTML(r.jobMatch) : ""}
       ${r.mentorReply ? `<p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>` : ""}
@@ -2316,6 +2390,7 @@ function renderDashboard() {
   const questSectionHTML = completedResult ? completedResultCardHTML(completedResult)
     : practiceTestFlow ? practiceTestFlowHTML()
     : jobMatchFlow ? jobMatchFlowHTML()
+    : jobApplicationFlow ? jobApplicationFlowHTML()
     : reflectOpen ? questSummaryCard(targetDay, goalLabel(targetDay?.goalIndex), milestoneLabel(targetDay?.goalIndex))
     : openQuests.length > 1 ? `
     <div class="quest-carousel">
@@ -2440,6 +2515,22 @@ function renderDashboard() {
         cv = artifacts.find((a) => a.type === "cv") || null;
       } catch (e) { /* fall through to upload-cv either way */ }
       jobMatchFlow = { questId: id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
+      renderDashboard();
+      return;
+    }
+    // Task 14 point 5: job-application-submit quests check the Artifacts
+    // library first, same pattern as job-match-analysis just above.
+    if (quest?.completionType === "job-application-submit") {
+      root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
+      let cv = null;
+      try {
+        const { artifacts } = await api("/api/artifacts");
+        cv = artifacts.find((a) => a.type === "cv") || null;
+      } catch (e) { /* fall through to cv step either way */ }
+      jobApplicationFlow = {
+        questId: id, step: cv ? "form" : "cv", cvArtifact: cv,
+        form: { companyName: "", roleTitle: "", dateApplied: "", submissionProof: "" }, error: "",
+      };
       renderDashboard();
       return;
     }
@@ -2655,8 +2746,12 @@ function renderDashboard() {
       });
       const qd = openQuests.find((q) => q.id === jobMatchFlow.questId);
       completedResult = {
+        // Task 14 point 6: no more delta chip (deltas always empty here) -
+        // resp.target is the Milestone progress line instead (reuses
+        // targetPickerHTML, same component the structured-physical flow
+        // uses for its own Target Berikutnya line).
         questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
-        mentorReply: "", deltas: resp.deltas, jobMatch: resp.result, target: null,
+        mentorReply: "", deltas: {}, jobMatch: resp.result, target: resp.target,
       };
       jobMatchFlow = null;
     } catch (e) {
@@ -2666,6 +2761,57 @@ function renderDashboard() {
     renderDashboard();
   });
   document.getElementById("jmCancel")?.addEventListener("click", () => { jobMatchFlow = null; renderDashboard(); });
+  // Task 14 point 5: job-application-submit flow.
+  document.getElementById("jaCvFile")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    root.innerHTML = spinnerHTML("Mengunggah & memproses CV...");
+    try {
+      const { mimeType, dataBase64, filename } = await fileToBase64(file);
+      const resp = await api("/api/artifacts", { method: "POST", body: { type: "cv", mimeType, dataBase64, filename } });
+      jobApplicationFlow.cvArtifact = resp.artifact;
+      jobApplicationFlow.step = "form";
+      jobApplicationFlow.error = "";
+    } catch (err) {
+      jobApplicationFlow.error = err.message;
+    }
+    renderDashboard();
+  });
+  document.querySelectorAll("[data-jaf]").forEach((el) => el.addEventListener("input", (e) => {
+    jobApplicationFlow.form[el.dataset.jaf] = e.target.value;
+  }));
+  document.getElementById("jaChangeCv")?.addEventListener("click", () => {
+    jobApplicationFlow.step = "cv";
+    jobApplicationFlow.error = "";
+    renderDashboard();
+  });
+  document.getElementById("jaSubmit")?.addEventListener("click", async () => {
+    const f = jobApplicationFlow.form;
+    if (!f.companyName.trim() || !f.roleTitle.trim() || !f.dateApplied || f.submissionProof.trim().length < 8) {
+      jobApplicationFlow.error = "Isi semua field dulu — bukti submit minimal 8 karakter.";
+      renderDashboard();
+      return;
+    }
+    root.innerHTML = spinnerHTML("Menyimpan lamaran...");
+    try {
+      const resp = await api("/api/job-application/submit", {
+        method: "POST",
+        body: { questId: jobApplicationFlow.questId, cvArtifactId: jobApplicationFlow.cvArtifact.id, ...jobApplicationFlow.form },
+      });
+      const qd = openQuests.find((q) => q.id === jobApplicationFlow.questId);
+      completedResult = {
+        questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
+        mentorReply: resp.jobApplication ? `Lamaran ke ${resp.jobApplication.companyName} untuk ${resp.jobApplication.roleTitle} tercatat.` : "",
+        deltas: {}, jobApplication: resp.jobApplication, target: resp.target,
+      };
+      jobApplicationFlow = null;
+    } catch (e) {
+      jobApplicationFlow.step = "form";
+      jobApplicationFlow.error = e.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("jaCancel")?.addEventListener("click", () => { jobApplicationFlow = null; renderDashboard(); });
   // Task 10a: Artifacts sheet.
   document.getElementById("openArtifacts")?.addEventListener("click", async () => {
     artifactsOpen = true; artifactsError = "";
@@ -2757,6 +2903,15 @@ function renderDashboard() {
           return;
         }
         payload = { kind: "cardio", metrics: { jarakKm, paceMinPerKm: durasiMenit / jarakKm } };
+      } else if (t.kind === "livelihood-funnel") {
+        const metricLabel = String(targetManualForm.metricLabel || "").trim();
+        const targetValue = Number(targetManualForm.targetValue);
+        if (!metricLabel || !targetValue || targetValue <= 0) {
+          targetError = "Isi nama metrik dan target angka dulu, target lebih dari 0.";
+          renderDashboard();
+          return;
+        }
+        payload = { kind: "livelihood-funnel", metrics: { metricLabel, targetValue, currentValue: 0 } };
       } else {
         const set = Number(targetManualForm.set);
         const repetisi = Number(targetManualForm.repetisi);
