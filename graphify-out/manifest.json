@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786525549.896176,
-    "ast_hash": "4b408cbb9a5b4b67525eb19fa4cc483b",
+    "mtime": 1786539841.2468112,
+    "ast_hash": "faa7b08159b4536b47f9127d5b6bfce2",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -25,18 +25,18 @@
     "semantic_hash": "20fd1243671a1310360b35ac9f823ada"
   },
   "server/claude.js": {
-    "mtime": 1786533231.6869092,
-    "ast_hash": "d9f226d03702fe5474f9a5d0c70b1c51",
+    "mtime": 1786538982.1268308,
+    "ast_hash": "0b695b04e4ab8085ab192273f0b9a19b",
     "semantic_hash": ""
   },
   "server/db.js": {
-    "mtime": 1786470396.256296,
-    "ast_hash": "0c15019573ae27cade696403cde3ce63",
+    "mtime": 1786539406.7588212,
+    "ast_hash": "3b10e4a57a1538e8ffc50ed4bf4169e4",
     "semantic_hash": ""
   },
   "server/index.js": {
-    "mtime": 1786518990.5367305,
-    "ast_hash": "cb31a74d4410b7a7c757518cc246417c",
+    "mtime": 1786539061.262829,
+    "ast_hash": "d57bc35c67eee3893d5fd822ca41ef33",
     "semantic_hash": ""
   },
   "server/jobMatch.js": {
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786533283.766908,
-    "ast_hash": "a5ee767241cc122f18c1c51802cdea1e",
+    "mtime": 1786540311.2468004,
+    "ast_hash": "3671abaff5b2b550181a57c21b9b68bb",
     "semantic_hash": ""
   },
   "README.md": {
@@ -202,6 +202,31 @@
   "tests/recoveryregression.js": {
     "mtime": 1786533172.7589104,
     "ast_hash": "059757ddeb3854b88a67a951204e08b1",
+    "semantic_hash": ""
+  },
+  "server/nutrition.js": {
+    "mtime": 1786538413.3788438,
+    "ast_hash": "c82a821db61b4500ed8e2ad5dd3d33b0",
+    "semantic_hash": ""
+  },
+  "server/nutritionEntry.js": {
+    "mtime": 1786538431.4428434,
+    "ast_hash": "8e94d0254e0e519809c1d0c3e60692b9",
+    "semantic_hash": ""
+  },
+  "tests/nutrition.e2e.js": {
+    "mtime": 1786539948.7988088,
+    "ast_hash": "d81ed83ff657ca6de0dd0e5e8ee19109",
+    "semantic_hash": ""
+  },
+  "tests/nutrition.js": {
+    "mtime": 1786539568.9988174,
+    "ast_hash": "6dbf0ce12e1c5c687746e2a2a72cec6d",
+    "semantic_hash": ""
+  },
+  "docs/soma-nutrition-flow.md": {
+    "mtime": 1786540231.4748023,
+    "ast_hash": "bbd4cbb85d8da0ac161a101eac3ed49a",
     "semantic_hash": ""
   }
 }
