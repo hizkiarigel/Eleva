@@ -10,6 +10,32 @@ const structured = require("./structured");
 const targets = require("./targets");
 const practiceTestLib = require("./practiceTest");
 const jobMatch = require("./jobMatch");
+const jobApplication = require("./jobApplication");
+
+// Task 14 (Livelihood Milestone, PRD.md section 26): auto-creates the fixed
+// "10 Qualified Applications" milestone the first time a Livelihood goal's
+// job-match flow touches a goalIndex with no Livelihood-family target yet.
+// Unlike cardio/gym (a target only exists once the user picks A/B/C after a
+// completed quest), this one is fixed from the founder's own decision - no
+// AI options, no user pick - so it's created eagerly rather than waiting for
+// an evidence submission to trigger it. Must be PERSISTED (not just
+// computed on read, the way practiceTestLib.currentTargetFor is) so it
+// renders through the same .quest-context Milestone line Body goals already
+// get (that line reads state.goalTargets only, see public/app.js
+// questSummaryCard/milestoneLabel).
+async function ensureQualifiedApplicationsMilestone(userId, state, goalIndex) {
+  const existing = state.goalTargets?.[String(goalIndex)];
+  if (existing && (existing.kind === "qualified-applications" || existing.kind === "livelihood-funnel")) return existing;
+  const metrics = { targetCount: 10, currentCount: 0 };
+  const target = {
+    kind: "qualified-applications",
+    label: targets.formatTargetLabel("qualified-applications", metrics),
+    approach: "", metrics, source: "auto", createdAt: new Date().toISOString(),
+  };
+  await db.setGoalTarget(userId, goalIndex, target);
+  state.goalTargets = { ...(state.goalTargets || {}), [String(goalIndex)]: target };
+  return target;
+}
 
 const app = express();
 app.set("trust proxy", 1);
@@ -221,6 +247,30 @@ app.get("/api/state", requireAuth, async (req, res) => {
       const recentAll = await db.recentDays(req.userId, { limit: 5 });
       const recentCtx = recentAll.map((d) => ({ date: d.date, quest: d.quest?.title, goalIndex: d.goalIndex, reflection: d.reflection }));
       for (const goalIndex of needySlots) {
+        // Task 14 point 4: deterministic branching hint for the Livelihood
+        // Milestone loop - computed in code (same defense-in-depth principle
+        // as targetReached/qualified) rather than asked of the model from
+        // raw recentDays, so a wrong AI read of old history can never
+        // mis-route "just qualified" into a skill-building quest or vice
+        // versa. Scoped to THIS goal only (recentAll above is cross-goal).
+        // "Unresolved" = the most recent job-match-analysis for this goal
+        // has no LATER job-application-submit for the same goal yet.
+        let jobMatchHint = null;
+        if (goalIndex != null) {
+          const goalRecent = await db.recentDays(req.userId, { goalIndex, limit: 5 });
+          const lastAnalysis = goalRecent.find((d) => d.reflection?.jobMatchResult);
+          const lastSubmit = goalRecent.find((d) => d.reflection?.jobApplicationSubmit);
+          if (lastAnalysis && (!lastSubmit || lastSubmit.id < lastAnalysis.id)) {
+            const jm = lastAnalysis.reflection.jobMatchResult;
+            jobMatchHint = jm.qualified
+              ? { qualified: true, note: "Lowongan terakhir yang dianalisis LOLOS (qualified) untuk goal ini - quest hari ini WAJIB completionType job-application-submit untuk lowongan itu, JANGAN job-match-analysis baru dulu." }
+              : {
+                  qualified: false,
+                  gap: (jm.matchTable || []).filter((r) => r.status !== "ada bukti").map((r) => r.skill),
+                  note: "Lowongan terakhir yang dianalisis TIDAK lolos (not qualified) untuk goal ini - JANGAN pilih job-application-submit. Pilih quest skill-building yang menyasar gap-nya, ATAU job-match-analysis untuk lowongan LAIN.",
+                };
+          }
+        }
         const ctx = {
           profile: state.profile,
           pathway: state.pathway,
@@ -256,6 +306,7 @@ app.get("/api/state", requireAuth, async (req, res) => {
           // moderate for).
           kondisiStatus: state.kondisiStatus !== "Normal" ? state.kondisiStatus : undefined,
           kondisiNote: state.kondisiStatus !== "Normal" ? state.kondisiNote : undefined,
+          jobMatchHint: jobMatchHint || undefined,
           stats: state.stats,
           chapterNumber: state.chapterNumber,
           chapterTitle: state.chapterTitle,
@@ -916,15 +967,18 @@ app.post("/api/artifacts/:id/replace", requireAuth, async (req, res) => {
   }
 });
 
-// Task 10b: Job Match Analysis. Unlike practice-test, this completion type
-// applies growth DETERMINISTICALLY (a flat bump to the quest's statFocus,
-// defaulting to livelihood) instead of a second AI call for mentorReply/
-// statDeltas - the analysis itself already returns rich, specific text
-// (verdict/relevanceNote/nextStep), so asking the model to comment on its
-// own comparison a second time would just be a second paid call for no real
-// new information. Chapter never advances from this completion type alone
-// (no AI judgment call feeding chapterAdvance here) - other quest types
-// still carry that forward normally.
+// Task 10b: Job Match Analysis.
+// Task 14 (PRD.md section 26, point 6): the flat "+3 to statFocus" bump this
+// route used to apply on every analysis is REMOVED - it was the one
+// completionType Task 7d's "no arbitrary points, only evidence-based growth"
+// pass missed (job-match's growth was deterministic-but-arbitrary, not tied
+// to any real gate, so it slipped past that cleanup). Nothing replaces it
+// here: an analysis alone is just a READING of fit, not evidence of
+// progress - the Livelihood Milestone counter (incremented only by a
+// validated /api/job-application/submit, see below) is what now carries the
+// "did something real happen" signal for this goal, same principle as
+// structured-physical/practice-test already growing from evidence, not
+// clicks. Chapter still never advances from this completion type alone.
 app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
   try {
     const { questId, cvArtifactId, images } = req.body;
@@ -943,31 +997,108 @@ app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
       pathway: state.pathway,
     });
 
-    const statFocus = (day.quest?.statFocus && day.quest.statFocus in state.stats) ? day.quest.statFocus : "livelihood";
-    const deltas = statFocus in state.stats ? { [statFocus]: 3 } : {};
-    const newStats = { ...state.stats };
-    Object.entries(deltas).forEach(([k, v]) => { newStats[k] = Math.max(0, Math.min(100, newStats[k] + v)); });
-    const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
-
     const reflection = {
       status: "done", text: "",
       jobMatchResult: result,
-      deltas, timestamp: new Date().toISOString(),
+      deltas: {}, timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
-    await db.touchStatActivity(req.userId, Object.keys(deltas));
-    await db.updateState(req.userId, {
-      stats: newStats,
-      chapterNumber: state.chapterNumber,
-      chapterTitle: state.chapterTitle,
-      growthSessions: newGrowthSessions,
-      pathwayNoun: state.pathwayNoun,
-    });
 
-    res.json({ ok: true, result, deltas });
+    // Task 14 point 1/2: a Livelihood goal's Milestone line ("→ Milestone:
+    // 10 Qualified Applications (X/10)") only renders once state.goalTargets
+    // actually has an entry for this goalIndex (questSummaryCard reads that
+    // column directly, see public/app.js) - auto-create it here on first
+    // touch rather than waiting for a submit, so the FIRST analysis already
+    // shows the counter, matching the founder's report that it never showed
+    // up at all. META sessions (goalIndex null) have no goal to attach a
+    // Milestone to, same guard the A/B/C structured-physical flow already uses.
+    const target = day.goalIndex != null ? await ensureQualifiedApplicationsMilestone(req.userId, state, day.goalIndex) : null;
+
+    res.json({ ok: true, result, target: target ? { mode: "progress", kind: target.kind, currentTarget: target } : null });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menganalisis kecocokan lowongan." });
+  }
+});
+
+// Task 14 (PRD.md section 26, points 2/5): "Submit Application" - the
+// evidence half of the Livelihood Milestone loop. Fully deterministic (no AI
+// call at all, unlike job-match-analysis) - there's nothing to judge here,
+// only structured evidence to validate and a counter to move, same
+// philosophy as structured.js's cardio/gym forms. The "qualified" checklist
+// (PRD point 2) is enforced here, server-side, from data already computed
+// deterministically earlier in the loop:
+//   - matchScore >= 70 / roleAligned / notRedFlag -> folded into the stored
+//     jobMatchResult.qualified boolean (jobMatch.cleanJobMatchResult), never
+//     re-trusted from a fresh AI claim here.
+//   - cvVersionUsed -> a real artifact id, looked up same as job-match-analyze.
+//   - applicationSubmittedEvidence -> the form fields themselves
+//     (jobApplication.validateJobApplication).
+// Only once ALL of those hold does current_count move - an unqualified
+// analysis, a missing CV reference, or a thin/empty proof field never
+// increments the Milestone, no matter how the form is filled.
+app.post("/api/job-application/submit", requireAuth, async (req, res) => {
+  try {
+    const { questId, cvArtifactId } = req.body;
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "job-application-submit") return res.status(400).json({ error: "Quest ini bukan tipe Submit Application." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    if (day.goalIndex == null) return res.status(400).json({ error: "Quest ini tidak terikat ke goal manapun." });
+
+    const validated = jobApplication.validateJobApplication(req.body);
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
+
+    const cvArtifact = await db.getArtifactById(req.userId, cvArtifactId);
+    if (!cvArtifact) return res.status(400).json({ error: "CV tidak ditemukan — pilih versi CV yang dipakai untuk lamaran ini." });
+
+    // "qualified" gate: the most recent job-match-analysis for THIS goal
+    // (not any goal) must have passed. Mirrors the jobMatchHint lookup in
+    // GET /api/state, but re-checked here independently - a stale/replayed
+    // client request must never increment the counter off an old hint.
+    const goalRecent = await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 5 });
+    const lastAnalysis = goalRecent.find((d) => d.reflection?.jobMatchResult);
+    if (!lastAnalysis || !lastAnalysis.reflection.jobMatchResult.qualified) {
+      return res.status(400).json({ error: "Belum ada Job Match Analysis yang LOLOS (qualified) untuk goal ini — selesaikan analisisnya dulu." });
+    }
+
+    const target = await ensureQualifiedApplicationsMilestone(req.userId, state, day.goalIndex);
+    const metrics = { targetCount: target.metrics.targetCount, currentCount: target.metrics.currentCount + 1 };
+    const updatedTarget = {
+      ...target, metrics, label: targets.formatTargetLabel("qualified-applications", metrics),
+      source: "evidence", createdAt: new Date().toISOString(),
+    };
+    await db.setGoalTarget(req.userId, day.goalIndex, updatedTarget);
+
+    const jobApplicationSubmit = { ...validated.clean, cvArtifactId: cvArtifact.id };
+    const reflection = {
+      status: "done", text: "",
+      jobApplicationSubmit,
+      mentorReply: `Lamaran ke ${validated.clean.companyName} untuk ${validated.clean.roleTitle} tercatat.`,
+      deltas: {}, timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+
+    // Task 14 point 7: reached 10/10 -> generalize the existing "Target
+    // Berikutnya" A/B/C mechanism (Fokus 2.2/2.3) to Livelihood goals, same
+    // trigger shape cardio/gym already use, just a different kind/prompt.
+    // cardio/gym's own trigger (line ~600 above) is untouched - this is a
+    // parallel path, not a modification of it.
+    let targetScreen;
+    if (targets.targetReached("qualified-applications", updatedTarget.metrics)) {
+      const options = await ai.generateTargetOptions({
+        kind: "qualified-applications", goalText: state.goals[day.goalIndex], pathway: state.pathway,
+      });
+      targetScreen = { mode: "options", reached: true, kind: "livelihood-funnel", options };
+    } else {
+      targetScreen = { mode: "progress", kind: "qualified-applications", currentTarget: updatedTarget };
+    }
+
+    res.json({ ok: true, jobApplication: jobApplicationSubmit, target: targetScreen });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan lamaran." });
   }
 });
 
