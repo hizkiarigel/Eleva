@@ -238,7 +238,18 @@ app.get("/api/state", requireAuth, async (req, res) => {
           // quest is a step TOWARD that target, not a fresh assumption it's
           // already met - generateQuest's prompt references this instead of
           // treating every quest as a clean slate.
-          currentTarget: goalIndex != null ? state.goalTargets?.[String(goalIndex)] : undefined,
+          // Task 13: a practice-test goal's target isn't a picked A/B/C
+          // number but the bottleneck track+band, recomputed read-only from
+          // its per-track history on every fetch (server-side, never the
+          // AI's choice) - {track, targetBand} with a label/approach shaped
+          // like the physical targets so generateQuest's prompt reads both
+          // the same way.
+          currentTarget: goalIndex != null
+            ? (state.goalTargets?.[String(goalIndex)]
+              || (state.practiceTest?.[String(goalIndex)]
+                ? practiceTestLib.currentTargetFor(state.practiceTest[String(goalIndex)], goals[goalIndex])
+                : undefined))
+            : undefined,
           // Task 11f: Context Update feeds quest generation directly (the
           // WOOP-Obstacle tie-in from the PRD) - only passed when it's
           // actually saying something (Normal is the default, nothing to
@@ -692,14 +703,24 @@ app.post("/api/practice-test/generate", requireAuth, async (req, res) => {
     if (day.quest?.completionType !== "practice-test") return res.status(400).json({ error: "Quest ini bukan tipe Practice Test." });
     if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
 
-    const practiceState = (day.goalIndex != null && state.practiceTest?.[String(day.goalIndex)]) || { level: 1, history: [] };
+    // Task 13: per-track state, migrated lazily from the old flat
+    // {level,history} shape (persisted back only on submit - this route is
+    // read-only toward practice_test). If the previous attempt on THIS track
+    // flagged a weak category, this session becomes a focused 12-question
+    // DRILL on it instead of a full 20-question sprint - evidence still
+    // accumulates, but the sprint counter/level ratchet don't move (see the
+    // submit route).
+    const { tracks } = practiceTestLib.migrateState(day.goalIndex != null ? state.practiceTest?.[String(day.goalIndex)] : null);
+    const trackState = tracks[kind];
+    const nextDrill = trackState.nextDrill || null;
     const result = await ai.generatePracticeTest({
-      kind, track, level: practiceState.level || 1,
-      history: (practiceState.history || []).slice(-5),
+      kind, track, level: trackState.level || 1,
+      history: (trackState.history || []).slice(-5),
       goalText: day.goalIndex != null ? state.goals?.[day.goalIndex] : undefined,
       pathway: state.pathway,
+      drill: nextDrill ? { category: nextDrill.category } : null,
     });
-    const payload = { kind, track, ...result };
+    const payload = { kind, track, entryType: nextDrill ? "drill" : "sprint", ...(nextDrill ? { focusCategory: nextDrill.category } : {}), ...result };
     // The answer key lives in days.practice_test_payload, NOT in the `quest`
     // jsonb - see the column comment in db.js's init() for why (that column
     // ships to the client verbatim on every GET /api/state, this one never
@@ -725,6 +746,37 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
 
     const graded = practiceTestLib.gradeAnswers(payload.questions, answers || {});
 
+    // Task 13 (Objective Assessment Engine): everything below is
+    // deterministic - band, confidence, ladder, milestone, next-drill - the
+    // AI is only ever asked for the mentorReply further down. Track totals
+    // run separately from the display-capped history so band/confidence
+    // never lose evidence past 20 sessions.
+    const entryType = payload.entryType || "sprint";
+    const trackKey = payload.kind === "listening" ? "listening" : "reading";
+    const goalText = day.goalIndex != null ? state.goals?.[day.goalIndex] : undefined;
+    const targetBand = practiceTestLib.parseTargetBand(goalText);
+    const migrated = practiceTestLib.migrateState(day.goalIndex != null ? state.practiceTest?.[String(day.goalIndex)] : null);
+    const trackState = migrated.tracks[trackKey];
+    const statusBefore = practiceTestLib.trackStatus(trackState, targetBand);
+    trackState.history = [...(trackState.history || []), {
+      ts: new Date().toISOString(), testKind: payload.kind, track: payload.track,
+      score: graded.correct, total: graded.total, entryType, categories: graded.categories,
+    }].slice(-20);
+    trackState.totalQuestions += graded.total;
+    trackState.totalCorrect += graded.correct;
+    // Progressive difficulty stays sprint-only: a focused drill is remedial
+    // work on one category, not evidence the whole track got easier.
+    if (entryType === "sprint") trackState.level = (trackState.level || 1) + 1;
+    const statusAfter = practiceTestLib.trackStatus(trackState, targetBand);
+    const milestoneAchieved = (statusAfter === "STABLE" || statusAfter === "MASTERED")
+      && statusBefore !== "STABLE" && statusBefore !== "MASTERED";
+    // Next Trial recommendation: weakest category of THIS attempt becomes
+    // the track's pending drill; a clean attempt clears it (next session is
+    // a fresh sprint).
+    const weakest = practiceTestLib.weakestCategory(graded.categories);
+    if (weakest) trackState.nextDrill = { category: weakest, questionCount: practiceTestLib.DRILL_QUESTIONS };
+    else delete trackState.nextDrill;
+
     const recentGoalDays = day.goalIndex != null ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined;
     const ctx = {
       profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
@@ -732,7 +784,7 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
       status: "done",
       // Distinct from structuredData - see processReflection's evaluationRules
       // branch in claude.js. Objective evidence, no growth-gate needed.
-      practiceTestResult: { kind: payload.kind, track: payload.track, score: graded.correct, total: graded.total },
+      practiceTestResult: { kind: payload.kind, track: payload.track, score: graded.correct, total: graded.total, entryType },
       recentDays: recentGoalDays,
       stats: state.stats,
       growthSessions: state.growthSessions,
@@ -751,7 +803,7 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
 
     const reflection = {
       status: "done", text: "",
-      practiceTestResult: { kind: payload.kind, track: payload.track, score: graded.correct, total: graded.total },
+      practiceTestResult: { kind: payload.kind, track: payload.track, score: graded.correct, total: graded.total, entryType },
       deltas, mentorReply: result.mentorReply, timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
@@ -766,17 +818,38 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
       pathwayNoun: state.pathwayNoun,
     });
 
-    // Progressive difficulty (founder spec): level always moves up by one on
-    // completion, regardless of score - "quest berikutnya otomatis lebih
-    // sulit sedikit dari level ini, TIDAK reset ke level dasar." History is
-    // capped so the column can't grow unbounded over a long First Trial.
+    // Task 13: persist the migrated per-track state (this write is also
+    // what upgrades a legacy flat {level,history} row to the tracks shape
+    // for good). META/legacy sessions (goalIndex null) have no per-goal row
+    // to accumulate into - their assessment below still reflects this
+    // session's own numbers, honestly at Low confidence.
     if (day.goalIndex != null) {
-      const practiceState = state.practiceTest?.[String(day.goalIndex)] || { level: 1, history: [] };
-      const history = [...(practiceState.history || []), { ts: new Date().toISOString(), testKind: payload.kind, track: payload.track, score: graded.correct, total: graded.total }].slice(-20);
-      await db.setPracticeTestState(req.userId, day.goalIndex, { level: (practiceState.level || 1) + 1, history });
+      await db.setPracticeTestState(req.userId, day.goalIndex, migrated);
     }
 
-    res.json({ ok: true, score: graded.correct, total: graded.total, wrong: graded.wrong, mentorReply: result.mentorReply, interpretation: result.interpretation || null, deltas });
+    // Task 13 result-card contract - all deterministic, computed AFTER the
+    // update so band/confidence include this attempt. currentTargetFor also
+    // re-picks the bottleneck track here, which is exactly the "Milestone
+    // achieved → target shifts to the next weakest track" trigger (the next
+    // GET /api/state reads the same function for quest generation).
+    const band = practiceTestLib.estimateBand(trackState.totalCorrect, trackState.totalQuestions);
+    const split = practiceTestLib.categorySplit(graded.categories);
+    const currentTarget = day.goalIndex != null ? practiceTestLib.currentTargetFor(migrated, goalText) : null;
+    const sprintNumber = trackState.history.filter((h) => (h.entryType || "sprint") === "sprint").length;
+    const assessment = {
+      trackKey, entryType, sprintNumber,
+      band, confidence: practiceTestLib.confidenceLabel(trackState.totalQuestions),
+      totalQuestions: trackState.totalQuestions,
+      targetBand, status: statusAfter, milestoneAchieved,
+      categories: { breakdown: graded.categories, strong: split.strong, unstable: split.unstable },
+      decision: {
+        primaryQuest: goalText || null,
+        currentTarget: currentTarget ? currentTarget.label : null,
+        nextTrial: weakest ? `${weakest} · Precision Drill · ${practiceTestLib.DRILL_QUESTIONS} soal` : null,
+      },
+    };
+
+    res.json({ ok: true, score: graded.correct, total: graded.total, wrong: graded.wrong, mentorReply: result.mentorReply, interpretation: result.interpretation || null, deltas, assessment });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan hasil tes." });

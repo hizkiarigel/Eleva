@@ -398,6 +398,16 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 .settings-row.disabled { color: var(--muted); }
 
+/* Task 13 (Objective Assessment Engine) — practice-test result blocks */
+.pt-block { margin: 0 0 16px; padding: 12px 14px; background: var(--surface2); border: 1px solid var(--hair); border-radius: 10px; }
+.pt-block .eyebrow { margin: 0 0 8px; }
+.pt-band { font-size: 20px; margin: 0 0 4px; color: var(--accent-bright); }
+.pt-band-meta { font-size: 11.5px; color: var(--muted); margin: 0 0 2px; }
+.pt-obs { font-size: 13px; margin: 0 0 6px; line-height: 1.5; }
+.pt-obs-label { display: inline-block; margin-right: 6px; font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); font-family: inherit; }
+.pt-obs-label.strong { color: var(--growth); }
+.pt-obs-label.unstable { color: var(--rust); }
+
 /* Task 12 (META tab) */
 .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .meta-tool-card {

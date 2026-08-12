@@ -12,10 +12,11 @@
   "10": "renderOnboarding",
   "11": "auth.js",
   "12": "practiceTest.js",
-  "13": "questSummaryCard",
+  "13": "practicetest.e2e.js",
   "14": "Job Match Analysis (Task 10b)",
   "15": "Eleva Root CLAUDE.md — graphify Integration Rules",
   "16": "Task 4: Privacy Notice (minimal)",
   "17": "Task 6: Prompt Caching",
-  "18": "completedResultCardHTML"
+  "18": "structSummary",
+  "19": "practice-test-flow.md"
 }

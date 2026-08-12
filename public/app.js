@@ -1531,7 +1531,8 @@ function practiceTestFlowHTML() {
     const body = f.kind === "listening" ? p.script : p.passage;
     return `
       <div class="quest-card fadeUp">
-        <div class="qlabel mono">PRACTICE TEST · ${PRACTICE_LABELS[f.kind]} · ${PRACTICE_LABELS[f.track]}</div>
+        <div class="qlabel mono">${p.entryType === "drill" ? `DRILL${p.focusCategory ? ` · ${esc(p.focusCategory).toUpperCase()}` : ""}` : "PRACTICE TEST"} · ${PRACTICE_LABELS[f.kind]} · ${PRACTICE_LABELS[f.track]}</div>
+        ${p.entryType === "drill" ? `<p class="why">Drill terfokus ${p.questions.length} soal — latihan kategori terlemahmu dari attempt sebelumnya, bukan pengukuran ulang penuh.</p>` : ""}
         ${f.kind === "listening" ? `
           <p class="why">Skrip dibacakan lewat suara browser — kualitasnya bisa terdengar robotic tergantung device, ini batasan versi pilot, bukan bug.</p>
           <button class="btn-ghost" id="ptPlay" ${f.plays >= 2 ? "disabled" : ""}>${f.plays >= 2 ? "Sudah diputar 2x" : `▶ Putar (${f.plays}/2 terpakai)`}</button>
@@ -1631,11 +1632,52 @@ function artifactsSheetHTML() {
 // Task 9: score + per-wrong-answer explanation, folded into the same
 // completedResultCardHTML acknowledgment used for every other quest type -
 // same "Lanjut" dismiss/refetch flow, no separate results screen to build.
+// Task 13 (Objective Assessment Engine): rebuilt around the founder-approved
+// block structure - header "{TRACK} SPRINT #n" (or DRILL), score+metadata,
+// ESTIMATED LEVEL (band range + confidence, NEVER a single "IELTS Band
+// Score: X.X"), ELEVA OBSERVED (deterministic per-category Strong/Unstable
+// from the grading breakdown - the Time bucket is a known gap until the
+// 30-minute active timer exists), and ELEVA DECISION (Primary Quest /
+// Current Target / Next Trial, reusing the Task 7d hierarchy labels).
+// The generic 3-line Eleva Response interpretation is intentionally NOT
+// rendered for practice-test results - these blocks replace it (see
+// completedResultCardHTML).
 function practiceTestResultHTML(pt) {
+  const a = pt.assessment || null;
+  const trackName = PRACTICE_LABELS[pt.kind] || pt.kind;
+  const header = a
+    ? (a.entryType === "drill" ? `${trackName.toUpperCase()} DRILL` : `${trackName.toUpperCase()} SPRINT #${String(a.sprintNumber || 1).padStart(2, "0")}`)
+    : `${trackName.toUpperCase()} PRACTICE`;
+  const catRow = (cats) => cats.map((c) => {
+    const b = a.categories.breakdown[c];
+    return `${esc(c)}${b ? ` (${b.correct}/${b.total})` : ""}`;
+  }).join(" · ");
   return `
+    <div class="eyebrow mono" style="margin:0 0 6px">${header}</div>
     <div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 12px">
-      ${PRACTICE_LABELS[pt.kind]} · ${PRACTICE_LABELS[pt.track]} · Skor ${pt.score}/${pt.total}
+      Skor ${pt.score}/${pt.total} · ${PRACTICE_LABELS[pt.track]} ${trackName}
     </div>
+    ${a && a.band ? `
+    <div class="pt-block">
+      <div class="eyebrow mono">ESTIMATED LEVEL</div>
+      <p class="pt-band mono">IELTS ${a.band.rangeLow}–${a.band.rangeHigh}</p>
+      <p class="mono pt-band-meta">Projected raw ≈ ${a.band.projectedRaw}/40</p>
+      <p class="mono pt-band-meta">Confidence: ${esc(a.confidence)} · ${a.totalQuestions} questions observed</p>
+    </div>` : ""}
+    ${a ? `
+    <div class="pt-block">
+      <div class="eyebrow mono">ELEVA OBSERVED</div>
+      ${a.categories.strong.length ? `<p class="pt-obs"><span class="pt-obs-label strong">Strong</span> ${catRow(a.categories.strong)}</p>` : ""}
+      ${a.categories.unstable.length ? `<p class="pt-obs"><span class="pt-obs-label unstable">Unstable</span> ${catRow(a.categories.unstable)}</p>` : ""}
+      ${!a.categories.strong.length && !a.categories.unstable.length ? `<p class="pt-obs" style="color:var(--muted)">Semua kategori di rentang tengah — belum ada yang menonjol kuat atau lemah.</p>` : ""}
+    </div>
+    <div class="pt-block">
+      <div class="eyebrow mono">ELEVA DECISION</div>
+      ${a.milestoneAchieved ? `<p class="pt-obs" style="color:var(--growth)">Milestone achieved — ${esc(PRACTICE_LABELS[a.trackKey] || a.trackKey)} baseline established: ~${a.band ? `${a.band.rangeLow}–${a.band.rangeHigh}` : ""}</p>` : ""}
+      ${a.decision.primaryQuest ? `<p class="pt-obs"><span class="pt-obs-label">Primary Quest</span> ${esc(a.decision.primaryQuest)}</p>` : ""}
+      ${a.decision.currentTarget ? `<p class="pt-obs"><span class="pt-obs-label">Current Target</span> ${esc(a.decision.currentTarget)}</p>` : ""}
+      ${a.decision.nextTrial ? `<p class="pt-obs"><span class="pt-obs-label">Next Trial</span> ${esc(a.decision.nextTrial)}</p>` : `<p class="pt-obs"><span class="pt-obs-label">Next Trial</span> Sprint penuh berikutnya — tidak ada kategori lemah yang butuh drill khusus.</p>`}
+    </div>` : ""}
     ${pt.wrong.length ? `
     <div style="margin:0 0 16px">
       <div class="eyebrow mono" style="margin:0 0 8px">PEMBAHASAN SOAL YANG SALAH</div>
@@ -1838,7 +1880,7 @@ function completedResultCardHTML(r) {
   return `
     <div class="quest-card fadeUp">
       <div class="qlabel mono">${esc(r.questTitle)}</div>
-      ${elevaResponseHTML(r.interpretation)}
+      ${r.practiceTest ? "" : elevaResponseHTML(r.interpretation)}
       ${r.safetyNote ? `<p class="safety-note">⚠ ${esc(r.safetyNote)}</p>` : ""}
       <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
         ${r.status === "done" ? "SELESAI" : r.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
@@ -2345,7 +2387,32 @@ function renderDashboard() {
     // get their own multi-step flow (pick Reading/Listening, pick Academic/
     // General, answer, submit) instead of a text/structured-fields box.
     if (quest?.completionType === "practice-test") {
-      practiceTestFlow = { questId: id, step: "kind", answers: {} };
+      // Item 1 (12 Agustus): the quest's own practiceTestSchema (filled at
+      // generation time only when the quest explicitly commits to a
+      // kind/track - same pattern as evidenceSchema below) skips the
+      // redundant pickers. Both filled → straight to the questions; kind
+      // only → just the track picker; neither → the full pre-Item-1 picker
+      // flow, unchanged. META sessions never carry a schema (no concrete
+      // quest to read), so they always take the full-picker path.
+      const pts = quest.practiceTestSchema;
+      if (pts?.kind && pts?.track) {
+        practiceTestFlow = { questId: id, kind: pts.kind, track: pts.track, answers: {} };
+        root.innerHTML = spinnerHTML("Menyusun soal...");
+        try {
+          const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: id, kind: pts.kind, track: pts.track } });
+          practiceTestFlow.payload = resp;
+          practiceTestFlow.plays = 0;
+          practiceTestFlow.step = "test";
+          practiceTestFlow.error = "";
+        } catch (e) {
+          practiceTestFlow.step = "track";
+          practiceTestFlow.error = e.message;
+        }
+      } else if (pts?.kind) {
+        practiceTestFlow = { questId: id, kind: pts.kind, step: "track", answers: {} };
+      } else {
+        practiceTestFlow = { questId: id, step: "kind", answers: {} };
+      }
       renderDashboard();
       return;
     }
@@ -2505,7 +2572,9 @@ function renderDashboard() {
       completedResult = {
         questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
         mentorReply: resp.mentorReply, interpretation: resp.interpretation, deltas: resp.deltas,
-        practiceTest: { kind: practiceTestFlow.kind, track: practiceTestFlow.track, score: resp.score, total: resp.total, wrong: resp.wrong },
+        // Task 13: assessment carries the deterministic band/observed/decision
+        // blocks the rebuilt practiceTestResultHTML renders.
+        practiceTest: { kind: practiceTestFlow.kind, track: practiceTestFlow.track, score: resp.score, total: resp.total, wrong: resp.wrong, assessment: resp.assessment || null },
         target: null,
       };
       practiceTestFlow = null;

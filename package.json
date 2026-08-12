@@ -1,12 +1,13 @@
 {
   "name": "eleva",
   "version": "0.1.0",
-  "description": "Eleva — AI Character Growth System (essential web MVP)",
+  "description": "Eleva \u2014 AI Character Growth System (essential web MVP)",
   "main": "server/index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "dev": "node server/index.js",
+    "test": "node tests/practicetest.js && node tests/practicetest.e2e.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -15,5 +16,8 @@
     "express": "^4.19.2",
     "mammoth": "^1.12.1",
     "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
   }
 }
