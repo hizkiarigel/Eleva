@@ -65,16 +65,29 @@ function buildImageBlocks(images) {
   return blocks;
 }
 
+// Task 14 (Livelihood Milestone, PRD.md section 26): threshold that turns
+// the AI's matchScore into a pass/fail verdict. Founder decision (b): the
+// verdict is this deterministic cutoff, never the AI's free-text judgment
+// alone - AI supplies the number, code alone decides qualified/not.
+const QUALIFIED_THRESHOLD = 70;
+
 // Defends against malformed AI output the same way practiceTest.cleanPayload
 // does: drop individual bad matchTable rows rather than discarding an
 // otherwise-good analysis, fail to null only if too little survives to be
 // useful (forces the caller's fallback).
+// matchScore is REQUIRED (not patched to a guessed default) - same principle
+// as verdict/nextStep already being required: a missing/malformed number
+// here would silently produce a wrong qualified verdict, so it forces the
+// caller's honest fallback instead.
 function cleanJobMatchResult(raw) {
   if (!raw || typeof raw !== "object") return null;
   const verdict = String(raw.verdict || "").trim();
   const relevanceNote = String(raw.relevanceNote || "").trim();
   const nextStep = String(raw.nextStep || "").trim();
   if (!verdict || !nextStep) return null;
+  const matchScoreNum = Number(raw.matchScore);
+  if (!Number.isFinite(matchScoreNum)) return null;
+  const matchScore = Math.max(0, Math.min(100, Math.round(matchScoreNum)));
   const matchTable = (Array.isArray(raw.matchTable) ? raw.matchTable : [])
     .map((row) => {
       if (!row || typeof row !== "object") return null;
@@ -86,10 +99,13 @@ function cleanJobMatchResult(raw) {
     .filter(Boolean)
     .slice(0, 20);
   if (matchTable.length < 1) return null;
-  return { matchTable, verdict: verdict.slice(0, 500), relevanceNote: relevanceNote.slice(0, 500), nextStep: nextStep.slice(0, 300) };
+  return {
+    matchTable, matchScore, qualified: matchScore >= QUALIFIED_THRESHOLD,
+    verdict: verdict.slice(0, 500), relevanceNote: relevanceNote.slice(0, 500), nextStep: nextStep.slice(0, 300),
+  };
 }
 
 module.exports = {
-  MATCH_STATUSES, ACCEPTED_CV_MIMES, ACCEPTED_IMAGE_MIMES, DOCX_MIME,
+  MATCH_STATUSES, ACCEPTED_CV_MIMES, ACCEPTED_IMAGE_MIMES, DOCX_MIME, QUALIFIED_THRESHOLD,
   prepareArtifactContent, buildCvContentBlocks, buildImageBlocks, cleanJobMatchResult,
 };
