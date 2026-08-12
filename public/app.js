@@ -502,6 +502,21 @@ let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
 let privacyChecked = false;
 let authError = "";
+// Cinematic login handoff (12 Agustus): submit-button door animation + post-
+// login portal sequence. authUiState is the button/panel state machine
+// (idle → authenticating → celebrating → success); the phase table after
+// success lives in runAuthCinematic. All transitions after the initial render
+// are direct DOM class toggles, never re-renders — a re-render mid-animation
+// would restart the CSS animations from zero.
+let authUiState = "idle";
+let authShowPassword = false;
+let authRemember = false; // "Ingat saya" — local/visual only: cookie-session is a fixed 30-day session server-side, there is no shorter-session mode for unchecked to mean anything (flagged in handoff notes)
+let authTimers = [];
+function clearAuthTimers() { authTimers.forEach(clearTimeout); authTimers = []; }
+const AUTH_PHASE_TIMINGS = { worldResponds: 350, pilgrimMoves: 750, cameraFollow: 1300, threshold: 2300, transition: 2900, complete: 3500 };
+function authReducedMotion() {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 // --- Adaptive onboarding phase (Radar chart -> Adaptive Scenario Cards ->
 // Chapter Analysis). v6: cards are one scenario + 4 options (one per
@@ -661,64 +676,285 @@ function spinnerHTML(label) {
   </div></div>`;
 }
 
+// Cinematic login (design handoff 12 Agustus): glass panel over an ambient
+// night scene (sky/stars/portal/dunes/pilgrim, mouse parallax), door-icon
+// submit animation wired to the REAL /api/login and /api/signup calls, then
+// a scripted portal cinematic that ends in a crossfade to the real home
+// screen. Deviations from the handoff, all deliberate and flagged:
+// - Privacy consent (Task 4) is kept on signup — the handoff omitted it, but
+//   a compliance feature can't be dropped by a visual redesign.
+// - "Ingat saya"/"Lupa password?"/Google/Apple are visual-only: the backend
+//   has one fixed 30-day session, no reset route, no OAuth (the handoff
+//   itself sanctions visual-only for OAuth).
+// - Celebrating helper says "Selamat datang di Eleva!" in signup mode (the
+//   handoff's "Selamat datang kembali!" reads wrong for a brand-new account).
+function authStarsHTML() {
+  let html = "";
+  for (let i = 0; i < 40; i++) {
+    const x = (Math.random() * 100).toFixed(1), y = (Math.random() * 55).toFixed(1);
+    const size = Math.random() < 0.85 ? 1 : 2;
+    const dur = (2 + Math.random() * 3).toFixed(2), delay = (Math.random() * 4).toFixed(2);
+    html += `<div class="auth-star" style="left:${x}%;top:${y}%;width:${size}px;height:${size}px;--tw-dur:${dur}s;--tw-delay:${delay}s"></div>`;
+  }
+  return html;
+}
+
 function renderAuth() {
+  clearAuthTimers();
+  authUiState = "idle";
   const isSignup = authMode === "signup";
   root.innerHTML = `
-    <div class="shell">
-      <div class="eyebrow mono">ELEVA</div>
-      <h1 class="fr" style="font-size:28px;font-weight:600;margin:0 0 20px">${isSignup ? "Daftar beta" : "Masuk"}</h1>
-      ${authError ? `<p style="color:var(--rust);font-size:13.5px;margin:0 0 16px">${esc(authError)}</p>` : ""}
-      <div class="field">
-        <label>Email</label>
-        <input type="email" id="authEmail" value="${esc(authForm.email)}" placeholder="kamu@email.com" autocomplete="email" />
+    <div class="auth-scene" id="authScene">
+      <div class="auth-sky"></div>
+      <div class="auth-stars auth-plx" data-depth="6">${authStarsHTML()}</div>
+      <div class="auth-portal auth-plx" data-depth="14">
+        <div class="auth-portal-glow" id="authPortalGlow"></div>
+        <div class="auth-portal-arch" id="authPortalArch"></div>
       </div>
-      <div class="field">
-        <label>Password</label>
-        <input type="password" id="authPassword" value="" placeholder="minimal 8 karakter" autocomplete="${isSignup ? "new-password" : "current-password"}" />
+      <div class="auth-mid auth-plx" data-depth="20">
+        <div class="auth-dune-far"></div>
+        <div class="auth-path"></div>
       </div>
-      ${isSignup ? `
-      <div class="field">
-        <label>Kode beta</label>
-        <input type="text" id="authBetaCode" value="${esc(authForm.betaCode)}" placeholder="dari founder Eleva" />
+      <div class="auth-pilgrim-wrap auth-plx" data-depth="16" id="authPilgrim"><div class="auth-pilgrim"></div></div>
+      <div class="auth-fg auth-plx" data-depth="34"><div class="auth-dune-near"></div></div>
+      <div class="auth-vignette"></div>
+      <div class="auth-panel-wrap" id="authPanelWrap">
+        <div class="auth-panel fadeUp">
+          <div class="auth-logo-row">
+            <div class="auth-logo-mark">◆</div>
+            <div class="auth-wordmark">ELEVA</div>
+          </div>
+          <h1 class="auth-headline">${isSignup ? "Mulai perjalananmu" : "Selamat datang kembali"}</h1>
+          <p class="auth-sub">${isSignup ? "Daftar beta tester Eleva." : "Masuk untuk lanjutkan ceritamu di Eleva."}</p>
+          <p class="auth-error" id="authErrorMsg">${esc(authError)}</p>
+          <div class="auth-field">
+            <label for="authEmail">Email</label>
+            <input type="email" id="authEmail" placeholder="kamu@email.com" autocomplete="email" />
+          </div>
+          <div class="auth-field">
+            <label for="authPassword">Password</label>
+            <input type="password" id="authPassword" placeholder="minimal 8 karakter" autocomplete="${isSignup ? "new-password" : "current-password"}" />
+            <span class="auth-eye" id="authEye">${authShowPassword ? "Sembunyikan" : "Lihat"}</span>
+          </div>
+          ${isSignup ? `
+          <div class="auth-field" style="margin-bottom:18px">
+            <label for="authBetaCode">Kode beta <span class="req">*</span></label>
+            <input type="text" id="authBetaCode" placeholder="dari founder Eleva" />
+            <div class="auth-field-caption">Wajib diisi — daftar beta tester butuh kode dari founder.</div>
+          </div>
+          <div class="auth-consent" id="authConsent">
+            <div class="auth-checkbox ${privacyChecked ? "on" : ""}" id="authConsentBox">${privacyChecked ? "✓" : ""}</div>
+            <span>Saya mengerti: refleksi saya diproses AI (Claude/Anthropic) untuk membuat quest &amp; analisis, disimpan di database yang bisa diakses founder selama masa beta, dan ini bukan pengganti layanan kesehatan mental profesional.</span>
+          </div>` : `
+          <div class="auth-row">
+            <button type="button" class="auth-remember" id="authRemember">
+              <span class="auth-checkbox ${authRemember ? "on" : ""}" id="authRememberBox">${authRemember ? "✓" : ""}</span>
+              Ingat saya
+            </button>
+            <button type="button" class="auth-forgot">Lupa password?</button>
+          </div>`}
+          <button class="auth-submit ${isSignup && !privacyChecked ? "idle-disabled" : ""}" id="authSubmit" ${isSignup && !privacyChecked ? "disabled" : ""}>
+            <span class="auth-btn-label">${isSignup ? "Daftar" : "Masuk"}</span>
+            <span class="auth-btn-check">✓</span>
+            <span class="auth-door-frame">
+              <span class="auth-door-glow"></span>
+              <span class="auth-door"></span>
+              <span class="auth-figure">
+                <span class="auth-figure-head"></span>
+                <span class="auth-figure-body"></span>
+              </span>
+            </span>
+          </button>
+          <div class="auth-helper" id="authHelper"></div>
+          <div class="auth-divider"><div class="line"></div><span>atau lanjutkan dengan</span><div class="line"></div></div>
+          <div class="auth-oauth">
+            <div class="auth-oauth-btn" aria-disabled="true">
+              <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.4 0 6.4 1.2 8.8 3.5l6.5-6.5C35.4 2.7 30 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.6 5.9C12.1 13.1 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.9 7.2l7.5 5.8c4.4-4 6.9-10 6.9-17.5z"/><path fill="#FBBC05" d="M10.1 19.1c-.5 1.5-.8 3.1-.8 4.9s.3 3.4.8 4.9l-7.6 5.9C.9 31.6 0 27.9 0 24s.9-7.6 2.5-10.8l7.6 5.9z"/><path fill="#34A853" d="M24 48c6 0 11.4-2 15.3-5.4l-7.5-5.8c-2.1 1.4-4.8 2.3-7.8 2.3-6.4 0-11.9-3.6-14-9.6l-7.6 5.9C6.5 42.6 14.6 48 24 48z"/></svg>
+              Google
+            </div>
+            <div class="auth-oauth-btn" aria-disabled="true">
+              <svg width="15" height="15" viewBox="0 0 384 512"><path fill="#c9c6ce" d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26-2 50-14.5 69.5-34.3z"/></svg>
+              Apple
+            </div>
+          </div>
+          <div class="auth-footer">
+            <button type="button" id="authToggle">${isSignup ? "Sudah punya akun?" : "Baru di ELEVA.AI?"} <b>${isSignup ? "Masuk" : "Daftar Akun"}</b></button>
+          </div>
+        </div>
       </div>
-      <div class="field" style="display:flex;gap:10px;align-items:flex-start">
-        <input type="checkbox" id="authPrivacy" ${privacyChecked ? "checked" : ""} style="margin-top:3px" />
-        <label for="authPrivacy" style="margin:0;font-size:12.5px;line-height:1.5;color:var(--muted)">
-          Saya mengerti: refleksi saya diproses AI (Claude/Anthropic) untuk membuat quest & analisis, disimpan di
-          database yang bisa diakses founder selama masa beta, dan ini bukan pengganti layanan kesehatan mental
-          profesional.
-        </label>
-      </div>` : ""}
-      <button class="btn-primary full" id="authSubmit" ${isSignup && !privacyChecked ? "disabled" : ""}>${isSignup ? "Daftar" : "Masuk"}</button>
-      <div style="text-align:center;margin-top:16px">
-        <button class="btn-ghost" id="authToggle">${isSignup ? "Sudah punya akun? Masuk" : "Belum punya akun? Daftar (butuh kode beta)"}</button>
-      </div>
+      <div class="auth-flash" id="authFlash"></div>
     </div>`;
 
-  document.getElementById("authEmail").addEventListener("input", (e) => { authForm.email = e.target.value; });
-  document.getElementById("authPassword").addEventListener("input", (e) => { authForm.password = e.target.value; });
-  document.getElementById("authBetaCode")?.addEventListener("input", (e) => { authForm.betaCode = e.target.value; });
-  document.getElementById("authPrivacy")?.addEventListener("change", (e) => {
-    privacyChecked = e.target.checked;
-    document.getElementById("authSubmit").disabled = isSignup && !privacyChecked;
+  const emailInput = document.getElementById("authEmail");
+  const pwInput = document.getElementById("authPassword");
+  const betaInput = document.getElementById("authBetaCode");
+  // Values restored via JS, not baked into the markup — keeps the password
+  // out of the HTML string and survives mode-toggle/error re-renders.
+  emailInput.value = authForm.email;
+  pwInput.value = authForm.password;
+  pwInput.type = authShowPassword ? "text" : "password";
+  if (betaInput) betaInput.value = authForm.betaCode;
+
+  emailInput.addEventListener("input", (e) => { authForm.email = e.target.value; });
+  pwInput.addEventListener("input", (e) => { authForm.password = e.target.value; });
+  betaInput?.addEventListener("input", (e) => { authForm.betaCode = e.target.value; });
+
+  document.getElementById("authEye").addEventListener("click", () => {
+    authShowPassword = !authShowPassword;
+    pwInput.type = authShowPassword ? "text" : "password";
+    document.getElementById("authEye").textContent = authShowPassword ? "Sembunyikan" : "Lihat";
+  });
+  document.getElementById("authRemember")?.addEventListener("click", () => {
+    authRemember = !authRemember;
+    const box = document.getElementById("authRememberBox");
+    box.classList.toggle("on", authRemember);
+    box.textContent = authRemember ? "✓" : "";
+  });
+  document.getElementById("authConsent")?.addEventListener("click", () => {
+    privacyChecked = !privacyChecked;
+    const box = document.getElementById("authConsentBox");
+    box.classList.toggle("on", privacyChecked);
+    box.textContent = privacyChecked ? "✓" : "";
+    const btn = document.getElementById("authSubmit");
+    btn.disabled = !privacyChecked;
+    btn.classList.toggle("idle-disabled", !privacyChecked);
   });
   document.getElementById("authToggle").addEventListener("click", () => {
+    if (authUiState !== "idle") return;
     authMode = isSignup ? "login" : "signup";
     authError = "";
     renderAuth();
   });
-  document.getElementById("authSubmit").addEventListener("click", async () => {
-    authError = "";
-    root.innerHTML = spinnerHTML(isSignup ? "Mendaftar..." : "Masuk...");
+
+  // Ambient parallax — layers drift opposite the cursor, depth-scaled.
+  // Ignored once the submit sequence starts and under reduced motion.
+  const scene = document.getElementById("authScene");
+  let plxQueued = false;
+  scene.addEventListener("mousemove", (e) => {
+    if (authUiState !== "idle" || authReducedMotion() || plxQueued) return;
+    plxQueued = true;
+    const r = scene.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width - 0.5) * 2;
+    const py = ((e.clientY - r.top) / r.height - 0.5) * 2;
+    requestAnimationFrame(() => {
+      plxQueued = false;
+      if (authUiState !== "idle") return;
+      scene.querySelectorAll(".auth-plx").forEach((el) => {
+        const d = Number(el.dataset.depth) || 0;
+        el.style.transform = `translate(${(-px * d).toFixed(1)}px, ${(-py * d * 0.6).toFixed(1)}px)`;
+      });
+    });
+  });
+
+  const showError = (msg) => {
+    authError = msg;
+    document.getElementById("authErrorMsg").textContent = msg;
+  };
+  const submit = async () => {
+    if (authUiState !== "idle") return;
+    // Inline validation, copy per handoff. Beta code correctness itself is
+    // server-side only (BETA_CODE is a secret) — client checks presence.
+    if (isSignup && !privacyChecked) return;
+    if (isSignup && !authForm.betaCode.trim()) return showError("Kode beta wajib diisi untuk daftar beta tester.");
+    if (!authForm.email.trim() || !authForm.password.trim()) return showError("Email dan password wajib diisi.");
+    showError("");
+    authUiState = "authenticating";
+    const btn = document.getElementById("authSubmit");
+    const helper = document.getElementById("authHelper");
+    btn.disabled = true;
+    btn.classList.add("authenticating");
+    helper.textContent = isSignup ? "Daftar..." : "Masuk...";
+    // Phase 1 lasts as long as the real request, with a ~500ms floor so the
+    // door swing isn't jarring on a fast network (handoff's mock-timing note).
+    const floor = new Promise((r) => setTimeout(r, 500));
     try {
-      await api(isSignup ? "/api/signup" : "/api/login", { method: "POST", body: authForm });
-      authForm = { email: "", password: "", betaCode: "" };
-      privacyChecked = false;
-      await boot();
+      await Promise.all([
+        api(isSignup ? "/api/signup" : "/api/login", { method: "POST", body: authForm }),
+        floor,
+      ]);
     } catch (e) {
-      authError = e.message;
-      renderAuth();
+      await floor;
+      authUiState = "idle";
+      btn.disabled = false;
+      btn.classList.remove("authenticating");
+      helper.textContent = "";
+      showError(e.message);
+      return;
     }
+    // Phase 2: celebrating — fixed ~900ms hold regardless of network speed.
+    // The real /api/state is prefetched during the hold + cinematic so the
+    // final crossfade lands on the real home screen, not a placeholder.
+    authForm = { email: "", password: "", betaCode: "" };
+    privacyChecked = false;
+    authUiState = "celebrating";
+    btn.classList.remove("authenticating");
+    btn.classList.add("celebrating");
+    helper.textContent = isSignup ? "Selamat datang di Eleva!" : "Selamat datang kembali!";
+    const statePrefetch = api("/api/state").catch(() => null);
+    authTimers.push(setTimeout(() => {
+      authUiState = "success";
+      runAuthCinematic(statePrefetch);
+    }, 900));
+  };
+  document.getElementById("authSubmit").addEventListener("click", submit);
+  [emailInput, pwInput, betaInput].forEach((el) => el?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  }));
+}
+
+// Post-success cinematic — the phase table from the handoff, all timings ms
+// after success (not after click). Ends by doing the real boot-style render
+// UNDER the full amber flash (the flash is position:fixed and reparented to
+// <body> so it survives root.innerHTML being replaced), then fading the
+// flash out: a true crossfade into the real home screen.
+async function runAuthCinematic(statePrefetch) {
+  const finish = async () => {
+    const s = await statePrefetch;
+    if (s) {
+      appState = s;
+      ui = { view: appState.profile ? "dashboard" : "onboarding" };
+      render();
+    } else {
+      await boot(); // prefetch failed — fall back to the normal boot path
+    }
+  };
+  if (authReducedMotion()) {
+    // Simplified 700ms crossfade: no phases, no parallax, no scale, no flash.
+    const ov = document.createElement("div");
+    ov.className = "auth-reveal-overlay";
+    document.body.appendChild(ov);
+    requestAnimationFrame(() => ov.classList.add("on"));
+    authTimers.push(setTimeout(async () => {
+      await finish();
+      ov.classList.remove("on");
+      authTimers.push(setTimeout(() => ov.remove(), 400));
+    }, 350));
+    return;
+  }
+  document.getElementById("authPanelWrap").classList.add("gone");
+  const t = (ms, fn) => authTimers.push(setTimeout(fn, ms));
+  t(AUTH_PHASE_TIMINGS.worldResponds, () => {
+    document.getElementById("authPortalGlow").classList.add("lit");
+    document.getElementById("authPortalArch").classList.add("lit");
+  });
+  t(AUTH_PHASE_TIMINGS.pilgrimMoves, () => document.getElementById("authPilgrim").classList.add("p-moves"));
+  t(AUTH_PHASE_TIMINGS.cameraFollow, () => document.getElementById("authScene").classList.add("camera-push"));
+  t(AUTH_PHASE_TIMINGS.threshold, () => {
+    document.getElementById("authPilgrim").classList.add("p-gone");
+    document.getElementById("authFlash").classList.add("half");
+  });
+  t(AUTH_PHASE_TIMINGS.transition, () => {
+    const flash = document.getElementById("authFlash");
+    flash.classList.remove("half");
+    flash.classList.add("full");
+  });
+  t(AUTH_PHASE_TIMINGS.complete, async () => {
+    const flash = document.getElementById("authFlash");
+    document.body.appendChild(flash); // survive the root.innerHTML swap at full opacity
+    await finish();
+    flash.classList.remove("full");
+    flash.classList.add("fade-out");
+    authTimers.push(setTimeout(() => flash.remove(), 900));
   });
 }
 
