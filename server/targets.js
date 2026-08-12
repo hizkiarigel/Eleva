@@ -30,6 +30,33 @@ function cleanTargetMetrics(kind, m) {
     if (bebanKg != null && (bebanKg < 0 || bebanKg > 500)) return null;
     return { set, repetisi, ...(bebanKg != null ? { bebanKg } : {}) };
   }
+  // Task 14: Livelihood Milestone #1 - a fixed count target (always 10, per
+  // founder decision), unlike cardio/gym's user-picked numbers. currentCount
+  // only ever moves via the job-application-submit route's server-side
+  // increment, never client-supplied directly - but this function still
+  // validates the shape (used both for the initial auto-created target and
+  // for re-validating it on every read).
+  if (kind === "qualified-applications") {
+    const targetCount = num(m.targetCount);
+    const currentCount = num(m.currentCount);
+    if (targetCount == null || targetCount <= 0 || targetCount > 1000) return null;
+    if (currentCount == null || currentCount < 0) return null;
+    return { targetCount, currentCount };
+  }
+  // Task 14 point 7: Livelihood Milestone #2+ - once 10 qualified
+  // applications is reached, the next milestone is a funnel metric (response
+  // rate, interview->offer conversion, or a manual write-in), not another
+  // fixed count. Kept generic (label + target/current value) rather than
+  // enumerating specific funnel stages in code.
+  if (kind === "livelihood-funnel") {
+    const metricLabel = String(m.metricLabel || "").trim();
+    const targetValue = num(m.targetValue);
+    const currentValue = m.currentValue == null ? 0 : num(m.currentValue);
+    if (!metricLabel) return null;
+    if (targetValue == null || targetValue <= 0 || targetValue > 100000) return null;
+    if (currentValue == null || currentValue < 0) return null;
+    return { metricLabel: metricLabel.slice(0, 80), targetValue, currentValue };
+  }
   return null;
 }
 
@@ -38,6 +65,12 @@ function formatTargetLabel(kind, m) {
     const mm = Math.floor(m.paceMinPerKm);
     const ss = Math.round((m.paceMinPerKm - mm) * 60);
     return `${m.jarakKm}km @ ${mm}:${String(ss).padStart(2, "0")}/km`;
+  }
+  if (kind === "qualified-applications") {
+    return `${m.targetCount} Qualified Applications (${m.currentCount}/${m.targetCount})`;
+  }
+  if (kind === "livelihood-funnel") {
+    return `${m.metricLabel} (${m.currentValue}/${m.targetValue})`;
   }
   return `${m.set}×${m.repetisi}${m.bebanKg != null ? ` @ ${m.bebanKg}kg` : ""}`;
 }
@@ -53,8 +86,18 @@ function canTarget(kind, actual) {
 
 // 2% pace tolerance absorbs rounding in the derived pace display, not a
 // deliberate leniency toward the target itself.
+// Task 14: cardio/gym compare a fixed target against a FRESH daily
+// submission (`actual`, a separate object) - Livelihood's count/funnel
+// targets carry their own running total INSIDE the target itself (updated in
+// place by the job-application-submit route), so there's no separate
+// `actual` to pass; `actual` is simply omitted/ignored for those two kinds.
+// No rounding tolerance for the count kind (unlike cardio's 2% pace
+// leniency) - a count either reached 10 or it didn't.
 function targetReached(kind, target, actual) {
-  if (!target || !actual) return false;
+  if (!target) return false;
+  if (kind === "qualified-applications") return target.currentCount >= target.targetCount;
+  if (kind === "livelihood-funnel") return target.currentValue >= target.targetValue;
+  if (!actual) return false;
   if (kind === "cardio") {
     if (actual.jarakKm == null || !actual.durasiMenit) return false;
     const actualPace = actual.durasiMenit / actual.jarakKm;
