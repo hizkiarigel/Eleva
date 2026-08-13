@@ -765,12 +765,14 @@ function renderAuth() {
       <div class="auth2-radial-vignette"></div>
       <div class="auth2-portal-glow" id="auth2PortalGlow"></div>
 
-      <button class="auth2-help-btn" id="auth2HelpBtn" aria-label="Bantuan">?</button>
-
       <div class="auth2-content" id="auth2Content">
         <div class="auth2-brand-row">
-          <img src="/assets/eleva-diamond.png" alt="" class="auth2-diamond" />
-          <span class="auth2-wordmark">ELEVA</span>
+          <span></span>
+          <span class="auth2-brand-mark">
+            <img src="/assets/eleva-diamond.png" alt="" class="auth2-diamond" />
+            <span class="auth2-wordmark">ELEVA</span>
+          </span>
+          <button class="auth2-help-btn" id="auth2HelpBtn" aria-label="Bantuan">?</button>
         </div>
         <div class="auth2-title-block">
           <h1 class="auth2-headline">${isSignup ? "MULAI<br/>PERJALANANMU" : "SELAMAT<br/>DATANG KEMBALI"}</h1>
@@ -807,9 +809,8 @@ function renderAuth() {
             </span>
           </button>
           <div class="auth2-helper" id="auth2Helper"></div>
-          <div class="auth2-hair"></div>
           <div class="auth2-link-row auth2-link-row-forgot"><span class="auth2-forgot">Lupa password?</span></div>
-          <div class="auth2-hair auth2-hair-2"></div>
+          <div class="auth2-hair"></div>
           <div class="auth2-link-row auth2-link-row-signup">
             <button class="auth2-toggle-mode" id="auth2ToggleMode"><span class="auth2-muted">${isSignup ? "Sudah punya akun? " : "Baru di sini? "}</span><span class="auth2-accent">${isSignup ? "MASUK" : "DAFTAR"}</span></button>
           </div>
