@@ -1,16 +1,16 @@
-# Graph Report - Eleva  (2026-08-12)
+# Graph Report - Eleva  (2026-08-13)
 
 ## Corpus Check
-- 44 files · ~231,215 words
+- 44 files · ~270,913 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 548 nodes · 846 edges · 34 communities (28 shown, 6 thin omitted)
+- 548 nodes · 849 edges · 34 communities (28 shown, 6 thin omitted)
 - Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 102 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `592a1476`
+- Built from commit: `f9e67d48`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -65,10 +65,10 @@
 ## Surprising Connections (you probably didn't know these)
 - `Growth-Gate (12-word deterministic check)` --semantically_similar_to--> `Discrete Confidence-Score Rubric (0.95/0.85/0.75/0.65/0.55)`  [INFERRED] [semantically similar]
   PRD.md → .claude/skills/graphify/references/extraction-spec.md
-- `Body Quest Completion Screen Screenshot` --references--> `Structured Physical Quest Input (Task 7b)`  [EXTRACTED]
-  reference/screenshots/body-quest-completion-target.png → PRD.md
 - `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` --semantically_similar_to--> `graphify Honesty Rules`  [INFERRED] [semantically similar]
   PRD.md → .claude/skills/graphify/SKILL.md
+- `Body Quest Completion Screen Screenshot` --references--> `Structured Physical Quest Input (Task 7b)`  [EXTRACTED]
+  reference/screenshots/body-quest-completion-target.png → PRD.md
 - `DEPLOY_RAILWAY.md — Railway Deployment Guide` --references--> `BETA_CODE Invite Gate`  [EXTRACTED]
   DEPLOY_RAILWAY.md → PRD.md
 - `Eleva PRD.md` --references--> `Body Quest Completion Screen Screenshot`  [EXTRACTED]
@@ -90,7 +90,7 @@ Nodes (32): AuthError, bcrypt, db, login(), normalizeEmail(), signup(), ai, app 
 
 ### Community 1 - "app.js"
 Cohesion: 0.04
-Nodes (49): adaptiveCards, adaptiveSelection, applyCalibrationCard(), applySynergyDrag(), ARTIFACT_TYPE_LABEL, AUTH_PHASE_TIMINGS, authForm, authTimers (+41 more)
+Nodes (48): adaptiveCards, adaptiveSelection, applyCalibrationCard(), applySynergyDrag(), ARTIFACT_TYPE_LABEL, authForm, authTimers, AXIS_DEFINITIONS (+40 more)
 
 ### Community 2 - "claude.js"
 Cohesion: 0.06
@@ -122,7 +122,7 @@ Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcry
 
 ### Community 9 - "render"
 Cohesion: 0.19
-Nodes (20): api(), authReducedMotion(), authStarsHTML(), boot(), clearAuthTimers(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder() (+12 more)
+Nodes (21): api(), authHelpModalHTML(), authHoldMs(), authReducedMotion(), boot(), clearAuthTimers(), fetchChapterAnalysis(), fetchScenarioCard() (+13 more)
 
 ### Community 10 - "attachPolygonHandlers"
 Cohesion: 0.24
@@ -197,7 +197,7 @@ Cohesion: 0.50
 Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
 
 ## Knowledge Gaps
-- **174 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+169 more)
+- **173 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+168 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **6 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -211,10 +211,10 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `Adaptive Scenario Cards` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
-  _174 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _173 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `index.js` be split into smaller, more focused modules?**
   _Cohesion score 0.0507399577167019 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.04392156862745098 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.044897959183673466 - nodes in this community are weakly interconnected._
 - **Should `claude.js` be split into smaller, more focused modules?**
   _Cohesion score 0.06440677966101695 - nodes in this community are weakly interconnected._

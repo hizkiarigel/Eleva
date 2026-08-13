@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786546164.3678071,
-    "ast_hash": "9a5f3976676d20bd9da86712e6c8c875",
+    "mtime": 1786608042.4008212,
+    "ast_hash": "4a18da09a0942219b25f5c8e326a1b08",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786546444.4958007,
-    "ast_hash": "c0e644eee1a192bff9f1e38fa5c055bd",
+    "mtime": 1786608606.5448084,
+    "ast_hash": "8ecbb2d470042e546ef61537db8b6c2b",
     "semantic_hash": ""
   },
   "README.md": {
@@ -140,8 +140,8 @@
     "semantic_hash": "988229385b570503de31cbfadfb76d91"
   },
   "public/index.html": {
-    "mtime": 1786525403.9041722,
-    "ast_hash": "78cb3bd412dc6139bf12d22882de008c",
+    "mtime": 1786607619.8008308,
+    "ast_hash": "a60df662493be49951f4dd8d27773b0d",
     "semantic_hash": ""
   },
   "reference/Eleva_Correlation_Matrix.html": {
@@ -190,8 +190,8 @@
     "semantic_hash": ""
   },
   "tests/auth.e2e.js": {
-    "mtime": 1786525617.7721777,
-    "ast_hash": "1b2bad0ceacd5ff44fb1ada822d0e565",
+    "mtime": 1786608275.9088159,
+    "ast_hash": "8e3bd69aef5c22a0ff969c564ff08c9a",
     "semantic_hash": ""
   },
   "scripts/fix-stale-recovery-quests.js": {
@@ -215,8 +215,8 @@
     "semantic_hash": ""
   },
   "tests/nutrition.e2e.js": {
-    "mtime": 1786545838.0678146,
-    "ast_hash": "d9b489723895a6e6326316a0e58598c0",
+    "mtime": 1786609009.6447992,
+    "ast_hash": "71abcc36c1d3d8bd3ead7240d1e14bfd",
     "semantic_hash": ""
   },
   "tests/nutrition.js": {
@@ -237,6 +237,26 @@
   "server/metaTargets.js": {
     "mtime": 1786545032.951833,
     "ast_hash": "ff3817c45228ef9c4dc06697bbf71a2c",
+    "semantic_hash": ""
+  },
+  "public/assets/eleva-diamond.png": {
+    "mtime": 1786607606.827048,
+    "ast_hash": "1b3091400a4aee08b7e29510004fa310",
+    "semantic_hash": ""
+  },
+  "public/assets/eleva-login-bg-crop.png": {
+    "mtime": 1786607606.8274918,
+    "ast_hash": "9afa7ecc5a16ed754a6ff5ce351e515f",
+    "semantic_hash": ""
+  },
+  "public/assets/eleva-portal-icon.png": {
+    "mtime": 1786607606.8288076,
+    "ast_hash": "d1b5e990a24ea8ff3023255adcf2e7b1",
+    "semantic_hash": ""
+  },
+  "public/assets/eleva-stickman.png": {
+    "mtime": 1786607606.8292723,
+    "ast_hash": "2ba779fe720555cfeff73437d972ca80",
     "semantic_hash": ""
   }
 }

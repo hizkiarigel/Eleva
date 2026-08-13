@@ -529,18 +529,25 @@ let authMode = "login";
 let authForm = { email: "", password: "", betaCode: "" };
 let privacyChecked = false;
 let authError = "";
-// Cinematic login handoff (12 Agustus): submit-button door animation + post-
-// login portal sequence. authUiState is the button/panel state machine
-// (idle → authenticating → celebrating → success); the phase table after
-// success lives in runAuthCinematic. All transitions after the initial render
-// are direct DOM class toggles, never re-renders — a re-render mid-animation
-// would restart the CSS animations from zero.
+// Cinematic login v2 (design_handoff_login_screen, 13 Agustus) - replaces
+// the previous cinematic login wholesale (founder confirmed via
+// AskUserQuestion: this new handoff supersedes it, not a second screen).
+// authUiState is the button/panel state machine (idle → loading → success →
+// entering → complete), names matching the handoff's own authState. All
+// transitions after the initial render are direct DOM class toggles, never
+// re-renders — a re-render mid-animation would restart the CSS animations
+// from zero (same reasoning as the previous login, kept).
 let authUiState = "idle";
 let authShowPassword = false;
-let authRemember = false; // "Ingat saya" — local/visual only: cookie-session is a fixed 30-day session server-side, there is no shorter-session mode for unchecked to mean anything (flagged in handoff notes)
+let authHelpOpen = false; // bottom-sheet "Tentang Eleva" modal
 let authTimers = [];
 function clearAuthTimers() { authTimers.forEach(clearTimeout); authTimers = []; }
-const AUTH_PHASE_TIMINGS = { worldResponds: 350, pilgrimMoves: 750, cameraFollow: 1300, threshold: 2300, transition: 2900, complete: 3500 };
+// Handoff's own timing table (README "Total success→complete sequence"):
+// loading→success is a REAL request with an 800ms floor (translated from
+// the static prototype's fixed 800ms mock timer - a real network call
+// shouldn't get cut short on a slow connection, same floor pattern the
+// previous login already used), success and entering each hold ~900ms.
+const AUTH_LOADING_FLOOR = 800, AUTH_SUCCESS_HOLD = 900, AUTH_ENTERING_HOLD = 900;
 function authReducedMotion() {
   return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -703,27 +710,45 @@ function spinnerHTML(label) {
   </div></div>`;
 }
 
-// Cinematic login (design handoff 12 Agustus): glass panel over an ambient
-// night scene (sky/stars/portal/dunes/pilgrim, mouse parallax), door-icon
-// submit animation wired to the REAL /api/login and /api/signup calls, then
-// a scripted portal cinematic that ends in a crossfade to the real home
-// screen. Deviations from the handoff, all deliberate and flagged:
-// - Privacy consent (Task 4) is kept on signup — the handoff omitted it, but
-//   a compliance feature can't be dropped by a visual redesign.
-// - "Ingat saya"/"Lupa password?"/Google/Apple are visual-only: the backend
-//   has one fixed 30-day session, no reset route, no OAuth (the handoff
-//   itself sanctions visual-only for OAuth).
-// - Celebrating helper says "Selamat datang di Eleva!" in signup mode (the
-//   handoff's "Selamat datang kembali!" reads wrong for a brand-new account).
-function authStarsHTML() {
-  let html = "";
-  for (let i = 0; i < 40; i++) {
-    const x = (Math.random() * 100).toFixed(1), y = (Math.random() * 55).toFixed(1);
-    const size = Math.random() < 0.85 ? 1 : 2;
-    const dur = (2 + Math.random() * 3).toFixed(2), delay = (Math.random() * 4).toFixed(2);
-    html += `<div class="auth-star" style="left:${x}%;top:${y}%;width:${size}px;height:${size}px;--tw-dur:${dur}s;--tw-delay:${delay}s"></div>`;
-  }
-  return html;
+// Cinematic login v2 (design_handoff_login_screen, 13 Agustus) - REPLACES
+// the previous cinematic login screen wholesale (confirmed via
+// AskUserQuestion: the founder wanted this new handoff to supersede it, not
+// coexist as a second screen). Full-bleed pre-cropped background + vignette
+// stack, MASUK/DAFTAR button with 5 states (idle/loading/success/entering/
+// complete, the handoff's own state names) wired to the REAL /api/login and
+// /api/signup. Deviations from the handoff, all deliberate and flagged:
+// - The handoff's own reference only implements a LOGIN screen ("DAFTAR" at
+//   the bottom has no onClick, no signup state anywhere in its component).
+//   Signup reuses every visual token verbatim, adding only what the
+//   PREVIOUS login handoff already needed for the identical reason: a beta
+//   code field (functionally required - BETA_CODE gates account creation
+//   server-side) and privacy consent (Task 4, a compliance feature no
+//   visual redesign can drop) - styled to match this screen's palette, not
+//   invented from scratch.
+// - "Lupa password?" is inert (no reset route exists in this backend) - the
+//   reference itself has no onClick for it either, so this isn't a new
+//   deviation, just confirming the non-functionality is intentional.
+// - The 800ms "loading" wait is a FLOOR around the real request, not the
+//   reference's fixed mock timer - same real-network translation the
+//   previous login already made (a slow connection must not get cut short).
+function authHoldMs(full) { return authReducedMotion() ? Math.min(full, 250) : full; }
+
+function authHelpModalHTML() {
+  if (!authHelpOpen) return "";
+  return `
+    <div class="auth2-help-backdrop" id="auth2HelpBackdrop"></div>
+    <div class="auth2-help-sheet fadeUp">
+      <div class="auth2-help-title">Tentang Eleva</div>
+      <p class="auth2-help-body">Eleva adalah aplikasi pertumbuhan diri berbasis pathway dan quest.</p>
+      <p class="auth2-help-body">Kamu bertumbuh lewat bukti nyata, bukan sekadar checklist.</p>
+      <p class="auth2-help-focus-label mono">FOKUS AWAL ELEVA</p>
+      <div class="auth2-help-focus-row">
+        <span class="auth2-help-focus-item">SOMA — Body</span>
+        <span class="auth2-help-focus-item">LINGUA — Growth</span>
+        <span class="auth2-help-focus-item">LABORA — Livelihood</span>
+      </div>
+      <button class="auth2-help-primary" id="auth2HelpClose">Mengerti</button>
+    </div>`;
 }
 
 function renderAuth() {
@@ -731,90 +756,71 @@ function renderAuth() {
   authUiState = "idle";
   const isSignup = authMode === "signup";
   root.innerHTML = `
-    <div class="auth-scene" id="authScene">
-      <div class="auth-sky"></div>
-      <div class="auth-stars auth-plx" data-depth="6">${authStarsHTML()}</div>
-      <div class="auth-portal auth-plx" data-depth="14">
-        <div class="auth-portal-glow" id="authPortalGlow"></div>
-        <div class="auth-portal-arch" id="authPortalArch"></div>
-      </div>
-      <div class="auth-mid auth-plx" data-depth="20">
-        <div class="auth-dune-far"></div>
-        <div class="auth-path"></div>
-      </div>
-      <div class="auth-pilgrim-wrap auth-plx" data-depth="16" id="authPilgrim"><div class="auth-pilgrim"></div></div>
-      <div class="auth-fg auth-plx" data-depth="34"><div class="auth-dune-near"></div></div>
-      <div class="auth-vignette"></div>
-      <div class="auth-panel-wrap" id="authPanelWrap">
-        <div class="auth-panel fadeUp">
-          <div class="auth-logo-row">
-            <div class="auth-logo-mark">◆</div>
-            <div class="auth-wordmark">ELEVA</div>
+    <div class="auth2-root" id="auth2Root">
+      <div class="auth2-bg-wrap"><img src="/assets/eleva-login-bg-crop.png" alt="" class="auth2-bg-img" id="auth2BgImg" /></div>
+      <div class="auth2-bg-fade"></div>
+      <div class="auth2-top-vignette"></div>
+      <div class="auth2-radial-vignette"></div>
+      <div class="auth2-portal-glow" id="auth2PortalGlow"></div>
+
+      <button class="auth2-help-btn" id="auth2HelpBtn" aria-label="Bantuan">?</button>
+
+      <div class="auth2-content" id="auth2Content">
+        <div class="auth2-brand-row">
+          <img src="/assets/eleva-diamond.png" alt="" class="auth2-diamond" />
+          <span class="auth2-wordmark">ELEVA</span>
+        </div>
+        <div class="auth2-title-block">
+          <h1 class="auth2-headline">${isSignup ? "MULAI<br/>PERJALANANMU" : "SELAMAT<br/>DATANG KEMBALI"}</h1>
+          <p class="auth2-tagline">${isSignup ? "Daftar untuk mulai membentuk<br/>jalanmu sendiri." : "Kembali pada jalan yang<br/>sedang membentukmu."}</p>
+        </div>
+        <div class="auth2-spacer"></div>
+        <div class="auth2-form-col">
+          <p class="auth2-error" id="auth2Error">${esc(authError)}</p>
+          <div class="auth2-field">
+            <label class="auth2-label mono">EMAIL</label>
+            <input type="email" id="auth2Email" placeholder="kamu@email.com" autocomplete="email" />
           </div>
-          <h1 class="auth-headline">${isSignup ? "Mulai perjalananmu" : "Selamat datang kembali"}</h1>
-          <p class="auth-sub">${isSignup ? "Daftar beta tester Eleva." : "Masuk untuk lanjutkan ceritamu di Eleva."}</p>
-          <p class="auth-error" id="authErrorMsg">${esc(authError)}</p>
-          <div class="auth-field">
-            <label for="authEmail">Email</label>
-            <input type="email" id="authEmail" placeholder="kamu@email.com" autocomplete="email" />
-          </div>
-          <div class="auth-field">
-            <label for="authPassword">Password</label>
-            <input type="password" id="authPassword" placeholder="minimal 8 karakter" autocomplete="${isSignup ? "new-password" : "current-password"}" />
-            <span class="auth-eye" id="authEye">${authShowPassword ? "Sembunyikan" : "Lihat"}</span>
+          <div class="auth2-field auth2-field-pw">
+            <label class="auth2-label mono">PASSWORD</label>
+            <div class="auth2-pw-row">
+              <input type="password" id="auth2Password" placeholder="••••••••" autocomplete="${isSignup ? "new-password" : "current-password"}" />
+              <span class="auth2-pw-toggle mono" id="auth2PwToggle">SHOW</span>
+            </div>
           </div>
           ${isSignup ? `
-          <div class="auth-field" style="margin-bottom:18px">
-            <label for="authBetaCode">Kode beta <span class="req">*</span></label>
-            <input type="text" id="authBetaCode" placeholder="dari founder Eleva" />
-            <div class="auth-field-caption">Wajib diisi — daftar beta tester butuh kode dari founder.</div>
+          <div class="auth2-field auth2-field-pw">
+            <label class="auth2-label mono">KODE BETA</label>
+            <input type="text" id="auth2BetaCode" placeholder="dari founder Eleva" />
           </div>
-          <div class="auth-consent" id="authConsent">
-            <div class="auth-checkbox ${privacyChecked ? "on" : ""}" id="authConsentBox">${privacyChecked ? "✓" : ""}</div>
-            <span>Saya mengerti: refleksi saya diproses AI (Claude/Anthropic) untuk membuat quest &amp; analisis, disimpan di database yang bisa diakses founder selama masa beta, dan ini bukan pengganti layanan kesehatan mental profesional.</span>
-          </div>` : `
-          <div class="auth-row">
-            <button type="button" class="auth-remember" id="authRemember">
-              <span class="auth-checkbox ${authRemember ? "on" : ""}" id="authRememberBox">${authRemember ? "✓" : ""}</span>
-              Ingat saya
-            </button>
-            <button type="button" class="auth-forgot">Lupa password?</button>
-          </div>`}
-          <button class="auth-submit ${isSignup && !privacyChecked ? "idle-disabled" : ""}" id="authSubmit" ${isSignup && !privacyChecked ? "disabled" : ""}>
-            <span class="auth-btn-label">${isSignup ? "Daftar" : "Masuk"}</span>
-            <span class="auth-btn-check">✓</span>
-            <span class="auth-door-frame">
-              <span class="auth-door-glow"></span>
-              <span class="auth-door"></span>
-              <span class="auth-figure">
-                <span class="auth-figure-head"></span>
-                <span class="auth-figure-body"></span>
-              </span>
+          <div class="auth2-consent" id="auth2Consent">
+            <span class="auth2-checkbox ${privacyChecked ? "on" : ""}" id="auth2ConsentBox">${privacyChecked ? "✓" : ""}</span>
+            <span class="auth2-consent-text">Saya mengerti: refleksi saya diproses AI (Claude/Anthropic) untuk membuat quest &amp; analisis, disimpan di database yang bisa diakses founder selama masa beta, dan ini bukan pengganti layanan kesehatan mental profesional.</span>
+          </div>` : ""}
+          <button class="auth2-cta ${isSignup && !privacyChecked ? "auth2-cta-disabled" : ""}" id="auth2Submit" ${isSignup && !privacyChecked ? "disabled" : ""}>
+            <span class="auth2-cta-label">${isSignup ? "DAFTAR" : "MASUK"}</span>
+            <span class="auth2-icon-group">
+              <img src="/assets/eleva-stickman.png" alt="" class="auth2-stickman" id="auth2Stickman" />
+              <img src="/assets/eleva-portal-icon.png" alt="" class="auth2-portal-icon" id="auth2PortalIcon" />
             </span>
           </button>
-          <div class="auth-helper" id="authHelper"></div>
-          <div class="auth-divider"><div class="line"></div><span>atau lanjutkan dengan</span><div class="line"></div></div>
-          <div class="auth-oauth">
-            <div class="auth-oauth-btn" aria-disabled="true">
-              <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.4 0 6.4 1.2 8.8 3.5l6.5-6.5C35.4 2.7 30 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.6 5.9C12.1 13.1 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.9 7.2l7.5 5.8c4.4-4 6.9-10 6.9-17.5z"/><path fill="#FBBC05" d="M10.1 19.1c-.5 1.5-.8 3.1-.8 4.9s.3 3.4.8 4.9l-7.6 5.9C.9 31.6 0 27.9 0 24s.9-7.6 2.5-10.8l7.6 5.9z"/><path fill="#34A853" d="M24 48c6 0 11.4-2 15.3-5.4l-7.5-5.8c-2.1 1.4-4.8 2.3-7.8 2.3-6.4 0-11.9-3.6-14-9.6l-7.6 5.9C6.5 42.6 14.6 48 24 48z"/></svg>
-              Google
-            </div>
-            <div class="auth-oauth-btn" aria-disabled="true">
-              <svg width="15" height="15" viewBox="0 0 384 512"><path fill="#c9c6ce" d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26-2 50-14.5 69.5-34.3z"/></svg>
-              Apple
-            </div>
-          </div>
-          <div class="auth-footer">
-            <button type="button" id="authToggle">${isSignup ? "Sudah punya akun?" : "Baru di ELEVA.AI?"} <b>${isSignup ? "Masuk" : "Daftar Akun"}</b></button>
+          <div class="auth2-helper" id="auth2Helper"></div>
+          <div class="auth2-hair"></div>
+          <div class="auth2-link-row auth2-link-row-forgot"><span class="auth2-forgot">Lupa password?</span></div>
+          <div class="auth2-hair auth2-hair-2"></div>
+          <div class="auth2-link-row auth2-link-row-signup">
+            <button class="auth2-toggle-mode" id="auth2ToggleMode"><span class="auth2-muted">${isSignup ? "Sudah punya akun? " : "Baru di sini? "}</span><span class="auth2-accent">${isSignup ? "MASUK" : "DAFTAR"}</span></button>
           </div>
         </div>
       </div>
-      <div class="auth-flash" id="authFlash"></div>
+
+      <div class="auth2-flash" id="auth2Flash"></div>
+      ${authHelpModalHTML()}
     </div>`;
 
-  const emailInput = document.getElementById("authEmail");
-  const pwInput = document.getElementById("authPassword");
-  const betaInput = document.getElementById("authBetaCode");
+  const emailInput = document.getElementById("auth2Email");
+  const pwInput = document.getElementById("auth2Password");
+  const betaInput = document.getElementById("auth2BetaCode");
   // Values restored via JS, not baked into the markup — keeps the password
   // out of the HTML string and survives mode-toggle/error re-renders.
   emailInput.value = authForm.email;
@@ -826,56 +832,52 @@ function renderAuth() {
   pwInput.addEventListener("input", (e) => { authForm.password = e.target.value; });
   betaInput?.addEventListener("input", (e) => { authForm.betaCode = e.target.value; });
 
-  document.getElementById("authEye").addEventListener("click", () => {
+  document.getElementById("auth2PwToggle").addEventListener("click", () => {
     authShowPassword = !authShowPassword;
     pwInput.type = authShowPassword ? "text" : "password";
-    document.getElementById("authEye").textContent = authShowPassword ? "Sembunyikan" : "Lihat";
+    document.getElementById("auth2PwToggle").textContent = authShowPassword ? "SEMBUNYIKAN" : "SHOW";
   });
-  document.getElementById("authRemember")?.addEventListener("click", () => {
-    authRemember = !authRemember;
-    const box = document.getElementById("authRememberBox");
-    box.classList.toggle("on", authRemember);
-    box.textContent = authRemember ? "✓" : "";
-  });
-  document.getElementById("authConsent")?.addEventListener("click", () => {
+  document.getElementById("auth2Consent")?.addEventListener("click", () => {
     privacyChecked = !privacyChecked;
-    const box = document.getElementById("authConsentBox");
+    const box = document.getElementById("auth2ConsentBox");
     box.classList.toggle("on", privacyChecked);
     box.textContent = privacyChecked ? "✓" : "";
-    const btn = document.getElementById("authSubmit");
+    const btn = document.getElementById("auth2Submit");
     btn.disabled = !privacyChecked;
-    btn.classList.toggle("idle-disabled", !privacyChecked);
+    btn.classList.toggle("auth2-cta-disabled", !privacyChecked);
   });
-  document.getElementById("authToggle").addEventListener("click", () => {
+  document.getElementById("auth2ToggleMode").addEventListener("click", () => {
     if (authUiState !== "idle") return;
     authMode = isSignup ? "login" : "signup";
     authError = "";
     renderAuth();
   });
+  document.getElementById("auth2HelpBtn").addEventListener("click", () => { authHelpOpen = true; renderAuth(); });
+  document.getElementById("auth2HelpBackdrop")?.addEventListener("click", () => { authHelpOpen = false; renderAuth(); });
+  document.getElementById("auth2HelpClose")?.addEventListener("click", () => { authHelpOpen = false; renderAuth(); });
 
-  // Ambient parallax — layers drift opposite the cursor, depth-scaled.
-  // Ignored once the submit sequence starts and under reduced motion.
-  const scene = document.getElementById("authScene");
+  // Ambient pointer-follow parallax on the background image only (handoff:
+  // "optional polish, low priority... skip if it adds complexity") - a
+  // single translate, not the previous login's multi-layer depth scene.
+  // Disabled once the submit sequence starts and under reduced motion.
+  const bgImg = document.getElementById("auth2BgImg");
   let plxQueued = false;
-  scene.addEventListener("mousemove", (e) => {
+  document.getElementById("auth2Root").addEventListener("mousemove", (e) => {
     if (authUiState !== "idle" || authReducedMotion() || plxQueued) return;
     plxQueued = true;
-    const r = scene.getBoundingClientRect();
-    const px = ((e.clientX - r.left) / r.width - 0.5) * 2;
-    const py = ((e.clientY - r.top) / r.height - 0.5) * 2;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5;
+    const py = (e.clientY - r.top) / r.height - 0.5;
     requestAnimationFrame(() => {
       plxQueued = false;
       if (authUiState !== "idle") return;
-      scene.querySelectorAll(".auth-plx").forEach((el) => {
-        const d = Number(el.dataset.depth) || 0;
-        el.style.transform = `translate(${(-px * d).toFixed(1)}px, ${(-py * d * 0.6).toFixed(1)}px)`;
-      });
+      bgImg.style.transform = `translate(${(-px * 12).toFixed(1)}px, ${(-py * 6).toFixed(1)}px)`;
     });
   });
 
   const showError = (msg) => {
     authError = msg;
-    document.getElementById("authErrorMsg").textContent = msg;
+    document.getElementById("auth2Error").textContent = msg;
   };
   const submit = async () => {
     if (authUiState !== "idle") return;
@@ -885,15 +887,13 @@ function renderAuth() {
     if (isSignup && !authForm.betaCode.trim()) return showError("Kode beta wajib diisi untuk daftar beta tester.");
     if (!authForm.email.trim() || !authForm.password.trim()) return showError("Email dan password wajib diisi.");
     showError("");
-    authUiState = "authenticating";
-    const btn = document.getElementById("authSubmit");
-    const helper = document.getElementById("authHelper");
+    authUiState = "loading";
+    const btn = document.getElementById("auth2Submit");
+    const helper = document.getElementById("auth2Helper");
     btn.disabled = true;
-    btn.classList.add("authenticating");
-    helper.textContent = isSignup ? "Daftar..." : "Masuk...";
-    // Phase 1 lasts as long as the real request, with a ~500ms floor so the
-    // door swing isn't jarring on a fast network (handoff's mock-timing note).
-    const floor = new Promise((r) => setTimeout(r, 500));
+    btn.classList.add("auth2-loading");
+    helper.textContent = "Masuk...";
+    const floor = new Promise((r) => setTimeout(r, authHoldMs(AUTH_LOADING_FLOOR)));
     try {
       await Promise.all([
         api(isSignup ? "/api/signup" : "/api/login", { method: "POST", body: authForm }),
@@ -903,38 +903,43 @@ function renderAuth() {
       await floor;
       authUiState = "idle";
       btn.disabled = false;
-      btn.classList.remove("authenticating");
+      btn.classList.remove("auth2-loading");
       helper.textContent = "";
       showError(e.message);
       return;
     }
-    // Phase 2: celebrating — fixed ~900ms hold regardless of network speed.
-    // The real /api/state is prefetched during the hold + cinematic so the
-    // final crossfade lands on the real home screen, not a placeholder.
     authForm = { email: "", password: "", betaCode: "" };
     privacyChecked = false;
-    authUiState = "celebrating";
-    btn.classList.remove("authenticating");
-    btn.classList.add("celebrating");
+    authUiState = "success";
+    btn.classList.remove("auth2-loading");
+    btn.classList.add("auth2-success");
+    document.getElementById("auth2PortalGlow").classList.add("lit");
+    // Signup's helper deliberately differs from the handoff's login-only
+    // copy ("Selamat datang kembali!" reads wrong for a brand-new account) -
+    // same deviation the previous login already made, kept for the same reason.
     helper.textContent = isSignup ? "Selamat datang di Eleva!" : "Selamat datang kembali!";
+    // The real /api/state is prefetched during the success+entering hold so
+    // the final crossfade lands on the real home/onboarding screen, not a
+    // placeholder (handoff: "replace with the actual navigation").
     const statePrefetch = api("/api/state").catch(() => null);
     authTimers.push(setTimeout(() => {
-      authUiState = "success";
-      runAuthCinematic(statePrefetch);
-    }, 900));
+      authUiState = "entering";
+      runAuthEntering(statePrefetch);
+    }, authHoldMs(AUTH_SUCCESS_HOLD)));
   };
-  document.getElementById("authSubmit").addEventListener("click", submit);
+  document.getElementById("auth2Submit").addEventListener("click", submit);
   [emailInput, pwInput, betaInput].forEach((el) => el?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submit();
   }));
 }
 
-// Post-success cinematic — the phase table from the handoff, all timings ms
-// after success (not after click). Ends by doing the real boot-style render
-// UNDER the full amber flash (the flash is position:fixed and reparented to
-// <body> so it survives root.innerHTML being replaced), then fading the
-// flash out: a true crossfade into the real home screen.
-async function runAuthCinematic(statePrefetch) {
+// Post-success sequence: stickman "walks" into the portal and fades, the
+// content column fades out, an amber flash covers the transition, then the
+// REAL boot-style render happens UNDER the flash while still opaque (the
+// flash is position:fixed, reparented to <body> so it survives
+// root.innerHTML being replaced) before fading back out — a true crossfade
+// into the real home/onboarding screen, not a hard cut.
+async function runAuthEntering(statePrefetch) {
   const finish = async () => {
     const s = await statePrefetch;
     if (s) {
@@ -945,44 +950,17 @@ async function runAuthCinematic(statePrefetch) {
       await boot(); // prefetch failed — fall back to the normal boot path
     }
   };
-  if (authReducedMotion()) {
-    // Simplified 700ms crossfade: no phases, no parallax, no scale, no flash.
-    const ov = document.createElement("div");
-    ov.className = "auth-reveal-overlay";
-    document.body.appendChild(ov);
-    requestAnimationFrame(() => ov.classList.add("on"));
-    authTimers.push(setTimeout(async () => {
-      await finish();
-      ov.classList.remove("on");
-      authTimers.push(setTimeout(() => ov.remove(), 400));
-    }, 350));
-    return;
-  }
-  document.getElementById("authPanelWrap").classList.add("gone");
-  const t = (ms, fn) => authTimers.push(setTimeout(fn, ms));
-  t(AUTH_PHASE_TIMINGS.worldResponds, () => {
-    document.getElementById("authPortalGlow").classList.add("lit");
-    document.getElementById("authPortalArch").classList.add("lit");
-  });
-  t(AUTH_PHASE_TIMINGS.pilgrimMoves, () => document.getElementById("authPilgrim").classList.add("p-moves"));
-  t(AUTH_PHASE_TIMINGS.cameraFollow, () => document.getElementById("authScene").classList.add("camera-push"));
-  t(AUTH_PHASE_TIMINGS.threshold, () => {
-    document.getElementById("authPilgrim").classList.add("p-gone");
-    document.getElementById("authFlash").classList.add("half");
-  });
-  t(AUTH_PHASE_TIMINGS.transition, () => {
-    const flash = document.getElementById("authFlash");
-    flash.classList.remove("half");
-    flash.classList.add("full");
-  });
-  t(AUTH_PHASE_TIMINGS.complete, async () => {
-    const flash = document.getElementById("authFlash");
-    document.body.appendChild(flash); // survive the root.innerHTML swap at full opacity
+  document.getElementById("auth2Content").classList.add("auth2-fade-out");
+  document.getElementById("auth2Stickman").classList.add("auth2-stickman-walk");
+  document.getElementById("auth2Flash").classList.add("lit");
+  authTimers.push(setTimeout(async () => {
+    authUiState = "complete";
+    const flash = document.getElementById("auth2Flash");
+    document.body.appendChild(flash); // survive the root.innerHTML swap while still opaque
     await finish();
-    flash.classList.remove("full");
-    flash.classList.add("fade-out");
-    authTimers.push(setTimeout(() => flash.remove(), 900));
-  });
+    flash.classList.remove("lit"); // fades back out via the same CSS transition, revealing the real screen underneath
+    authTimers.push(setTimeout(() => flash.remove(), authReducedMotion() ? 200 : 1200));
+  }, authHoldMs(AUTH_ENTERING_HOLD)));
 }
 
 // Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both

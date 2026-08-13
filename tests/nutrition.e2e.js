@@ -87,10 +87,15 @@ async function test(name, fn) {
     statFocus: "body", why: "test", goalIndex: 0,
     progressive: { requiredContributions: 3, completedContributions: 0, primaryMetric: "protein", targetValue: 60, currentValue: 0, evidenceComplete: false, targetMet: false, status: "ACTIVE" },
   };
+  // date must be TODAY (server-local, same format as index.js's todayKey) -
+  // a hardcoded past date here would make the lazy end-of-day check
+  // (GET /api/state) roll this quest to INCOMPLETE before the test ever
+  // gets to interact with it, the instant the real calendar date moves on.
+  const todayKey = new Date().toLocaleDateString("en-CA");
   const { rows } = await sql.query(
     `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest, is_meta)
-     VALUES ($1, 0, '2026-08-12', $2, NULL, NULL, false, false) RETURNING id`,
-    [userId, nutritionQuest]
+     VALUES ($1, 0, $3, $2, NULL, NULL, false, false) RETURNING id`,
+    [userId, nutritionQuest, todayKey]
   );
   const goalQuestId = rows[0].id;
 
