@@ -544,12 +544,39 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 
 @keyframes auth2DoorGlowPulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 
-.auth2-root { position: fixed; inset: 0; overflow: hidden; background: #05050a; font-family: "Inter", sans-serif; }
+/* Fix (13 Agustus, real-device report): height:100%/100vh + overflow:hidden
+   clipped "Lupa password?"/"DAFTAR" (and nearly the CTA) off-screen on real
+   mobile Safari once content is taller than the ACTUAL visible viewport
+   (100vh there is the LARGEST possible viewport, address-bar collapsed —
+   taller than what's really visible with the bar showing, and there was no
+   way to scroll to reveal the rest). min-height:100dvh tracks the real
+   current viewport instead of overshooting it, and overflow-y:auto (not
+   hidden) lets anything still taller than that scroll into view instead of
+   clipping - overflow-x stays hidden, this is a vertical-only fix. */
+.auth2-root { position: fixed; inset: 0; min-height: 100dvh; overflow-y: auto; overflow-x: hidden; background: #05050a; font-family: "Inter", sans-serif; }
 .auth2-bg-wrap { position: absolute; top: 0; left: 0; width: 100%; display: flex; justify-content: center; }
 /* Natural width-scaling, NOT object-fit:cover — the crop was prepared so
    this specific scaling places the arch correctly (handoff explicit). */
 .auth2-bg-img { display: block; width: 100%; height: auto; transition: transform .25s ease-out; will-change: transform; }
-.auth2-bg-fade { position: absolute; left: 0; right: 0; bottom: 0; height: 26%; background: linear-gradient(to bottom, rgba(5, 5, 10, 0), #05050a); pointer-events: none; }
+/* Fix (13 Agustus, real-device report): was a SIBLING of .auth2-bg-wrap,
+   not a child - its bottom:0/height% resolved against the viewport-height
+   .auth2-root instead of the background image's own (shorter, width-scaled)
+   box, so it never actually sat at the image's bottom edge once scrolled.
+   Nested inside .auth2-bg-wrap (the image's own positioned box) so the fade
+   stays pinned to the image's crop edge wherever the page is scrolled to.
+   Multi-stop gradient (was a flat 2-stop transparent->solid, read as a hard
+   crop line, not a transition) + taller (42% vs 26%) for a longer, smoother
+   blend into the screen's solid background. */
+.auth2-bg-fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 42%; pointer-events: none;
+  background: linear-gradient(to bottom,
+    rgba(5, 5, 10, 0) 0%,
+    rgba(5, 5, 10, .12) 22%,
+    rgba(5, 5, 10, .35) 42%,
+    rgba(5, 5, 10, .65) 62%,
+    rgba(5, 5, 10, .88) 80%,
+    #05050a 100%);
+}
 .auth2-top-vignette { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(5, 5, 10, .82) 0%, rgba(5, 5, 10, .32) 20%, rgba(5, 5, 10, 0) 36%, rgba(5, 5, 10, 0) 54%, rgba(5, 5, 10, .62) 74%, rgba(5, 5, 10, .94) 100%); pointer-events: none; }
 .auth2-radial-vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 48%, transparent 42%, rgba(0, 0, 0, .4) 100%); pointer-events: none; }
 .auth2-portal-glow {

@@ -757,8 +757,10 @@ function renderAuth() {
   const isSignup = authMode === "signup";
   root.innerHTML = `
     <div class="auth2-root" id="auth2Root">
-      <div class="auth2-bg-wrap"><img src="/assets/eleva-login-bg-crop.png" alt="" class="auth2-bg-img" id="auth2BgImg" /></div>
-      <div class="auth2-bg-fade"></div>
+      <div class="auth2-bg-wrap">
+        <img src="/assets/eleva-login-bg-crop.png" alt="" class="auth2-bg-img" id="auth2BgImg" />
+        <div class="auth2-bg-fade"></div>
+      </div>
       <div class="auth2-top-vignette"></div>
       <div class="auth2-radial-vignette"></div>
       <div class="auth2-portal-glow" id="auth2PortalGlow"></div>
