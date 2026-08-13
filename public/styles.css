@@ -586,16 +586,23 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 .auth2-portal-glow.lit { width: 520px; height: 520px; }
 
+/* Fix (13 Agustus, founder feedback): top:62px left a large unused gap to
+   the corner - top:max(16px, safe-area-inset-top) keeps it clear of a real
+   device's status bar/notch without reserving that much space when there's
+   no inset to clear. */
 .auth2-help-btn {
-  position: absolute; top: 62px; right: 18px; width: 44px; height: 44px; border-radius: 50%;
+  position: absolute; top: max(16px, env(safe-area-inset-top)); right: 18px; width: 44px; height: 44px; border-radius: 50%;
   background: rgba(20, 18, 14, .4); border: 1px solid rgba(216, 163, 85, .55); color: #f1eee8;
   font-family: "Fraunces", serif; font-size: 16px; display: flex; align-items: center; justify-content: center;
   z-index: 6; cursor: pointer; backdrop-filter: blur(6px);
 }
 
+/* Fix (13 Agustus, founder feedback): padding-top 108px left unused empty
+   space above the portal image - reduced to 56px so the brand/headline/
+   tagline block sits higher, closer to the art. */
 .auth2-content {
   position: relative; z-index: 3; display: flex; flex-direction: column; height: 100%; box-sizing: border-box;
-  padding: 108px 24px 28px; opacity: 1; transition: opacity .5s ease;
+  padding: 56px 24px 28px; opacity: 1; transition: opacity .5s ease;
 }
 .auth2-content.auth2-fade-out { opacity: 0; }
 .auth2-brand-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 22px; flex: none; }
