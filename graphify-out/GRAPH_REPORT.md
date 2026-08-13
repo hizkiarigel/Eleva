@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-13)
 
 ## Corpus Check
-- 44 files · ~270,913 words
+- 44 files · ~269,948 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 548 nodes · 849 edges · 34 communities (28 shown, 6 thin omitted)
+- 548 nodes · 849 edges · 35 communities (29 shown, 6 thin omitted)
 - Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 102 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f9e67d48`
+- Built from commit: `2b53dabc`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -25,7 +25,7 @@
 - Eleva_Prototype.jsx
 - package.json
 - render
-- attachPolygonHandlers
+- renderAdaptive
 - jobMatch.js
 - practiceTest.js
 - practicetest.e2e.js
@@ -33,7 +33,7 @@
 - Eleva Root CLAUDE.md — graphify Integration Rules
 - Task 4: Privacy Notice (minimal)
 - Task 6: Prompt Caching
-- esc
+- renderDashboard
 - practice-test-flow.md
 - metaTargets.js
 - livelihood.e2e.js
@@ -49,6 +49,7 @@
 - soma-nutrition-flow.md
 - realmIconSVG
 - 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
+- esc
 
 ## God Nodes (most connected - your core abstractions)
 1. `esc()` - 37 edges
@@ -82,7 +83,7 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (34 total, 6 thin omitted)
+## Communities (35 total, 6 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.05
@@ -121,12 +122,12 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.19
-Nodes (21): api(), authHelpModalHTML(), authHoldMs(), authReducedMotion(), boot(), clearAuthTimers(), fetchChapterAnalysis(), fetchScenarioCard() (+13 more)
+Cohesion: 0.27
+Nodes (14): api(), authHelpModalHTML(), authHoldMs(), authReducedMotion(), boot(), clearAuthTimers(), fetchChapterAnalysis(), fetchScenarioCard() (+6 more)
 
-### Community 10 - "attachPolygonHandlers"
-Cohesion: 0.24
-Nodes (10): attachPolygonHandlers(), axisLabelLayout(), heptagonPath(), polyPoint(), polyRadius(), polyValueFromRadius(), radiusPoint(), renderPolygonSVG() (+2 more)
+### Community 10 - "renderAdaptive"
+Cohesion: 0.15
+Nodes (17): attachPolygonHandlers(), axisLabelLayout(), characterScreenHTML(), goalPlaceholder(), helpBtnHTML(), heptagonPath(), polyPoint(), polyRadius() (+9 more)
 
 ### Community 11 - "jobMatch.js"
 Cohesion: 0.08
@@ -144,9 +145,9 @@ Nodes (4): assert, { chromium }, { Client }, { spawn }
 Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
-### Community 18 - "esc"
-Cohesion: 0.08
-Nodes (38): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), characterScreenHTML(), completedResultCardHTML(), durasiMenitFromFields() (+30 more)
+### Community 18 - "renderDashboard"
+Cohesion: 0.11
+Nodes (20): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), beginStructuredOrReflectiveFlow(), durasiMenitFromFields(), fileToBase64(), jobApplicationFlowHTML(), jobMatchFlowHTML() (+12 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -195,6 +196,10 @@ Nodes (9): comingSoonRowHTML(), metaRealmDetailHTML(), metaRealmToolsHTML(), met
 ### Community 33 - "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)"
 Cohesion: 0.50
 Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
+
+### Community 34 - "esc"
+Cohesion: 0.17
+Nodes (18): axisDefinitionsHTML(), completedResultCardHTML(), elevaResponseHTML(), esc(), helpSheetHTML(), isStepValid(), jobApplicationSummary(), jobMatchResultHTML() (+10 more)
 
 ## Knowledge Gaps
 - **173 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+168 more)

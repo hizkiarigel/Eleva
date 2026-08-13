@@ -553,7 +553,26 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    current viewport instead of overshooting it, and overflow-y:auto (not
    hidden) lets anything still taller than that scroll into view instead of
    clipping - overflow-x stays hidden, this is a vertical-only fix. */
-.auth2-root { position: fixed; inset: 0; min-height: 100dvh; overflow-y: auto; overflow-x: hidden; background: #05050a; font-family: "Inter", sans-serif; }
+/* Fix (13 Agustus, founder feedback): vertical spacing (never font-size)
+   now scales down on short viewports via dvh-based clamp()s, so a real
+   device with limited visible height shrinks to fit rather than relying on
+   overflow-y:auto scroll as the ONLY way to reach the CTA/links - scroll
+   stays as the safety net for anything still too tall, not the primary
+   mechanism. Each var's max is the exact px value already tuned above for
+   a normal-height viewport, so nothing changes there - only short
+   viewports pull the value down toward the min. */
+.auth2-root {
+  position: fixed; inset: 0; min-height: 100dvh; overflow-y: auto; overflow-x: hidden; background: #05050a; font-family: "Inter", sans-serif;
+  --a2-2xs: clamp(5px, 1.4dvh, 10px);
+  --a2-xs: clamp(6px, 1.6dvh, 12px);
+  --a2-sm: clamp(7px, 2dvh, 14px);
+  --a2-md: clamp(9px, 2.4dvh, 18px);
+  --a2-md2: clamp(10px, 2.6dvh, 20px);
+  --a2-lg: clamp(11px, 3dvh, 22px);
+  --a2-pad-top: clamp(24px, 6.5dvh, 56px);
+  --a2-pad-bottom: clamp(14px, 3.5dvh, 28px);
+  --a2-spacer-min: clamp(40px, 18dvh, 230px);
+}
 .auth2-bg-wrap { position: absolute; top: 0; left: 0; width: 100%; display: flex; justify-content: center; }
 /* Natural width-scaling, NOT object-fit:cover — the crop was prepared so
    this specific scaling places the arch correctly (handoff explicit). */
@@ -597,19 +616,16 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   z-index: 6; cursor: pointer; backdrop-filter: blur(6px);
 }
 
-/* Fix (13 Agustus, founder feedback): padding-top 108px left unused empty
-   space above the portal image - reduced to 56px so the brand/headline/
-   tagline block sits higher, closer to the art. */
 .auth2-content {
   position: relative; z-index: 3; display: flex; flex-direction: column; height: 100%; box-sizing: border-box;
-  padding: 56px 24px 28px; opacity: 1; transition: opacity .5s ease;
+  padding: var(--a2-pad-top) 24px var(--a2-pad-bottom); opacity: 1; transition: opacity .5s ease;
 }
 .auth2-content.auth2-fade-out { opacity: 0; }
 /* Fix (13 Agustus, founder feedback): help button moved into this row
    (was absolutely positioned in the corner). 3-column grid keeps the ELEVA
    mark visually centered on the row regardless of the button's width - the
    two 1fr tracks stay equal, the button just end-aligns within its own. */
-.auth2-brand-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin-bottom: 22px; flex: none; }
+.auth2-brand-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin-bottom: var(--a2-lg); flex: none; }
 .auth2-brand-mark { display: flex; align-items: center; justify-self: center; gap: 8px; }
 .auth2-diamond { width: 13px; height: 13px; flex: none; object-fit: contain; }
 .auth2-wordmark { font-family: "Fraunces", serif; font-size: 13px; font-weight: 500; letter-spacing: .3em; color: #d8a355; }
@@ -617,21 +633,23 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .auth2-title-block { flex: none; text-align: center; }
 /* clamp deliberately smaller than a first instinct - at larger sizes
    "DATANG KEMBALI" wraps to a 3rd line / overflows a 390px frame. */
-.auth2-headline { font-family: "Fraunces", serif; font-weight: 500; font-size: clamp(22px, 6.2vw, 26px); line-height: 1.18; color: #f1eee8; margin: 0 0 12px; }
+.auth2-headline { font-family: "Fraunces", serif; font-weight: 500; font-size: clamp(22px, 6.2vw, 26px); line-height: 1.18; color: #f1eee8; margin: 0 0 var(--a2-xs); }
 .auth2-tagline { font-family: "Fraunces", serif; font-style: italic; font-size: 15.5px; line-height: 1.4; color: #d8a355; opacity: .8; margin: 0; }
 
-/* This spacer + the bg crop is what places the portal arch precisely
-   between the tagline and the EMAIL field with zero overlap - don't shrink. */
-.auth2-spacer { flex: 1; min-height: 230px; }
+/* This spacer + the bg crop is what places the portal arch in the gap
+   between tagline and EMAIL - min-height now shrinks on short viewports
+   (was a fixed 230px floor that fought overflow-y:auto's scroll fallback
+   instead of helping content actually fit). */
+.auth2-spacer { flex: 1; min-height: var(--a2-spacer-min); }
 
 .auth2-form-col { flex: none; width: 86%; max-width: 332px; margin: 0 auto; }
-.auth2-error { color: #c96b5e; font-size: 13px; text-align: center; margin: 0 0 14px; }
+.auth2-error { color: #c96b5e; font-size: 13px; text-align: center; margin: 0 0 var(--a2-sm); }
 .auth2-error:empty { display: none; margin: 0; }
 
 /* Fix (13 Agustus, founder feedback): tightened field/CTA/link spacing -
    was reading as too loose end-to-end from EMAIL to the DAFTAR link. */
-.auth2-field { margin-bottom: 18px; }
-.auth2-field-pw { margin-bottom: 20px; }
+.auth2-field { margin-bottom: var(--a2-md); }
+.auth2-field-pw { margin-bottom: var(--a2-md2); }
 .auth2-label { display: block; font-size: 12px; font-weight: 500; letter-spacing: .18em; color: #d8a355; margin-bottom: 6px; }
 .auth2-field input, .auth2-pw-row input {
   width: 100%; box-sizing: border-box; background: transparent; border: none; border-bottom: 1px solid rgba(216, 163, 85, .4);
@@ -652,7 +670,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    inventing new ones, kept for the identical functional reason the
    PREVIOUS login handoff already required them (BETA_CODE gate, Task 4
    compliance). Flagged back to design. */
-.auth2-consent { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 20px; cursor: pointer; }
+.auth2-consent { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 var(--a2-md2); cursor: pointer; }
 .auth2-checkbox {
   flex: none; width: 18px; height: 18px; border-radius: 4px; border: 1px solid rgba(216, 163, 85, .5);
   display: flex; align-items: center; justify-content: center; font-size: 12px; color: #1a1409; margin-top: 1px;
@@ -661,7 +679,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .auth2-consent-text { font-size: 12px; line-height: 1.5; color: #948f9c; }
 
 .auth2-cta {
-  position: relative; width: 100%; min-height: 58px; border-radius: 29px; border: none; margin-top: 22px; margin-bottom: 0;
+  position: relative; width: 100%; min-height: 58px; border-radius: 29px; border: none; margin-top: var(--a2-lg); margin-bottom: 0;
   background: linear-gradient(135deg, #f0c26a, #d8a355); display: flex; align-items: center; justify-content: center;
   cursor: pointer; transition: background .6s ease, transform .15s ease; box-shadow: 0 8px 24px rgba(216, 163, 85, .25);
 }
@@ -680,17 +698,17 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .auth2-portal-icon { width: 20px; height: auto; object-fit: contain; filter: brightness(.6) saturate(.7); transition: filter .5s ease; }
 .auth2-cta.auth2-success .auth2-portal-icon { filter: none; }
 
-.auth2-helper { text-align: center; font-size: 12.5px; color: #948f9c; margin-top: 10px; }
+.auth2-helper { text-align: center; font-size: 12.5px; color: #948f9c; margin-top: var(--a2-2xs); }
 .auth2-helper:empty { display: none; margin: 0; }
 
 /* Fix (13 Agustus, founder feedback): the divider between MASUK and "Lupa
    password?" is gone - "Lupa password?" is meant to read as close to the
    button, not separated by a rule. Only one hairline remains now, between
    "Lupa password?" and "Baru di sini? DAFTAR". */
-.auth2-hair { height: 1px; background: rgba(216, 163, 85, .16); margin: 10px 0 0; }
+.auth2-hair { height: 1px; background: rgba(216, 163, 85, .16); margin: var(--a2-2xs) 0 0; }
 .auth2-link-row { text-align: center; min-height: 44px; display: flex; align-items: center; justify-content: center; }
-.auth2-link-row-forgot { margin-top: 14px; }
-.auth2-link-row-signup { margin-top: 4px; }
+.auth2-link-row-forgot { margin-top: var(--a2-sm); }
+.auth2-link-row-signup { margin-top: var(--a2-2xs); }
 .auth2-forgot { font-size: 13.5px; color: #948f9c; cursor: pointer; }
 .auth2-toggle-mode { background: none; border: none; padding: 0; cursor: pointer; font: inherit; }
 .auth2-muted { font-size: 13.5px; color: #948f9c; margin-right: 5px; }
