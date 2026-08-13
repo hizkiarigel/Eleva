@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-13)
 
 ## Corpus Check
-- 44 files · ~357,714 words
+- 44 files · ~358,225 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 550 nodes · 852 edges · 37 communities (30 shown, 7 thin omitted)
+- 551 nodes · 854 edges · 36 communities (29 shown, 7 thin omitted)
 - Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 102 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `af41ac34`
+- Built from commit: `fc314c29`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -21,11 +21,11 @@
 - graphify Skill Definition (SKILL.md)
 - db.js
 - Goal Capture (v13, bridge to First Trial)
-- questSummaryCard
+- esc
 - Eleva_Prototype.jsx
 - package.json
 - render
-- statLabel
+- renderOnboarding
 - jobMatch.js
 - practiceTest.js
 - practicetest.e2e.js
@@ -33,13 +33,13 @@
 - Eleva Root CLAUDE.md — graphify Integration Rules
 - Task 4: Privacy Notice (minimal)
 - Task 6: Prompt Caching
-- esc
+- renderDashboard
 - practice-test-flow.md
 - metaTargets.js
 - livelihood.e2e.js
 - auth.e2e.js
 - DEPLOY_RAILWAY.md — Railway Deployment Guide
-- Adaptive Scenario Cards
+- 3-Card Pathway Recommendation Carousel
 - Eleva README.md
 - Growth-Gate (12-word deterministic check)
 - Task 5: Adaptive Pathway Onboarding
@@ -48,10 +48,9 @@
 - nutrition.e2e.js
 - soma-nutrition-flow.md
 - realmIconSVG
-- 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
+- appHeaderHTML
 - renderAuth
 - applyCalibrationCard
-- buildPathwayOptions
 
 ## God Nodes (most connected - your core abstractions)
 1. `esc()` - 37 edges
@@ -61,9 +60,9 @@
 5. `render()` - 12 edges
 6. `completedResultCardHTML()` - 11 edges
 7. `callClaude()` - 11 edges
-8. `renderOnboarding()` - 10 edges
-9. `graphify Skill Definition (SKILL.md)` - 10 edges
-10. `statLabel()` - 9 edges
+8. `renderAuth()` - 10 edges
+9. `renderOnboarding()` - 10 edges
+10. `graphify Skill Definition (SKILL.md)` - 10 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Growth-Gate (12-word deterministic check)` --semantically_similar_to--> `Discrete Confidence-Score Rubric (0.95/0.85/0.75/0.65/0.55)`  [INFERRED] [semantically similar]
@@ -85,7 +84,7 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (37 total, 7 thin omitted)
+## Communities (36 total, 7 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.05
@@ -100,8 +99,8 @@ Cohesion: 0.06
 Nodes (56): APPLY, { looksRecoveryThemed, normalizeEvidenceSchema }, main(), { Pool }, analyzeNutritionPhoto(), AXIS_ACTIVITY_PHRASE, callClaude(), CARDIO_ACTIVITY_TYPES (+48 more)
 
 ### Community 3 - "graphify Skill Definition (SKILL.md)"
-Cohesion: 0.22
-Nodes (9): .claude/CLAUDE.md — graphify Trigger Pointer, graphify add/--watch Reference Guide, graphify Exports & Benchmark Reference Guide, graphify GitHub Clone & Cross-Repo Merge Guide, graphify Commit Hook & CLAUDE.md Integration Guide, graphify Query/Path/Explain Reference Guide, graphify Video/Audio Transcription Guide, graphify --update/--cluster-only Reference Guide (+1 more)
+Cohesion: 0.18
+Nodes (11): .claude/CLAUDE.md — graphify Trigger Pointer, graphify add/--watch Reference Guide, graphify Exports & Benchmark Reference Guide, graphify GitHub Clone & Cross-Repo Merge Guide, graphify Commit Hook & CLAUDE.md Integration Guide, graphify Query/Path/Explain Reference Guide, graphify Video/Audio Transcription Guide, graphify --update/--cluster-only Reference Guide (+3 more)
 
 ### Community 4 - "db.js"
 Cohesion: 0.05
@@ -111,9 +110,9 @@ Nodes (25): allHistory(), createArtifact(), createFoodEntry(), createQuest(), DE
 Cohesion: 0.14
 Nodes (15): Context Update / Kondisi Hari Ini (11f), Homepage/Dashboard Redesign (4-screen nav shell), Stat Decay Mechanism (11e), Goal Capture (v13, bridge to First Trial), Practice Test completionType (Task 9), public/app.js (vanilla JS frontend), public/styles.css (design tokens), Quest Hierarchy: Primary Quest/Milestone/Today's Trial (Task 7d) (+7 more)
 
-### Community 6 - "questSummaryCard"
-Cohesion: 0.25
-Nodes (8): ensureCountdownTicking(), formatCountdown(), nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
+### Community 6 - "esc"
+Cohesion: 0.19
+Nodes (16): artifactsSheetHTML(), axisDefinitionsHTML(), completedResultCardHTML(), elevaResponseHTML(), esc(), helpSheetHTML(), jobApplicationSummary(), jobMatchFlowHTML() (+8 more)
 
 ### Community 7 - "Eleva_Prototype.jsx"
 Cohesion: 0.10
@@ -124,12 +123,12 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.31
-Nodes (13): api(), authFinish(), boot(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder(), helpBtnHTML(), isStepValid() (+5 more)
+Cohesion: 0.28
+Nodes (13): api(), authFinish(), boot(), buildPathwayOptions(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder(), openNutritionFlow() (+5 more)
 
-### Community 10 - "statLabel"
-Cohesion: 0.19
-Nodes (14): attachPolygonHandlers(), axisLabelLayout(), characterScreenHTML(), heptagonPath(), polyPoint(), polyRadius(), polyValueFromRadius(), radiusPoint() (+6 more)
+### Community 10 - "renderOnboarding"
+Cohesion: 0.16
+Nodes (17): attachPolygonHandlers(), axisLabelLayout(), characterScreenHTML(), helpBtnHTML(), heptagonPath(), isStepValid(), polyPoint(), polyRadius() (+9 more)
 
 ### Community 11 - "jobMatch.js"
 Cohesion: 0.08
@@ -147,9 +146,9 @@ Nodes (4): assert, { chromium }, { Client }, { spawn }
 Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
-### Community 18 - "esc"
+### Community 18 - "renderDashboard"
 Cohesion: 0.09
-Nodes (37): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML() (+29 more)
+Nodes (26): activeSomaQuest(), beginStructuredOrReflectiveFlow(), durasiMenitFromFields(), ensureCountdownTicking(), fileToBase64(), formatCountdown(), jobApplicationFlowHTML(), kisahmuScreenHTML() (+18 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -164,12 +163,12 @@ Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 23 - "DEPLOY_RAILWAY.md — Railway Deployment Guide"
-Cohesion: 0.40
-Nodes (5): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence)
+Cohesion: 0.29
+Nodes (7): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence), Eleva PRD.md, Body Quest Completion Screen Screenshot
 
-### Community 24 - "Adaptive Scenario Cards"
-Cohesion: 0.40
-Nodes (5): graphify Honesty Rules, Adaptive Scenario Cards, Defense-in-Depth Pattern (don't trust AI self-report, enforce in code), Locked-Axis Erosion Mechanism (v12), lockTension Mechanism
+### Community 24 - "3-Card Pathway Recommendation Carousel"
+Cohesion: 0.50
+Nodes (4): Chapter Advancement Mechanism, 3-Card Pathway Recommendation Carousel, Pathway ≠ Chapter Principle, Pathway Rename/Reframe v8 (Architect/Warden/Weaver/Pilgrim/Specialist)
 
 ### Community 25 - "Eleva README.md"
 Cohesion: 0.16
@@ -181,7 +180,7 @@ Nodes (7): Discrete Confidence-Score Rubric (0.95/0.85/0.75/0.65/0.55), graphify
 
 ### Community 27 - "Task 5: Adaptive Pathway Onboarding"
 Cohesion: 0.22
-Nodes (9): Chapter Advancement Mechanism, Claude Sonnet (not Haiku) Model Choice, Eleva (AI Character Growth System), Freemium Monetization Model (decided, not built), 3-Card Pathway Recommendation Carousel, Pathway ≠ Chapter Principle, Task 5: Adaptive Pathway Onboarding, Pathway Rename/Reframe v8 (Architect/Warden/Weaver/Pilgrim/Specialist) (+1 more)
+Nodes (11): Adaptive Scenario Cards, Claude Sonnet (not Haiku) Model Choice, Eleva (AI Character Growth System), Locked-Axis Erosion Mechanism (v12), lockTension Mechanism, Freemium Monetization Model (decided, not built), Task 5: Adaptive Pathway Onboarding, 10-Person Closed 14-Day Pilot (+3 more)
 
 ### Community 28 - "server/nutrition.js"
 Cohesion: 0.10
@@ -195,13 +194,9 @@ Nodes (4): assert, { chromium }, { Client }, { spawn }
 Cohesion: 0.36
 Nodes (9): comingSoonRowHTML(), metaRealmDetailHTML(), metaRealmToolsHTML(), metaScreenHTML(), metaSessionPct(), realmClusterHTML(), realmIconSVG(), realmProgressCardHTML() (+1 more)
 
-### Community 33 - "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)"
-Cohesion: 0.50
-Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
-
 ### Community 34 - "renderAuth"
-Cohesion: 0.38
-Nodes (7): authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
+Cohesion: 0.32
+Nodes (8): authConsentInfoModalHTML(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
 
 ### Community 35 - "applyCalibrationCard"
 Cohesion: 0.33
@@ -215,11 +210,11 @@ Nodes (6): applyCalibrationCard(), applySynergyDrag(), clampCalibrationDelta(), 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Eleva README.md` connect `Eleva README.md` to `7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)`, `Goal Capture (v13, bridge to First Trial)`, `DEPLOY_RAILWAY.md — Railway Deployment Guide`?**
+- **Why does `Eleva README.md` connect `Eleva README.md` to `Task 5: Adaptive Pathway Onboarding`, `Goal Capture (v13, bridge to First Trial)`, `DEPLOY_RAILWAY.md — Railway Deployment Guide`?**
   _High betweenness centrality (0.006) - this node is a cross-community bridge._
-- **Why does `Task 5: Adaptive Pathway Onboarding` connect `Task 5: Adaptive Pathway Onboarding` to `Adaptive Scenario Cards`, `7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)`, `Goal Capture (v13, bridge to First Trial)`?**
+- **Why does `Task 5: Adaptive Pathway Onboarding` connect `Task 5: Adaptive Pathway Onboarding` to `3-Card Pathway Recommendation Carousel`, `Goal Capture (v13, bridge to First Trial)`?**
   _High betweenness centrality (0.005) - this node is a cross-community bridge._
-- **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `Adaptive Scenario Cards` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`?**
+- **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `graphify Skill Definition (SKILL.md)` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`, `Task 5: Adaptive Pathway Onboarding`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
   _173 weakly-connected nodes found - possible documentation gaps or missing edges._

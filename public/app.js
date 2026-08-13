@@ -540,6 +540,7 @@ let authError = "";
 let authUiState = "idle";
 let authShowPassword = false;
 let authHelpOpen = false; // bottom-sheet "Tentang Eleva" modal
+let authConsentInfoOpen = false; // bottom-sheet "Tentang data selama Beta" (Sign Up consent)
 let authTimers = [];
 function clearAuthTimers() { authTimers.forEach(clearTimeout); authTimers = []; }
 // Handoff's own timing table (README "Total sequence ≈ 4.9s"): loading→
@@ -758,6 +759,25 @@ function authHelpModalHTML() {
     </div>`;
 }
 
+// Sign Up consent's info sheet (handoff v4: "the data-info sheet") - reuses
+// the SAME bottom-sheet component/classes as the "Tentang Eleva" help sheet
+// above (same visual pattern, different content), reachable from two tap
+// points in the consent row (the bold "Ketentuan Beta & Privasi" text and
+// the "Lihat bagaimana data saya digunakan" link below it) - one sheet, two
+// entry points, not two separate sheets.
+function authConsentInfoModalHTML() {
+  if (!authConsentInfoOpen) return "";
+  return `
+    <div class="auth2-help-backdrop" id="auth2ConsentInfoBackdrop"></div>
+    <div class="auth2-help-sheet fadeUp">
+      <div class="auth2-help-title">Tentang data selama Beta</div>
+      <p class="auth2-help-body">Refleksi dan bukti yang kamu kirim dapat diproses oleh model AI untuk membuat quest dan analisis personal.</p>
+      <p class="auth2-help-body">Selama masa beta, data dapat diakses secara terbatas untuk pengembangan Eleva.</p>
+      <p class="auth2-help-body">Eleva bukan pengganti layanan kesehatan mental profesional.</p>
+      <button class="auth2-help-primary" id="auth2ConsentInfoClose">Saya mengerti</button>
+    </div>`;
+}
+
 function renderAuth() {
   clearAuthTimers();
   authUiState = "idle";
@@ -783,10 +803,10 @@ function renderAuth() {
         </div>
         <div class="auth2-title-block">
           <h1 class="auth2-headline">${isSignup ? "MULAI<br/>PERJALANANMU" : "SELAMAT<br/>DATANG KEMBALI"}</h1>
-          <p class="auth2-tagline">${isSignup ? "Daftar untuk mulai membentuk<br/>jalanmu sendiri." : "Kembali pada jalan yang<br/>sedang membentukmu."}</p>
+          <p class="auth2-tagline">${isSignup ? "Bentuk karakter melalui<br/>langkah yang nyata." : "Kembali pada jalan yang<br/>sedang membentukmu."}</p>
         </div>
         <div class="auth2-spacer"></div>
-        <div class="auth2-form-col">
+        <div class="auth2-form-col ${isSignup ? "auth2-form-col-signup" : ""}">
           <p class="auth2-error" id="auth2Error">${esc(authError)}</p>
           <div class="auth2-field">
             <label class="auth2-label mono">EMAIL</label>
@@ -801,12 +821,15 @@ function renderAuth() {
           </div>
           ${isSignup ? `
           <div class="auth2-field auth2-field-pw">
-            <label class="auth2-label mono">KODE BETA</label>
-            <input type="text" id="auth2BetaCode" placeholder="dari founder Eleva" />
+            <label class="auth2-label mono">KODE UNDANGAN</label>
+            <input type="text" id="auth2BetaCode" placeholder="Masukkan kode beta" />
           </div>
           <div class="auth2-consent" id="auth2Consent">
             <span class="auth2-checkbox ${privacyChecked ? "on" : ""}" id="auth2ConsentBox">${privacyChecked ? "✓" : ""}</span>
-            <span class="auth2-consent-text">Saya mengerti: refleksi saya diproses AI (Claude/Anthropic) untuk membuat quest &amp; analisis, disimpan di database yang bisa diakses founder selama masa beta, dan ini bukan pengganti layanan kesehatan mental profesional.</span>
+            <span class="auth2-consent-text">Saya setuju dengan <span class="auth2-consent-link" id="auth2ConsentTerms">Ketentuan Beta &amp; Privasi</span></span>
+          </div>
+          <div class="auth2-consent-datalink-row">
+            <span class="auth2-consent-datalink" id="auth2DataLink">Lihat bagaimana data saya digunakan</span>
           </div>` : ""}
           <button class="auth2-cta ${isSignup && !privacyChecked ? "auth2-cta-disabled" : ""}" id="auth2Submit" ${isSignup && !privacyChecked ? "disabled" : ""}>
             <span class="auth2-cta-label">${isSignup ? "DAFTAR" : "MASUK"}</span>
@@ -816,7 +839,13 @@ function renderAuth() {
             </span>
           </button>
           <div class="auth2-helper" id="auth2Helper"></div>
-          <div class="auth2-link-row auth2-link-row-forgot"><span class="auth2-forgot">Lupa password?</span></div>
+          ${isSignup ? "" : `<div class="auth2-link-row auth2-link-row-forgot"><span class="auth2-forgot">Lupa password?</span></div>`}
+        </div>
+        <!-- Fix (handoff v4): the footer (hairline + mode-switch link) is a
+             SEPARATE flex child from .auth2-form-col, not nested inside it -
+             this is what keeps it pinned in place while Sign Up's form
+             column above shifts up via translateY, instead of moving with it. -->
+        <div class="auth2-footer-col">
           <div class="auth2-hair"></div>
           <div class="auth2-link-row auth2-link-row-signup">
             <button class="auth2-toggle-mode" id="auth2ToggleMode"><span class="auth2-muted">${isSignup ? "Sudah punya akun? " : "Baru di sini? "}</span><span class="auth2-accent">${isSignup ? "MASUK" : "DAFTAR"}</span></button>
@@ -829,6 +858,7 @@ function renderAuth() {
       </div>
       <div class="auth2-flash" id="auth2Flash"></div>
       ${authHelpModalHTML()}
+      ${authConsentInfoModalHTML()}
     </div>`;
 
   const emailInput = document.getElementById("auth2Email");
@@ -859,6 +889,17 @@ function renderAuth() {
     btn.disabled = !privacyChecked;
     btn.classList.toggle("auth2-cta-disabled", !privacyChecked);
   });
+  // The bold "Ketentuan Beta & Privasi" tap target opens the info sheet
+  // instead of toggling consent - stopPropagation so it doesn't also bubble
+  // up to the row's own click-to-toggle handler above.
+  document.getElementById("auth2ConsentTerms")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    authConsentInfoOpen = true;
+    renderAuth();
+  });
+  document.getElementById("auth2DataLink")?.addEventListener("click", () => { authConsentInfoOpen = true; renderAuth(); });
+  document.getElementById("auth2ConsentInfoBackdrop")?.addEventListener("click", () => { authConsentInfoOpen = false; renderAuth(); });
+  document.getElementById("auth2ConsentInfoClose")?.addEventListener("click", () => { authConsentInfoOpen = false; renderAuth(); });
   document.getElementById("auth2ToggleMode").addEventListener("click", () => {
     if (authUiState !== "idle") return;
     authMode = isSignup ? "login" : "signup";

@@ -125,17 +125,50 @@ async function test(name, fn) {
     await page.click("#auth2ToggleMode");
     await page.waitForSelector("text=MULAI", { timeout: 5000 });
     assert.ok(await page.locator("text=PERJALANANMU").count(), "signup headline missing");
+    assert.ok(await page.locator("text=Bentuk karakter melalui").count(), "signup tagline missing");
     assert.ok(await page.locator("#auth2BetaCode").count(), "beta code field missing");
+    assert.ok(await page.locator("text=KODE UNDANGAN").count(), "KODE UNDANGAN label missing");
     assert.ok(await page.locator("#auth2Consent").count(), "privacy consent (Task 4) missing from signup");
     assert.strictEqual(await page.locator("#auth2Submit").isDisabled(), true, "submit must be gated on consent");
+    assert.strictEqual(await page.locator("text=Lupa password?").count(), 0, "Sign Up must have no forgot-password row (handoff v4)");
     await page.click("#auth2ToggleMode");
     await page.waitForSelector("#auth2BetaCode", { state: "detached", timeout: 5000 });
+    assert.ok(await page.locator("text=Lupa password?").count(), "Login must keep its forgot-password row");
     await page.click("#auth2ToggleMode"); // back to signup for the next tests
     await page.waitForSelector("#auth2BetaCode", { timeout: 5000 });
   });
 
+  await test("consent's bold link and the data-usage link both open the same info sheet without toggling consent; the footer stays put while the form column shifts (handoff v4)", async () => {
+    assert.ok(await page.locator("#auth2ConsentTerms").count(), "bold 'Ketentuan Beta & Privasi' tap target missing");
+    assert.ok(await page.locator("#auth2DataLink").count(), "'Lihat bagaimana data saya digunakan' link missing");
+    await page.click("#auth2ConsentTerms");
+    await page.waitForSelector("#auth2ConsentInfoClose", { timeout: 5000 });
+    assert.ok(await page.locator("text=Tentang data selama Beta").count(), "consent info sheet title missing");
+    assert.strictEqual(
+      await page.evaluate(() => document.getElementById("auth2ConsentBox").classList.contains("on")),
+      false, "clicking the bold link must not also toggle consent"
+    );
+    await page.click("#auth2ConsentInfoClose");
+    await page.waitForSelector("#auth2ConsentInfoClose", { state: "detached", timeout: 5000 });
+    await page.click("#auth2DataLink");
+    await page.waitForSelector("#auth2ConsentInfoClose", { timeout: 5000 });
+    await page.click("#auth2ConsentInfoBackdrop");
+    await page.waitForSelector("#auth2ConsentInfoClose", { state: "detached", timeout: 5000 });
+    // Form column shifts up (translateY) in Sign Up only; the footer is a
+    // separate flex sibling and must stay untransformed.
+    const transforms = await page.evaluate(() => ({
+      formCol: getComputedStyle(document.querySelector(".auth2-form-col")).transform,
+      footerCol: getComputedStyle(document.querySelector(".auth2-footer-col")).transform,
+    }));
+    assert.notStrictEqual(transforms.formCol, "none", "Sign Up's form column must be shifted via translateY");
+    assert.strictEqual(transforms.footerCol, "none", "footer must stay pinned (no transform) regardless of the form column's shift");
+  });
+
   await test("beta code required: inline error before any request", async () => {
-    await page.click("#auth2Consent");
+    // The checkbox specifically, not the row - the row's own click-center
+    // now lands inside the bold "Ketentuan Beta & Privasi" tap target
+    // (handoff v4), which opens the info sheet instead of toggling consent.
+    await page.click("#auth2ConsentBox");
     assert.strictEqual(await page.locator("#auth2Submit").isDisabled(), false, "consent click did not enable submit");
     await page.fill("#auth2Email", `cin-${Date.now()}@example.com`);
     await page.fill("#auth2Password", "password123");
@@ -172,7 +205,7 @@ async function test(name, fn) {
     await pageZoom.fill("#auth2Email", zoomEmail);
     await pageZoom.fill("#auth2Password", "password123");
     await pageZoom.fill("#auth2BetaCode", "TESTCODE");
-    await pageZoom.click("#auth2Consent");
+    await pageZoom.click("#auth2ConsentBox");
     await pageZoom.click("#auth2Submit");
     await pageZoom.waitForSelector(".auth2-cta.auth2-success", { timeout: 10000 });
     // Wait past the success hold into "entering": the glow must already be

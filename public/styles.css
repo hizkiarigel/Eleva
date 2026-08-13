@@ -658,6 +658,12 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .auth2-spacer { flex: 1; min-height: var(--a2-spacer-min); }
 
 .auth2-form-col { flex: none; width: 86%; max-width: 332px; margin: 0 auto; }
+/* Sign Up only (handoff v4, "final spacing/structure details"): the whole
+   form column shifts up so its tightened field block doesn't crowd the
+   footer below - a transform, so it never affects .auth2-footer-col (a
+   separate flex sibling, not a descendant - see below), which stays pinned
+   at its usual position in both modes. */
+.auth2-form-col-signup { transform: translateY(-28px); }
 .auth2-error { color: #c96b5e; font-size: 13px; text-align: center; margin: 0 0 var(--a2-sm); }
 .auth2-error:empty { display: none; margin: 0; }
 
@@ -665,6 +671,13 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    was reading as too loose end-to-end from EMAIL to the DAFTAR link. */
 .auth2-field { margin-bottom: var(--a2-md); }
 .auth2-field-pw { margin-bottom: var(--a2-md2); }
+/* Sign Up's own field rhythm is tighter still (near-zero, "one tight
+   block") - scoped to Sign Up only so Login's already-tuned spacing above
+   is untouched. Higher specificity than the base rules above wins
+   regardless of source order. */
+.auth2-form-col-signup .auth2-field,
+.auth2-form-col-signup .auth2-field-pw { margin-bottom: 1.6px; }
+.auth2-form-col-signup .auth2-cta { margin-top: 18px; }
 .auth2-label { display: block; font-size: 12px; font-weight: 500; letter-spacing: .18em; color: #d8a355; margin-bottom: 6px; }
 .auth2-field input, .auth2-pw-row input {
   width: 100%; box-sizing: border-box; background: transparent; border: none; border-bottom: 1px solid rgba(216, 163, 85, .4);
@@ -680,18 +693,30 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .auth2-pw-row input[type="password"] { letter-spacing: 2px; }
 .auth2-pw-toggle { flex: none; padding-bottom: 10px; font-size: 12px; letter-spacing: .1em; color: #948f9c; cursor: pointer; min-height: 20px; display: flex; align-items: center; }
 
-/* Beta code + consent: NOT in the handoff (its reference has no signup
-   state at all) - reuses the SAME field/label tokens above rather than
-   inventing new ones, kept for the identical functional reason the
-   PREVIOUS login handoff already required them (BETA_CODE gate, Task 4
-   compliance). Flagged back to design. */
-.auth2-consent { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 var(--a2-md2); cursor: pointer; }
+/* Consent (handoff v4, "Sign Up mode" + "final spacing/structure
+   details"): checkbox row has NO margin of its own - the visual gap above
+   it comes from KODE UNDANGAN's own (tightened) field spacing, not from
+   this row. */
+.auth2-consent { display: flex; align-items: flex-start; gap: 10px; margin: 0; cursor: pointer; }
 .auth2-checkbox {
   flex: none; width: 18px; height: 18px; border-radius: 4px; border: 1px solid rgba(216, 163, 85, .5);
   display: flex; align-items: center; justify-content: center; font-size: 12px; color: #1a1409; margin-top: 1px;
 }
 .auth2-checkbox.on { background: #d8a355; border-color: #d8a355; }
 .auth2-consent-text { font-size: 12px; line-height: 1.5; color: #948f9c; }
+/* The bold/gold part of the consent copy is its own tap target (opens the
+   data-info sheet) - not the checkbox toggle, hence the separate class and
+   the stopPropagation on its click handler in app.js. */
+.auth2-consent-link { color: #d8a355; font-weight: 600; }
+/* -10px margin-top is deliberate (pulls the link up snug under the consent
+   row, no visible gap) - padding-left:28px lands its left edge under the
+   consent TEXT (checkbox 18px + 10px gap), not under the checkbox itself.
+   That overlap is intentional but the row's own box would otherwise sit on
+   top of (and intercept clicks meant for) the consent-link text just above
+   it - pointer-events:none on the wrapper, re-enabled only on the link
+   itself, keeps the negative margin purely visual. */
+.auth2-consent-datalink-row { padding-left: 28px; margin-top: -10px; pointer-events: none; }
+.auth2-consent-datalink { font-size: 11px; color: #948f9c; text-decoration: underline; cursor: pointer; pointer-events: auto; }
 
 .auth2-cta {
   position: relative; width: 100%; min-height: 58px; border-radius: 29px; border: none; margin-top: var(--a2-lg); margin-bottom: 0;
@@ -720,6 +745,11 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    password?" is gone - "Lupa password?" is meant to read as close to the
    button, not separated by a rule. Only one hairline remains now, between
    "Lupa password?" and "Baru di sini? DAFTAR". */
+/* Fix (handoff v4): separate flex child from .auth2-form-col (not nested)
+   so it stays pinned in place while Sign Up's form column shifts up via
+   translateY above it - same width/centering pattern as .auth2-form-col so
+   nothing shifts horizontally. */
+.auth2-footer-col { flex: none; width: 86%; max-width: 332px; margin: 0 auto; }
 .auth2-hair { height: 1px; background: rgba(216, 163, 85, .16); margin: var(--a2-2xs) 0 0; }
 .auth2-link-row { text-align: center; min-height: 44px; display: flex; align-items: center; justify-content: center; }
 .auth2-link-row-forgot { margin-top: var(--a2-sm); }
