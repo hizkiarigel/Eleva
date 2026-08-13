@@ -564,12 +564,20 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .auth2-root {
   position: fixed; inset: 0; min-height: 100dvh; overflow-y: auto; overflow-x: hidden; background: #05050a; font-family: "Inter", sans-serif;
   --a2-2xs: clamp(5px, 1.4dvh, 10px);
-  --a2-xs: clamp(6px, 1.6dvh, 12px);
+  --a2-xs: clamp(3px, 0.8dvh, 4px);
   --a2-sm: clamp(7px, 2dvh, 14px);
   --a2-md: clamp(9px, 2.4dvh, 18px);
   --a2-md2: clamp(10px, 2.6dvh, 20px);
   --a2-lg: clamp(11px, 3dvh, 22px);
-  --a2-pad-top: clamp(24px, 6.5dvh, 56px);
+  /* Fix (13 Agustus, founder feedback): the brand row + title block was
+     sitting low enough to overlap the gate's spire in the background art
+     (measured on the rendered page: tagline bottom ~233px vs spire top
+     ~178px at 390x844 - zero gap, text over stone). Cut hard here since the
+     flex .auth2-spacer below absorbs whatever this frees up, so the form's
+     position is untouched (see .auth2-spacer comment) - only the title
+     block moves up. env() floor keeps it clear of a real notch/status bar. */
+  --a2-pad-top: max(clamp(6px, 1.5dvh, 10px), env(safe-area-inset-top, 0px));
+  --a2-brand-gap: clamp(4px, 1dvh, 6px);
   --a2-pad-bottom: clamp(14px, 3.5dvh, 28px);
   --a2-spacer-min: clamp(40px, 18dvh, 230px);
 }
@@ -625,7 +633,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    (was absolutely positioned in the corner). 3-column grid keeps the ELEVA
    mark visually centered on the row regardless of the button's width - the
    two 1fr tracks stay equal, the button just end-aligns within its own. */
-.auth2-brand-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin-bottom: var(--a2-lg); flex: none; }
+.auth2-brand-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin-bottom: var(--a2-brand-gap); flex: none; }
 .auth2-brand-mark { display: flex; align-items: center; justify-self: center; gap: 8px; }
 .auth2-diamond { width: 13px; height: 13px; flex: none; object-fit: contain; }
 .auth2-wordmark { font-family: "Fraunces", serif; font-size: 13px; font-weight: 500; letter-spacing: .3em; color: #d8a355; }
