@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786611094.9159408,
-    "ast_hash": "246f7a934c8baf84ec074321e348e60d",
+    "mtime": 1786620982.422369,
+    "ast_hash": "0ae2ebf52cc2adafe452cea5f8018f2a",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -190,8 +190,8 @@
     "semantic_hash": ""
   },
   "tests/auth.e2e.js": {
-    "mtime": 1786608275.9088159,
-    "ast_hash": "8e3bd69aef5c22a0ff969c564ff08c9a",
+    "mtime": 1786621281.866387,
+    "ast_hash": "8ef3d8fd17e1a78b2c0c78614d7820e0",
     "semantic_hash": ""
   },
   "scripts/fix-stale-recovery-quests.js": {
@@ -257,6 +257,11 @@
   "public/assets/eleva-stickman.png": {
     "mtime": 1786607606.8292723,
     "ast_hash": "2ba779fe720555cfeff73437d972ca80",
+    "semantic_hash": ""
+  },
+  "public/assets/eleva-portal-zoom.png": {
+    "mtime": 1786620895.1023638,
+    "ast_hash": "ac9192b3fa77059b58a537560fdba984",
     "semantic_hash": ""
   }
 }

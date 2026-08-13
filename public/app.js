@@ -533,21 +533,28 @@ let authError = "";
 // the previous cinematic login wholesale (founder confirmed via
 // AskUserQuestion: this new handoff supersedes it, not a second screen).
 // authUiState is the button/panel state machine (idle → loading → success →
-// entering → complete), names matching the handoff's own authState. All
-// transitions after the initial render are direct DOM class toggles, never
-// re-renders — a re-render mid-animation would restart the CSS animations
-// from zero (same reasoning as the previous login, kept).
+// entering → zooming → flash → complete), names matching the handoff's own
+// authState. All transitions after the initial render are direct DOM class
+// toggles, never re-renders — a re-render mid-animation would restart the
+// CSS animations from zero (same reasoning as the previous login, kept).
 let authUiState = "idle";
 let authShowPassword = false;
 let authHelpOpen = false; // bottom-sheet "Tentang Eleva" modal
 let authTimers = [];
 function clearAuthTimers() { authTimers.forEach(clearTimeout); authTimers = []; }
-// Handoff's own timing table (README "Total success→complete sequence"):
-// loading→success is a REAL request with an 800ms floor (translated from
-// the static prototype's fixed 800ms mock timer - a real network call
-// shouldn't get cut short on a slow connection, same floor pattern the
-// previous login already used), success and entering each hold ~900ms.
-const AUTH_LOADING_FLOOR = 800, AUTH_SUCCESS_HOLD = 900, AUTH_ENTERING_HOLD = 900;
+// Handoff's own timing table (README "Total sequence ≈ 4.9s"): loading→
+// success is a REAL request with an 800ms floor (translated from the static
+// prototype's fixed 800ms mock timer - a real network call shouldn't get
+// cut short on a slow connection, same floor pattern the previous login
+// already used); success/entering hold ~900ms each, zooming ~1600ms (the
+// full-bleed gate's scale/brightness transition), flash ~700ms (fast fade-
+// in then a hold).
+const AUTH_LOADING_FLOOR = 800, AUTH_SUCCESS_HOLD = 900, AUTH_ENTERING_HOLD = 900, AUTH_ZOOMING_HOLD = 1600, AUTH_FLASH_HOLD = 700;
+// Reduced-motion collapses to idle → loading(300ms) → success(200ms) →
+// flash(250ms) → complete, skipping entering/zooming ENTIRELY (no gate
+// zoom, no parallax) - these are the handoff's own distinct per-phase
+// numbers, not a uniform "cap every hold at 250ms".
+const AUTH_RM_LOADING_FLOOR = 300, AUTH_RM_SUCCESS_HOLD = 200, AUTH_RM_FLASH_HOLD = 250;
 function authReducedMotion() {
   return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -714,9 +721,10 @@ function spinnerHTML(label) {
 // the previous cinematic login screen wholesale (confirmed via
 // AskUserQuestion: the founder wanted this new handoff to supersede it, not
 // coexist as a second screen). Full-bleed pre-cropped background + vignette
-// stack, MASUK/DAFTAR button with 5 states (idle/loading/success/entering/
-// complete, the handoff's own state names) wired to the REAL /api/login and
-// /api/signup. Deviations from the handoff, all deliberate and flagged:
+// stack, MASUK/DAFTAR button with 7 states (idle/loading/success/entering/
+// zooming/flash/complete, the handoff's own state names) wired to the REAL
+// /api/login and /api/signup. Deviations from the handoff, all deliberate
+// and flagged:
 // - The handoff's own reference only implements a LOGIN screen ("DAFTAR" at
 //   the bottom has no onClick, no signup state anywhere in its component).
 //   Signup reuses every visual token verbatim, adding only what the
@@ -731,7 +739,6 @@ function spinnerHTML(label) {
 // - The 800ms "loading" wait is a FLOOR around the real request, not the
 //   reference's fixed mock timer - same real-network translation the
 //   previous login already made (a slow connection must not get cut short).
-function authHoldMs(full) { return authReducedMotion() ? Math.min(full, 250) : full; }
 
 function authHelpModalHTML() {
   if (!authHelpOpen) return "";
@@ -817,6 +824,9 @@ function renderAuth() {
         </div>
       </div>
 
+      <div class="auth2-zoom-wrap" id="auth2ZoomWrap">
+        <img src="/assets/eleva-portal-zoom.png" alt="" class="auth2-zoom-img" id="auth2ZoomImg" />
+      </div>
       <div class="auth2-flash" id="auth2Flash"></div>
       ${authHelpModalHTML()}
     </div>`;
@@ -896,7 +906,7 @@ function renderAuth() {
     btn.disabled = true;
     btn.classList.add("auth2-loading");
     helper.textContent = "Masuk...";
-    const floor = new Promise((r) => setTimeout(r, authHoldMs(AUTH_LOADING_FLOOR)));
+    const floor = new Promise((r) => setTimeout(r, authReducedMotion() ? AUTH_RM_LOADING_FLOOR : AUTH_LOADING_FLOOR));
     try {
       await Promise.all([
         api(isSignup ? "/api/signup" : "/api/login", { method: "POST", body: authForm }),
@@ -921,14 +931,21 @@ function renderAuth() {
     // copy ("Selamat datang kembali!" reads wrong for a brand-new account) -
     // same deviation the previous login already made, kept for the same reason.
     helper.textContent = isSignup ? "Selamat datang di Eleva!" : "Selamat datang kembali!";
-    // The real /api/state is prefetched during the success+entering hold so
-    // the final crossfade lands on the real home/onboarding screen, not a
-    // placeholder (handoff: "replace with the actual navigation").
+    // The real /api/state is prefetched during the success/entering/zooming
+    // hold so the final crossfade lands on the real home/onboarding screen,
+    // not a placeholder (handoff: "replace with the actual navigation").
     const statePrefetch = api("/api/state").catch(() => null);
     authTimers.push(setTimeout(() => {
-      authUiState = "entering";
-      runAuthEntering(statePrefetch);
-    }, authHoldMs(AUTH_SUCCESS_HOLD)));
+      // Reduced motion skips entering/zooming ENTIRELY (no gate zoom, no
+      // parallax) - straight from success to the flash beat.
+      document.getElementById("auth2PortalGlow").classList.add("hidden");
+      if (authReducedMotion()) {
+        runAuthReducedFlash(statePrefetch);
+      } else {
+        authUiState = "entering";
+        runAuthEntering(statePrefetch);
+      }
+    }, authReducedMotion() ? AUTH_RM_SUCCESS_HOLD : AUTH_SUCCESS_HOLD));
   };
   document.getElementById("auth2Submit").addEventListener("click", submit);
   [emailInput, pwInput, betaInput].forEach((el) => el?.addEventListener("keydown", (e) => {
@@ -936,34 +953,61 @@ function renderAuth() {
   }));
 }
 
-// Post-success sequence: stickman "walks" into the portal and fades, the
-// content column fades out, an amber flash covers the transition, then the
-// REAL boot-style render happens UNDER the flash while still opaque (the
-// flash is position:fixed, reparented to <body> so it survives
-// root.innerHTML being replaced) before fading back out — a true crossfade
-// into the real home/onboarding screen, not a hard cut.
-async function runAuthEntering(statePrefetch) {
-  const finish = async () => {
-    const s = await statePrefetch;
-    if (s) {
-      appState = s;
-      ui = { view: appState.profile ? "dashboard" : "onboarding" };
-      render();
-    } else {
-      await boot(); // prefetch failed — fall back to the normal boot path
-    }
-  };
-  document.getElementById("auth2Content").classList.add("auth2-fade-out");
-  document.getElementById("auth2Stickman").classList.add("auth2-stickman-walk");
-  document.getElementById("auth2Flash").classList.add("lit");
+// Resolves the real /api/state prefetch (or falls back to a normal boot) and
+// renders the destination screen - shared by both the full-motion and
+// reduced-motion completion paths below.
+async function authFinish(statePrefetch) {
+  const s = await statePrefetch;
+  if (s) {
+    appState = s;
+    ui = { view: appState.profile ? "dashboard" : "onboarding" };
+    render();
+  } else {
+    await boot(); // prefetch failed — fall back to the normal boot path
+  }
+}
+
+// Flash beat shared by both completion paths: fast fade-in (.25s, CSS),
+// hold, then reparent to <body> (survives the root.innerHTML swap while
+// still opaque), resolve the real screen underneath, and fade back out
+// (.6s full-motion, collapsed under reduced motion's global CSS override).
+function runAuthFlash(statePrefetch, holdMs) {
+  authUiState = "flash";
+  const flash = document.getElementById("auth2Flash");
+  flash.classList.add("lit");
   authTimers.push(setTimeout(async () => {
     authUiState = "complete";
-    const flash = document.getElementById("auth2Flash");
-    document.body.appendChild(flash); // survive the root.innerHTML swap while still opaque
-    await finish();
-    flash.classList.remove("lit"); // fades back out via the same CSS transition, revealing the real screen underneath
-    authTimers.push(setTimeout(() => flash.remove(), authReducedMotion() ? 200 : 1200));
-  }, authHoldMs(AUTH_ENTERING_HOLD)));
+    document.body.appendChild(flash);
+    await authFinish(statePrefetch);
+    flash.classList.add("auth2-flash-out"); // switch to the slower fade-OUT duration before toggling opacity back
+    flash.classList.remove("lit");
+    authTimers.push(setTimeout(() => flash.remove(), authReducedMotion() ? 200 : 700));
+  }, holdMs));
+}
+
+function runAuthReducedFlash(statePrefetch) {
+  runAuthFlash(statePrefetch, AUTH_RM_FLASH_HOLD);
+}
+
+// Post-success sequence: stickman "walks" into the portal and fades, the
+// login content column fades out while the full-bleed zoom-gate image
+// crossfades in (same window, so it reads as one continuous handoff, not a
+// jump cut) - "entering". The gate then scales up + brightens further -
+// "zooming", the only gate visual in the whole sequence, already visible
+// from "entering". Then the flash beat, then the REAL boot-style render
+// happens under it while still opaque, before fading back out into the
+// real home/onboarding screen.
+async function runAuthEntering(statePrefetch) {
+  document.getElementById("auth2Content").classList.add("auth2-fade-out");
+  document.getElementById("auth2Stickman").classList.add("auth2-stickman-walk");
+  document.getElementById("auth2ZoomWrap").classList.add("visible");
+  authTimers.push(setTimeout(() => {
+    authUiState = "zooming";
+    document.getElementById("auth2ZoomWrap").classList.add("zooming");
+    authTimers.push(setTimeout(() => {
+      runAuthFlash(statePrefetch, AUTH_FLASH_HOLD);
+    }, AUTH_ZOOMING_HOLD));
+  }, AUTH_ENTERING_HOLD));
 }
 
 // Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both

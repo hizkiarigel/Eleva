@@ -612,6 +612,13 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   transition: width 1.1s ease, height 1.1s ease; opacity: .8; pointer-events: none;
 }
 .auth2-portal-glow.lit { width: 520px; height: 520px; }
+/* Fix (13 Agustus, handoff v3 - full-bleed zoom-gate transition): this glow
+   is only a brief "the door is glowing" beat during success - must be gone
+   before the zoom-gate image (below) becomes visible in "entering", or the
+   two read as overlapping gate animations (handoff explicit). display:none
+   over a class (not just removing .lit) so it can't linger mid width/height
+   transition either. */
+.auth2-portal-glow.hidden { display: none; }
 
 /* Fix (13 Agustus, founder feedback): no longer absolutely positioned in
    the corner - lives inline in .auth2-brand-row now, end-aligned in its
@@ -722,10 +729,40 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .auth2-muted { font-size: 13.5px; color: #948f9c; margin-right: 5px; }
 .auth2-accent { font-family: "Fraunces", serif; font-weight: 600; font-size: 13.5px; letter-spacing: .04em; color: #d8a355; cursor: pointer; }
 
+/* Full-bleed zoom-gate transition (13 Agustus, handoff v3): a SEPARATE,
+   taller portrait artwork of the gate (not a stretched crop of the login
+   background), positioned so its gate lines up exactly with where the gate
+   sits in the login background at the moment of crossfade - the handoff's
+   own pixel-measured values (brightest-pixel sampling in both source
+   images), reused verbatim, not re-derived by eye. Hidden (opacity:0) until
+   "entering", stays through "zooming"/"flash"/"complete" - one continuous
+   element, never a second/different gate. z-index sits between the login
+   content (3) and the flash overlay (80). */
+.auth2-zoom-wrap {
+  position: absolute; inset: 0; overflow: hidden; z-index: 6; pointer-events: none;
+  opacity: 0; transition: opacity .9s ease;
+}
+.auth2-zoom-wrap.visible { opacity: 1; }
+.auth2-zoom-img {
+  position: absolute; left: 50%; top: -25.9%; width: 100%; height: auto;
+  transform: translateX(-50%) scale(1);
+  transform-origin: 50% 68.9%; /* the gate's own position in this image - scaling expands FROM the gate so it never drifts on screen */
+  filter: brightness(1);
+  transition: transform 1.6s cubic-bezier(.16, .7, .2, 1), filter 1.6s ease;
+}
+/* Set once at "zooming" and left alone - the transition naturally holds at
+   scale(2.6)/brightness(1.5) through "flash" and "complete" too. */
+.auth2-zoom-wrap.zooming .auth2-zoom-img { transform: translateX(-50%) scale(2.6); filter: brightness(1.5); }
+
 /* position:fixed so it survives being reparented to <body> across the
-   root.innerHTML swap into the real home/onboarding render. */
-.auth2-flash { position: fixed; inset: 0; background: #f0c26a; opacity: 0; transition: opacity 1s ease; z-index: 80; pointer-events: none; }
+   root.innerHTML swap into the real home/onboarding render. Warm-white
+   (not the old amber) fast flashbang fade-in (.25s) vs a slower fade-out
+   (.6s, added via .auth2-flash-out right before removing .lit) - a
+   deliberately asymmetric transition, so the same opacity toggle needs two
+   different durations depending on direction. */
+.auth2-flash { position: fixed; inset: 0; background: #fff6e0; opacity: 0; transition: opacity .25s ease; z-index: 80; pointer-events: none; }
 .auth2-flash.lit { opacity: 1; }
+.auth2-flash.auth2-flash-out { transition: opacity .6s ease; }
 
 .auth2-help-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 9; }
 .auth2-help-sheet {

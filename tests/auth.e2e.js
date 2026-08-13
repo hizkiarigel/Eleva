@@ -3,9 +3,10 @@
 // login (12 Agustus) wholesale. Covers: idle layout/copy, help modal,
 // signup mode's beta-code + privacy-consent gating (not in the handoff's
 // own reference, kept from the previous login for the same functional
-// reasons), inline validation, the MASUK/DAFTAR button's 5-state machine
-// (idle/loading/success/entering/complete) wired to the REAL /api/login
-// //api/signup, and the crossfade into the REAL home/onboarding screen.
+// reasons), inline validation, the MASUK/DAFTAR button's 7-state machine
+// (idle/loading/success/entering/zooming/flash/complete) wired to the REAL
+// /api/login //api/signup, the full-bleed zoom-gate crossfade, and the
+// final crossfade into the REAL home/onboarding screen.
 //
 // Run: node tests/auth.e2e.js
 // Requires: local Postgres (same TEST_DATABASE_URL convention as
@@ -159,6 +160,48 @@ async function test(name, fn) {
 
   await ctx1.close();
 
+  console.log("E2E: full-bleed zoom-gate transition (README 'entering -> zooming -> flash -> complete')");
+  const ctxZoom = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+  const pageZoom = await ctxZoom.newPage();
+  await test("entering hides the success glow before the zoom-gate crossfades in, zooms/brightens, then a warm-white flash carries the crossfade", async () => {
+    await pageZoom.goto(BASE);
+    await pageZoom.waitForSelector("#auth2Submit", { timeout: 20000 });
+    await pageZoom.click("#auth2ToggleMode"); // to signup, so we can create a fresh account
+    await pageZoom.waitForSelector("#auth2BetaCode", { timeout: 5000 });
+    const zoomEmail = `zoom-${Date.now()}@example.com`;
+    await pageZoom.fill("#auth2Email", zoomEmail);
+    await pageZoom.fill("#auth2Password", "password123");
+    await pageZoom.fill("#auth2BetaCode", "TESTCODE");
+    await pageZoom.click("#auth2Consent");
+    await pageZoom.click("#auth2Submit");
+    await pageZoom.waitForSelector(".auth2-cta.auth2-success", { timeout: 10000 });
+    // Wait past the success hold into "entering": the glow must already be
+    // display:none by the time the zoom-gate is visible, or it reads as two
+    // overlapping gate animations (handoff explicit).
+    await pageZoom.waitForFunction(() => {
+      const glow = document.getElementById("auth2PortalGlow");
+      const zw = document.getElementById("auth2ZoomWrap");
+      return zw.classList.contains("visible") && getComputedStyle(glow).display === "none";
+    }, null, { timeout: 5000 });
+    assert.strictEqual(
+      await pageZoom.evaluate(() => getComputedStyle(document.getElementById("auth2PortalGlow")).display),
+      "none", "success glow must be hidden once the zoom-gate is visible"
+    );
+    // Zooming: the same image scales up + brightens, no new element.
+    await pageZoom.waitForSelector(".auth2-zoom-wrap.zooming", { timeout: 3000 });
+    await pageZoom.waitForFunction(() => {
+      const img = document.getElementById("auth2ZoomImg");
+      return new DOMMatrixReadOnly(getComputedStyle(img).transform).a > 2;
+    }, null, { timeout: 3000 });
+    // Flash: warm-white (#fff6e0), not the old amber (#f0c26a).
+    await pageZoom.waitForSelector(".auth2-flash.lit", { timeout: 3000 });
+    const flashBg = await pageZoom.evaluate(() => getComputedStyle(document.querySelector(".auth2-flash")).backgroundColor);
+    assert.strictEqual(flashBg, "rgb(255, 246, 224)", `flash must be warm-white #fff6e0, got ${flashBg}`);
+    await pageZoom.waitForSelector("text=Siapa namamu?", { timeout: 15000 });
+    await pageZoom.waitForFunction(() => !document.querySelector(".auth2-flash"), null, { timeout: 5000 });
+  });
+  await ctxZoom.close();
+
   console.log("E2E: login with an existing profiled account lands on the real dashboard");
   // Profile the account via API so login leads to the dashboard branch.
   let cookieHeader = "";
@@ -197,18 +240,28 @@ async function test(name, fn) {
   console.log("E2E: prefers-reduced-motion fallback");
   const ctx3 = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
   const page3 = await ctx3.newPage();
-  await test("reduced motion: state machine still runs but every hold is capped (~250ms), no full sequence delay", async () => {
+  await test("reduced motion: entering/zooming are skipped entirely (idle -> loading(300) -> success(200) -> flash(250) -> complete), no full sequence delay", async () => {
     await page3.goto(BASE);
     await page3.waitForSelector("#auth2Submit", { timeout: 20000 });
     await page3.fill("#auth2Email", signupEmail);
     await page3.fill("#auth2Password", "password123");
     const t0 = Date.now();
     await page3.click("#auth2Submit");
+    // The zoom-gate must never appear under reduced motion - not just fast,
+    // genuinely skipped (handoff: "no gate zoom, no parallax"). Watched
+    // concurrently so its own (unmet) timeout never inflates `elapsed` below.
+    let zoomWrapEverVisible = false;
+    const watcher = page3.waitForFunction(
+      () => document.getElementById("auth2ZoomWrap")?.classList.contains("visible"), null, { timeout: 4000 }
+    ).then(() => { zoomWrapEverVisible = true; }).catch(() => {});
     await page3.waitForSelector("[data-reflect-id]", { timeout: 30000 });
     const elapsed = Date.now() - t0;
-    // Full-motion path is ~800(floor)+900(success)+900(entering) = 2600ms+;
-    // reduced-motion caps each hold at 250ms, so total should land well under.
-    assert.ok(elapsed < 2000, `reduced-motion path took ${elapsed}ms - holds not capped?`);
+    await watcher;
+    assert.strictEqual(zoomWrapEverVisible, false, "zoom-gate must never appear under reduced motion");
+    // Full-motion path is ~800+900+900+1600+700 = 4900ms+; reduced-motion's
+    // own distinct holds (300+200+250=750ms) plus real request latency land
+    // well under that.
+    assert.ok(elapsed < 2000, `reduced-motion path took ${elapsed}ms - holds not skipped/shortened?`);
   });
   await ctx3.close();
 
