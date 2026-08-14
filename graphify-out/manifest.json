@@ -140,8 +140,8 @@
     "semantic_hash": "988229385b570503de31cbfadfb76d91"
   },
   "public/index.html": {
-    "mtime": 1786607619.8008308,
-    "ast_hash": "a60df662493be49951f4dd8d27773b0d",
+    "mtime": 1786692901.7874444,
+    "ast_hash": "54fe4f711cb75e296c5c4937642214f4",
     "semantic_hash": ""
   },
   "reference/Eleva_Correlation_Matrix.html": {
@@ -265,8 +265,8 @@
     "semantic_hash": ""
   },
   "tests/onboarding-radar.e2e.js": {
-    "mtime": 1786692269.6434586,
-    "ast_hash": "bf9fa04c88b6fe0b052215dd892dbdb4",
+    "mtime": 1786692913.095444,
+    "ast_hash": "bee2c9f844eaf7f642b40f7f209214ed",
     "semantic_hash": ""
   }
 }

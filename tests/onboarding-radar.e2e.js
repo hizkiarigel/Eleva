@@ -257,6 +257,13 @@ async function test(name, fn) {
     await page.waitForTimeout(150);
   });
 
+  console.log("E2E: round 12 (real root cause found: viewport meta had no maximum-scale/user-scalable, so native pinch-zoom-then-pan could bypass every CSS overflow fix - not reproducible headlessly, but the meta tag itself is asserted here as a regression guard) - viewport locked against zoom");
+  await test("the viewport meta tag disables pinch-zoom (maximum-scale=1, user-scalable=no) so a zoomed page can never be panned around, independent of any CSS overflow rule", async () => {
+    const content = await page.evaluate(() => document.querySelector('meta[name="viewport"]').content);
+    assert.ok(content.includes("maximum-scale=1"), `viewport meta must include maximum-scale=1, got "${content}"`);
+    assert.ok(content.includes("user-scalable=no"), `viewport meta must include user-scalable=no, got "${content}"`);
+  });
+
   console.log("E2E: round 11 (founder: real device showed a page-level horizontal scrollbar and cropped heading text) - html/body get a hard overflow-x:hidden guarantee, verified at a wide width sweep");
   await test("no document-level horizontal scroll at any width from 360px to 430px (the full range of real supported phones), belt-and-braces via html/body overflow-x:hidden", async () => {
     for (const width of [360, 375, 390, 393, 414, 428, 430]) {
