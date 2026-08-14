@@ -89,10 +89,11 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
      real rendered height now equals the true, JS-measured --vh height,
      and margin-top:auto places the button inside the actually-visible
      area instead of past its edge. */
-  /* Founder: a breathing margin instead of sitting perfectly flush against
-     the real screen edges - 2px top/bottom, widened to 4px on left/right. */
-  position: fixed; top: 2px; bottom: 2px; left: 4px; right: 4px; height: calc(var(--vh, 1dvh) * 100 - 4px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
-  max-width: 552px; margin: 0 auto; display: flex; flex-direction: column;
+  /* Round 10 (founder): a fixed, uniform 10px breathing margin on all four
+     sides, on any phone screen size - inset is in px (not vw/vh/%), so this
+     stays exactly 10px regardless of viewport width or height. */
+  position: fixed; inset: 10px; height: calc(var(--vh, 1dvh) * 100 - 20px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  max-width: 540px; margin: 0 auto; display: flex; flex-direction: column;
   /* Round 4 (repeated real-device report): CSS dvh itself has proven
      unreliable on the founder's real Safari - every "Ndvh" below is now
      calc(var(--vh, 1dvh) * N), where --vh is measured directly from
@@ -110,9 +111,23 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
      narrow phones (88% of 360px = ~317px, comfortably inside the ~332px
      actually available there) - the --vh term still handles the vertical
      no-scroll budget as before. */
-  --rd-svg-max: clamp(220px, calc(var(--vh, 1dvh) * 40), min(360px, 88vw));
+  /* Round 10 (founder: heptagon still looks small): the old clamp's
+     "preferred" value (var(--vh)*40) tied the SVG's width to the
+     viewport's HEIGHT too aggressively - on a normal 780-844px-tall phone
+     that capped the box at ~310-330px even though ~320-355px was
+     genuinely free width-wise. First tried dropping the height term
+     entirely (.poly-svg's own width:100% fills whatever max-width allows,
+     vertical safety net handles short viewports) - but that broke the
+     genuinely-short-viewport compression test (41px real overflow at
+     height=600, since box height ~= box width for this square viewBox).
+     Restored the height term but with a much higher multiplier (52, up
+     from 40): at a normal height (~780px+, vh~7.8+) it now resolves to
+     400px+, comfortably above the width-based max(460px, 96vw) cap so it
+     never binds there - it only kicks in and compresses on a genuinely
+     short viewport, same as every other --rd-* clamp above. */
+  --rd-svg-max: clamp(220px, calc(var(--vh, 1dvh) * 52), min(460px, 96vw));
   --rd-nav-mt: clamp(8px, calc(var(--vh, 1dvh) * 1.6), 28px);
-  padding: var(--rd-pad-top) 14px var(--rd-pad-bottom);
+  padding: var(--rd-pad-top) 8px var(--rd-pad-bottom);
 }
 /* Revision 1 (founder feedback): the nav row was leaving a large dead gap
    above it on taller real devices (the clamp()s above cap out at the
@@ -122,7 +137,9 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    padding - falls back to 0 automatically on short viewports where
    there's no leftover space to begin with. */
 .shell-radar .onboard-nav-row { margin-top: auto; flex: none; }
-.shell-radar .btn-primary { padding: 14px 18px; }
+/* Round 10 (founder): equal padding on all four sides, tight around the
+   text - not the base .btn-primary's fixed min-height:52px box. */
+.shell-radar .btn-primary { padding: 10px; min-height: 0; }
 .shell-radar .fadeUp { min-height: 0; display: flex; flex-direction: column; }
 /* Scoped descendant overrides (not edits to the base rules) so the
    Chapter Analysis comparison chart elsewhere, which reuses .poly-svg/
@@ -241,7 +258,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .poly-scale-num { fill: #c9c9c9; font-family: "IBM Plex Mono", monospace; font-size: 7.5px; text-anchor: start; pointer-events: none; }
 .poly-shape { fill: rgba(216, 163, 85, .28); stroke: #d8a355; stroke-width: 2.25; filter: drop-shadow(0 0 5px rgba(216, 163, 85, .45)); }
 .poly-center { fill: rgba(216, 163, 85, .6); }
-.poly-label { fill: #f1eee8; font-family: "Inter", sans-serif; font-weight: 500; font-size: 12px; line-height: 1.1; }
+.poly-label { fill: #f1eee8; font-family: "Inter", sans-serif; font-weight: 500; font-size: 16px; line-height: 1.1; }
 .poly-label.locked { fill: #d8a355; }
 /* Value node: unlocked-inactive / unlocked-active (just dragged, or its
    lock was just tapped) / locked - 3 distinct states, never green. */

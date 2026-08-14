@@ -154,16 +154,22 @@ async function test(name, fn) {
     await page.waitForTimeout(150);
   });
 
-  console.log("E2E: round 7/7b (founder feedback) - breathing margin on all sides, widened to 4px on left/right");
-  await test("`.shell-radar` sits 2px in from the top/bottom real viewport edges and 4px in from the left/right edges", async () => {
-    const { rect, viewportW, viewportH } = await page.evaluate(() => {
-      const r = document.querySelector(".shell-radar").getBoundingClientRect();
-      return { rect: { top: r.top, left: r.left, right: r.right, bottom: r.bottom }, viewportW: window.innerWidth, viewportH: window.innerHeight };
-    });
-    assert.strictEqual(rect.top, 2, `top margin should be exactly 2px, got ${rect.top}`);
-    assert.strictEqual(rect.left, 4, `left margin should be exactly 4px, got ${rect.left}`);
-    assert.strictEqual(viewportW - rect.right, 4, `right margin should be exactly 4px, got ${viewportW - rect.right}`);
-    assert.ok(Math.abs(viewportH - rect.bottom - 2) < 1, `bottom margin should be ~2px, got ${viewportH - rect.bottom}`);
+  console.log("E2E: round 7/7b/10 (founder feedback) - uniform 10px breathing margin on all four sides, on any phone screen size");
+  await test("`.shell-radar` sits exactly 10px in from every real viewport edge, at multiple widths (margin is a fixed px value, not vw/vh-relative)", async () => {
+    for (const width of [360, 390, 430]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.waitForTimeout(120);
+      const { rect, viewportW, viewportH } = await page.evaluate(() => {
+        const r = document.querySelector(".shell-radar").getBoundingClientRect();
+        return { rect: { top: r.top, left: r.left, right: r.right, bottom: r.bottom }, viewportW: window.innerWidth, viewportH: window.innerHeight };
+      });
+      assert.strictEqual(rect.top, 10, `top margin should be exactly 10px at width=${width}, got ${rect.top}`);
+      assert.strictEqual(rect.left, 10, `left margin should be exactly 10px at width=${width}, got ${rect.left}`);
+      assert.strictEqual(viewportW - rect.right, 10, `right margin should be exactly 10px at width=${width}, got ${viewportW - rect.right}`);
+      assert.ok(Math.abs(viewportH - rect.bottom - 10) < 1, `bottom margin should be ~10px at width=${width}, got ${viewportH - rect.bottom}`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(120);
   });
 
   console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, compressed to avoid scrolling, with a scroll safety net");
@@ -249,6 +255,26 @@ async function test(name, fn) {
     assert.strictEqual(hOverflow, 0, `must not overflow the page horizontally at 360px width, got ${hOverflow}px`);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(150);
+  });
+
+  console.log("E2E: round 10 (founder feedback) - heptagon box actually fills available width (not height-capped), 16px axis-label font, '<- Kembali' arrow, tight symmetric Lanjut padding");
+  await test("the SVG box is now driven by available width (not an artificially low height-based cap) at a normal viewport height, axis labels are visibly bigger, Kembali has a back arrow, and Lanjut's padding is small and even on every side", async () => {
+    const svgWidth = await page.evaluate(() => document.getElementById("polySvg").getBoundingClientRect().width);
+    assert.ok(svgWidth > 340, `at 390px width / 844px height, the heptagon box should now fill most of the available width (>340px), got ${svgWidth}px`);
+
+    const labelFontSize = await page.evaluate(() => getComputedStyle(document.querySelector(".poly-label")).fontSize);
+    assert.strictEqual(labelFontSize, "16px", `axis-label font-size should be 16 (viewBox units), got ${labelFontSize}`);
+
+    const backText = await page.locator("#back").textContent();
+    assert.strictEqual(backText.trim(), "← Kembali", `back button should read "← Kembali" with an arrow, got "${backText}"`);
+
+    const nextPad = await page.evaluate(() => {
+      const cs = getComputedStyle(document.getElementById("next"));
+      return { top: cs.paddingTop, bottom: cs.paddingBottom, left: cs.paddingLeft, right: cs.paddingRight };
+    });
+    assert.strictEqual(nextPad.top, nextPad.bottom, `Lanjut's top/bottom padding must match, got ${JSON.stringify(nextPad)}`);
+    assert.strictEqual(nextPad.left, nextPad.right, `Lanjut's left/right padding must match, got ${JSON.stringify(nextPad)}`);
+    assert.strictEqual(nextPad.top, nextPad.left, `Lanjut's padding must be equal on all four sides, got ${JSON.stringify(nextPad)}`);
   });
 
   console.log("E2E: layout + copy (handoff v5, 'Growth Focus Radar')");
