@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 47 files · ~407,315 words
+- 47 files · ~418,164 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 585 nodes · 904 edges · 39 communities (33 shown, 6 thin omitted)
+- 585 nodes · 904 edges · 38 communities (32 shown, 6 thin omitted)
 - Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 103 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e193adcd`
+- Built from commit: `4eeaafc1`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -52,7 +52,6 @@
 - renderAuth
 - onboarding-questioncard.e2e.js
 - onboarding-name.e2e.js
-- 3-Card Pathway Recommendation Carousel
 - ensureCountdownTicking
 
 ## God Nodes (most connected - your core abstractions)
@@ -87,7 +86,7 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (39 total, 6 thin omitted)
+## Communities (38 total, 6 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.05
@@ -182,8 +181,8 @@ Cohesion: 0.38
 Nodes (7): Discrete Confidence-Score Rubric (0.95/0.85/0.75/0.65/0.55), graphify Extraction Subagent Prompt Spec, Goodhart's Law (Growth Needs Real Substance), Growth-Gate (12-word deterministic check), server/structured.js (structured evidence validation), Specificity Gate (kespesifikan, Task 7), Structured Physical Quest Input (Task 7b)
 
 ### Community 27 - "Task 5: Adaptive Pathway Onboarding"
-Cohesion: 0.22
-Nodes (11): Adaptive Scenario Cards, Claude Sonnet (not Haiku) Model Choice, Eleva (AI Character Growth System), Locked-Axis Erosion Mechanism (v12), lockTension Mechanism, Freemium Monetization Model (decided, not built), Task 5: Adaptive Pathway Onboarding, 10-Person Closed 14-Day Pilot (+3 more)
+Cohesion: 0.15
+Nodes (15): Adaptive Scenario Cards, Chapter Advancement Mechanism, Claude Sonnet (not Haiku) Model Choice, Eleva (AI Character Growth System), Locked-Axis Erosion Mechanism (v12), lockTension Mechanism, Freemium Monetization Model (decided, not built), 3-Card Pathway Recommendation Carousel (+7 more)
 
 ### Community 28 - "server/nutrition.js"
 Cohesion: 0.10
@@ -213,10 +212,6 @@ Nodes (3): assert, { chromium }, { spawn }
 Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 37 - "3-Card Pathway Recommendation Carousel"
-Cohesion: 0.50
-Nodes (4): Chapter Advancement Mechanism, 3-Card Pathway Recommendation Carousel, Pathway ≠ Chapter Principle, Pathway Rename/Reframe v8 (Architect/Warden/Weaver/Pilgrim/Specialist)
-
 ### Community 39 - "ensureCountdownTicking"
 Cohesion: 0.67
 Nodes (3): ensureCountdownTicking(), formatCountdown(), tickCountdowns()
@@ -231,7 +226,7 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Eleva README.md` connect `Eleva README.md` to `Task 5: Adaptive Pathway Onboarding`, `Goal Capture (v13, bridge to First Trial)`, `DEPLOY_RAILWAY.md — Railway Deployment Guide`?**
   _High betweenness centrality (0.005) - this node is a cross-community bridge._
-- **Why does `Task 5: Adaptive Pathway Onboarding` connect `Task 5: Adaptive Pathway Onboarding` to `3-Card Pathway Recommendation Carousel`, `Goal Capture (v13, bridge to First Trial)`?**
+- **Why does `Task 5: Adaptive Pathway Onboarding` connect `Task 5: Adaptive Pathway Onboarding` to `Goal Capture (v13, bridge to First Trial)`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
 - **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `graphify Skill Definition (SKILL.md)` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`, `Task 5: Adaptive Pathway Onboarding`?**
   _High betweenness centrality (0.003) - this node is a cross-community bridge._
