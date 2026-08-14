@@ -1055,14 +1055,18 @@ async function runAuthEntering(statePrefetch) {
 // gone, folded into the adaptive conversation and the radar chart itself.
 const ONBOARD_STEPS = [
   { type: "namePromise", q: "Siapa namamu?", promiseText: "Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva." },
-  // Design-handoff usability round: question reframed from "describe yourself
-  // now" to "where do you want to focus" - user-tested copy, keep verbatim.
-  { type: "radar", q: "Ke mana kamu mau fokus sekarang?", sub: "Ini bukan soal gimana kondisimu sekarang — tapi area mana yang mau kamu prioritaskan ke depan. Tarik titik-titiknya buat nunjukin porsi fokusnya. Menonjolkan satu sisi bikin sisi lain sedikit mengecil, karena waktu & energimu terbatas." },
+  // Growth Focus Radar handoff (v5): heading/explainer copy for this step is
+  // now hardcoded directly in renderOnboarding (needs explicit <br/> line
+  // breaks, not just an escaped string) - q/sub here would be dead weight.
+  { type: "radar" },
 ];
 
 function isStepValid(step) {
   const s = ONBOARD_STEPS[step];
-  if (s.type === "radar") return true;
+  // Growth Focus Radar handoff: "Continue button: Disabled... until at
+  // least 1 axis is locked" - the screen's whole purpose is picking and
+  // locking priorities before moving on.
+  if (s.type === "radar") return onboardForm.locked.length >= 1;
   // Privacy consent moved from a separate checkbox to a caption under the
   // primary button (design-handoff round) - tapping Lanjut IS the consent,
   // so only the name gates this step now.
@@ -1070,9 +1074,8 @@ function isStepValid(step) {
 }
 
 // Point at a RAW radius (not value-space) along axis i - the instrument
-// chrome (bezel, scale rings, ticks) is drawn in radius-space per the design
-// spec ("~36%, ~68%, 100% of max radius"), unlike the data polygon which
-// stays in value-space via polyPoint.
+// chrome (scale rings, lock buttons) is drawn in radius-space, unlike the
+// data polygon which stays in value-space via polyPoint.
 function radiusPoint(index, r) {
   const angle = ((-90 + index * POLY_STEP_DEG) * Math.PI) / 180;
   return [POLY_CENTER + r * Math.cos(angle), POLY_CENTER + r * Math.sin(angle)];
@@ -1083,72 +1086,116 @@ function heptagonPath(r) {
     return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ") + "Z";
 }
-// Axis label layout shared by render + updatePolygonDOM: 8px mono, wrapped
-// to two lines when the name is two words (Emotional Stability), locked
-// axis's label tinted accent. Returns {x, y, anchor, lines, dx, dy}.
+// Per-axis label placement (Growth Focus Radar handoff, "Per-axis label
+// placement" - pixel-exact, all 7 axes special-cased, no generic
+// diagonal/radial fallback). Body/Growth/Autonomy sit ABOVE their lock
+// button (the upper half of the heptagon); Livelihood/Purpose/Emotional/
+// Social sit BELOW. Growth+Livelihood shift right of the lock button's own
+// x; Autonomy+Purpose shift left; Body/Emotional/Social stay centered on
+// it - a deliberate asymmetry for visual rhythm, not derived from angle.
+const AXIS_LABEL_RULES = {
+  body: { above: true, shift: 0 },
+  growth: { above: true, shift: 16 },
+  autonomy: { above: true, shift: -16 },
+  livelihood: { above: false, shift: 16 },
+  purpose: { above: false, shift: -16 },
+  emotional: { above: false, shift: 0 },
+  social: { above: false, shift: 0 },
+};
+const AXIS_LABEL_GAP_ABOVE = 22, AXIS_LABEL_GAP_BELOW = 26;
+// Axis label layout shared by render + updatePolygonDOM: Inter 12px,
+// wrapped to two lines when the name is two words (Emotional Stability),
+// locked axis's label tinted accent. Returns {x, y, anchor, lines}.
 function axisLabelLayout(i) {
-  const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
-  const dx = Math.cos(angle), dy = Math.sin(angle);
-  const x = POLY_CENTER + (POLY_MAXR + 18) * dx;
-  const y = POLY_CENTER + (POLY_MAXR + 18) * dy + (dy > 0.35 ? 9 : dy < -0.35 ? -4 : 3.5);
-  const anchor = dx > 0.35 ? "start" : dx < -0.35 ? "end" : "middle";
-  const label = statLabel(POLY_ORDER[i]);
+  const key = POLY_ORDER[i];
+  const rule = AXIS_LABEL_RULES[key];
+  const [lockX, lockY] = radiusPoint(i, POLY_MAXR);
+  const x = lockX + rule.shift;
+  const y = rule.above ? lockY - AXIS_LABEL_GAP_ABOVE : lockY + AXIS_LABEL_GAP_BELOW;
+  const label = statLabel(key);
   const lines = label.includes(" ") ? label.split(" ") : [label];
-  return { x, y, anchor, lines, dx, dy };
+  return { x, y, anchor: "middle", lines, above: rule.above };
+}
+// 24x24 padlock (Growth Focus Radar handoff, "Lock button states"): body =
+// rounded rect, shackle path swaps between the closed and open-swung-away
+// variant. Sized/positioned as a nested <svg> centered on (x,y).
+function lockIconSVG(x, y, size, locked) {
+  const shackle = locked ? "M8 10V7a4 4 0 018 0v3" : "M8 10V7a4 4 0 017.4-2.3";
+  return `<svg x="${(x - size / 2).toFixed(1)}" y="${(y - size / 2).toFixed(1)}" width="${size}" height="${size}" viewBox="0 0 24 24" class="lock-icon-svg" fill="none">
+    <rect x="5" y="10" width="14" height="11" rx="2" /><path d="${shackle}" />
+  </svg>`;
 }
 function renderPolygonSVG() {
   const radar = onboardForm.radar;
   const points = POLY_ORDER.map((k, i) => polyPoint(i, radar[k]));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
-  // Instrument chrome (design handoff Screen 1): a faint outer bezel, three
-  // DASHED dim scale rings, SOLID brighter axis lines - the key hierarchy
-  // fix, axis and scale ring are no longer two same-opacity hairlines - and
-  // small open tick circles at the outer vertices.
-  const bezel = `<path d="${heptagonPath(POLY_MAXR + 7)}" class="poly-bezel" />`;
-  const rings = [0.36, 0.68, 1].map((f) => `<path d="${heptagonPath(f * POLY_MAXR)}" class="poly-ring" />`).join("");
+  // Instrument chrome (Growth Focus Radar handoff, "Radar geometry"): 3
+  // DASHED inner guide rings at 25/50/75%, thin radial spokes, and a SOLID
+  // outer heptagon at 100% (faint gold fill + solid gold stroke) - the
+  // outer ring is a distinct visual weight from the dashed guides, not one
+  // more ring in the same style.
+  const rings = [0.25, 0.5, 0.75].map((f) => `<path d="${heptagonPath(f * POLY_MAXR)}" class="poly-ring" />`).join("");
+  const outerHeptagon = `<path d="${heptagonPath(POLY_MAXR)}" class="poly-outer" />`;
   const axisLines = POLY_ORDER.map((_, i) => {
     const [x, y] = radiusPoint(i, POLY_MAXR);
     return `<line x1="${POLY_CENTER}" y1="${POLY_CENTER}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="poly-axis" />`;
   }).join("");
-  const ticks = POLY_ORDER.map((_, i) => {
-    const [x, y] = radiusPoint(i, POLY_MAXR);
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" class="poly-tick" />`;
+  // Scale guide numbers along the vertical (Body) spoke, above center -
+  // decreasing opacity outward-to-inward per the handoff.
+  const scaleNums = [
+    { v: 10, op: 0.5 }, { v: 7.5, op: 0.44 }, { v: 5, op: 0.4 }, { v: 2.5, op: 0.35 },
+  ].map(({ v, op }) => {
+    const y = POLY_CENTER - polyRadius(v);
+    return `<text x="${POLY_CENTER + 5}" y="${(y + 2.5).toFixed(1)}" class="poly-scale-num" style="opacity:${op}">${v}</text>`;
   }).join("");
-  const MONO_CHAR_W = 4.9; // IBM Plex Mono advance width at 8px, for icon placement
+  const MONO_CHAR_W = 6.2; // Inter 12px advance width at base scale, for icon placement
   const labels = POLY_ORDER.map((k, i) => {
     const L = axisLabelLayout(i);
     const isLocked = onboardForm.locked.includes(k);
-    const tspans = L.lines.map((line, li) => `<tspan x="${L.x.toFixed(1)}" dy="${li === 0 ? 0 : 8.5}">${esc(line)}</tspan>`).join("");
-    // The (i) info icon sits just past the label text (which grows toward
-    // anchor direction), with an oversized invisible hit circle - r=6 visual
-    // alone is too small a touch target.
+    const tspans = L.lines.map((line, li) => `<tspan x="${L.x.toFixed(1)}" dy="${li === 0 ? 0 : 13}">${esc(line)}</tspan>`).join("");
+    // The (i) info icon sits just right of the (always centered) label text,
+    // with an oversized invisible hit circle - r=6 visual alone is too
+    // small a touch target.
     const maxChars = Math.max(...L.lines.map((l) => l.length));
     const w = maxChars * MONO_CHAR_W;
-    const iconX = L.anchor === "start" ? L.x + w + 10 : L.anchor === "end" ? L.x - w - 10 : L.x + w / 2 + 11;
-    const iconY = L.y - 3;
+    const iconX = L.x + w / 2 + 11;
+    const iconY = L.y - 3.5;
     return `<text x="${L.x.toFixed(1)}" y="${L.y.toFixed(1)}" class="poly-label ${isLocked ? "locked" : ""}" data-label-for="${k}" text-anchor="${L.anchor}">${tspans}</text>
       <g class="axis-info-btn" data-axis-info="${k}">
         <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="12" class="axis-info-hit" />
-        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="6" class="axis-info-bg" />
-        <text x="${iconX.toFixed(1)}" y="${(iconY + 2.8).toFixed(1)}" class="axis-info-glyph" text-anchor="middle">i</text>
+        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="6.5" class="axis-info-bg" />
+        <text x="${iconX.toFixed(1)}" y="${(iconY + 3).toFixed(1)}" class="axis-info-glyph" text-anchor="middle">i</text>
       </g>`;
   }).join("");
-  // Visual dot (small, per design: outlined when free, SOLID accent when
-  // locked - never green, never a 🔒 glyph) is separate from the invisible
-  // oversized hit circle that keeps drag/tap usable on touch. The numeric
-  // value sits just inside each dot, 1-decimal per the instrument spec,
-  // with a bg-colored stroke so it stays legible over the dashed rings.
+  // Lock buttons sit FIXED on the outer heptagon vertex (radius-space, like
+  // the old tick marks they replace) - unlike the value node below, their
+  // position never moves with the axis's value.
+  const lockBtns = POLY_ORDER.map((k, i) => {
+    const [x, y] = radiusPoint(i, POLY_MAXR);
+    const isLocked = onboardForm.locked.includes(k);
+    const disabled = !isLocked && onboardForm.locked.length >= MAX_LOCKS;
+    return `<g class="lock-btn ${isLocked ? "locked" : ""} ${disabled ? "disabled" : ""}" data-lock-btn-for="${k}">
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13.5" class="lock-btn-bg" />
+      ${lockIconSVG(x, y, 12, isLocked)}
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16" class="lock-btn-hit" data-lock-hit="${k}" />
+    </g>`;
+  }).join("");
+  // Value node: unlocked-inactive / unlocked-active (just dragged or its
+  // lock was just tapped) / locked - 3 states, not 2. The numeric value
+  // sits centered inside the node (white on unlocked, navy on locked, per
+  // the handoff's contrast rule), with a background-colored halo behind it
+  // so it stays legible over the dashed rings even where node fill is dark.
   const handles = POLY_ORDER.map((k, i) => {
     const [x, y] = polyPoint(i, radar[k]);
     const isLocked = onboardForm.locked.includes(k);
-    const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
-    const vx = x - 14 * Math.cos(angle), vy = y - 14 * Math.sin(angle);
-    return `<text x="${vx.toFixed(1)}" y="${(vy + 2.8).toFixed(1)}" class="poly-value ${isLocked ? "locked" : ""}" data-value-for="${k}" text-anchor="middle">${Number(radar[k]).toFixed(1)}</text>
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isLocked ? 6.5 : 5}" class="poly-dot ${isLocked ? "locked" : ""}" data-dot-for="${k}" />
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="14" class="poly-handle" data-stat="${k}" />`;
+    const isActive = !isLocked && activeAxisKey === k;
+    const dotClass = isLocked ? "locked" : isActive ? "active" : "";
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="10" class="poly-dot ${dotClass}" data-dot-for="${k}" />
+      <text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="poly-value ${isLocked ? "locked" : ""}" data-value-for="${k}" text-anchor="middle">${Number(radar[k]).toFixed(1)}</text>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16" class="poly-handle" data-stat="${k}" />`;
   }).join("");
   const centerDot = `<circle cx="${POLY_CENTER}" cy="${POLY_CENTER}" r="3" class="poly-center" />`;
-  return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${bezel}${rings}${axisLines}${ticks}<path d="${pathD}" class="poly-shape" id="polyShape" />${centerDot}${labels}${handles}</svg>`;
+  return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${rings}${outerHeptagon}${axisLines}${scaleNums}<path d="${pathD}" class="poly-shape" id="polyShape" />${centerDot}${labels}${lockBtns}${handles}</svg>`;
 }
 
 // Read-only before/after comparison for Chapter Analysis (v7, WAJIB tampil):
@@ -1193,9 +1240,11 @@ function renderRadarComparisonSVG(radarRaw, radarCalibrated) {
 function updatePolygonDOM() {
   const svg = document.getElementById("polySvg");
   if (!svg) return;
+  const atCap = onboardForm.locked.length >= MAX_LOCKS;
   POLY_ORDER.forEach((k, i) => {
     const [x, y] = polyPoint(i, onboardForm.radar[k]);
     const isLocked = onboardForm.locked.includes(k);
+    const isActive = !isLocked && activeAxisKey === k;
     const handle = svg.querySelector(`circle[data-stat="${k}"]`);
     if (handle) {
       handle.setAttribute("cx", x.toFixed(1));
@@ -1205,35 +1254,107 @@ function updatePolygonDOM() {
     if (dot) {
       dot.setAttribute("cx", x.toFixed(1));
       dot.setAttribute("cy", y.toFixed(1));
-      dot.setAttribute("r", isLocked ? "6.5" : "5");
       dot.classList.toggle("locked", isLocked);
+      dot.classList.toggle("active", isActive);
     }
     const valueText = svg.querySelector(`text[data-value-for="${k}"]`);
     if (valueText) {
-      const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
-      const vx = x - 14 * Math.cos(angle), vy = y - 14 * Math.sin(angle);
-      valueText.setAttribute("x", vx.toFixed(1));
-      valueText.setAttribute("y", (vy + 2.8).toFixed(1));
+      valueText.setAttribute("x", x.toFixed(1));
+      valueText.setAttribute("y", (y + 3).toFixed(1));
       valueText.textContent = Number(onboardForm.radar[k]).toFixed(1);
       valueText.classList.toggle("locked", isLocked);
     }
     const labelText = svg.querySelector(`text[data-label-for="${k}"]`);
     if (labelText) labelText.classList.toggle("locked", isLocked);
+    const lockBtn = svg.querySelector(`[data-lock-btn-for="${k}"]`);
+    if (lockBtn) {
+      lockBtn.classList.toggle("locked", isLocked);
+      lockBtn.classList.toggle("disabled", !isLocked && atCap);
+      const iconWrap = lockBtn.querySelector(".lock-icon-svg");
+      const shackle = iconWrap?.querySelector("path");
+      if (shackle) shackle.setAttribute("d", isLocked ? "M8 10V7a4 4 0 018 0v3" : "M8 10V7a4 4 0 017.4-2.3");
+    }
   });
   const points = POLY_ORDER.map((k, i) => polyPoint(i, onboardForm.radar[k]));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
   document.getElementById("polyShape")?.setAttribute("d", pathD);
 }
 
-// One-time hint the first time a user locks any axis this session - a
-// transient teaching moment, deliberately NOT a persistent badge (the
-// persistent "TERKUNCI" badge pattern was tried and rejected in the
-// design-handoff usability round).
-let lockExplainerShown = false;
-// Which axis's definition panel is expanded below the radar chart (null =
-// none, zero height, no placeholder). Local UI state only - never persisted,
-// never touches onboarding data.
-let openAxisInfo = null;
+// Which axis is "active" - just dragged, or its lock was just toggled -
+// showing a gold label + the detail-card row for 3.2s, then auto-clearing
+// (Growth Focus Radar handoff). Distinct from "locked": an unlocked axis
+// can be active too, right after a drag or a tap on its (now separate)
+// lock button. DOM-patched, never a full renderOnboarding(), so it can
+// never interrupt an in-progress drag gesture.
+let activeAxisKey = null;
+let activeAxisTimer = null;
+function renderDetailCardDOM() {
+  const slot = document.getElementById("radarDetailSlot");
+  if (slot) slot.innerHTML = detailCardHTML();
+}
+function setActiveAxis(key) {
+  activeAxisKey = key;
+  clearTimeout(activeAxisTimer);
+  activeAxisTimer = setTimeout(() => { activeAxisKey = null; updatePolygonDOM(); renderDetailCardDOM(); }, 3200);
+  updatePolygonDOM();
+  renderDetailCardDOM();
+}
+function clearActiveAxisNow() {
+  if (!activeAxisKey) return;
+  activeAxisKey = null;
+  clearTimeout(activeAxisTimer);
+  updatePolygonDOM();
+  renderDetailCardDOM();
+}
+function detailCardHTML() {
+  if (!activeAxisKey) return "";
+  const k = activeAxisKey;
+  const isLocked = onboardForm.locked.includes(k);
+  return `<div class="radar-detail-card">
+    <span class="radar-detail-name">${esc(statLabel(k))}</span>
+    <span class="radar-detail-state">${isLocked ? "Dikunci" : "Bebas"}</span>
+    <span class="radar-detail-value mono">${Math.round(onboardForm.radar[k])}/10</span>
+  </div>`;
+}
+function counterPillHTML() {
+  const n = onboardForm.locked.length;
+  return `<div class="radar-counter-pill">
+    <svg width="13" height="13" viewBox="0 0 24 24" class="radar-counter-icon" fill="none"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 018 0v3" /></svg>
+    <span><span class="radar-counter-count mono">${n} / ${MAX_LOCKS}</span> <span class="radar-counter-label">prioritas dikunci</span></span>
+  </div>`;
+}
+function renderCounterPillDOM() {
+  const slot = document.getElementById("radarCounterSlot");
+  if (slot) slot.innerHTML = counterPillHTML();
+  const nextBtn = document.getElementById("next");
+  if (nextBtn) nextBtn.disabled = !isStepValid(onboardStep);
+}
+// Toast (Growth Focus Radar handoff): shown at most twice per session, only
+// when a single drag gesture's cumulative change reaches +/-2 - teaches the
+// redistribution concept without nagging on every small tweak.
+let radarToastShownCount = 0;
+let radarToastTimer = null;
+function showRadarToast(key, delta) {
+  const el = document.getElementById("radarToast");
+  if (!el || radarToastShownCount >= 2) return;
+  radarToastShownCount++;
+  const sign = delta > 0 ? "+" : "";
+  el.textContent = `${sign}${Math.round(delta)} ${statLabel(key)} membutuhkan ruang dari area lain.`;
+  el.classList.add("visible");
+  clearTimeout(radarToastTimer);
+  radarToastTimer = setTimeout(() => el.classList.remove("visible"), 2600);
+}
+// Warning bubble: tapping a 4th lock while 3 are already locked doesn't
+// lock it - a centered bubble explains why instead of a silent no-op.
+let radarWarningTimer = null;
+function showRadarMaxLockWarning() {
+  const el = document.getElementById("radarMaxLockWarning");
+  if (!el) return;
+  el.classList.add("visible");
+  clearTimeout(radarWarningTimer);
+  radarWarningTimer = setTimeout(() => el.classList.remove("visible"), 2400);
+}
+
 function toggleLock(key) {
   const i = onboardForm.locked.indexOf(key);
   if (i >= 0) {
@@ -1247,18 +1368,17 @@ function toggleLock(key) {
     // this, an axis eroding past the 5-midpoint would flip what counts as
     // "contrary" partway through calibration (see v12 riwayat in PRD.md).
     onboardForm.lockedOriginalValue[key] = onboardForm.radar[key];
-    if (!lockExplainerShown) {
-      lockExplainerShown = true;
-      const el = document.getElementById("lockExplainer");
-      if (el) {
-        el.textContent = "Terkunci — axis ini nggak akan ikut bergeser walau axis lain kamu ubah. Tap lagi buat buka kuncinya.";
-        el.style.display = "";
-      }
-    }
+  } else {
+    // At the cap: tapping a 4th lock button does NOT lock it - explain why
+    // instead of a silent no-op (Growth Focus Radar handoff). That lock
+    // button's 40% opacity is already always-on at the cap via the
+    // .disabled CSS class - this bubble is just the transient explanation.
+    showRadarMaxLockWarning();
+    return;
   }
-  // At the cap, tapping a 4th point deliberately does nothing - the user has
-  // to unlock one first (the "maksimal 3 axis" bullet above the chart says so).
+  setActiveAxis(key); // toggling a lock also marks the axis active
   updatePolygonDOM();
+  renderCounterPillDOM();
 }
 
 function attachPolygonHandlers() {
@@ -1266,8 +1386,8 @@ function attachPolygonHandlers() {
   if (!svg) return;
   let draggingKey = null;
   let dragBase = null; // radar snapshot at gesture start - each move recomputes from it
-  let downX = 0, downY = 0, moved = false, wasLimited = false;
-  const TAP_THRESHOLD = 8; // px of pointer travel: below = tap (toggle lock), above = drag
+  let downX = 0, downY = 0, moved = false, wasLimited = false, toastArmedThisDrag = false;
+  const TAP_THRESHOLD = 8; // px of pointer travel: below = tap, above = drag
   function setLimitHint(key) {
     const el = document.getElementById("limitHint");
     if (!el) return;
@@ -1290,31 +1410,93 @@ function attachPolygonHandlers() {
     const res = applySynergyDrag(dragBase, draggingKey, polyValueFromRadius(dist), onboardForm.locked);
     onboardForm.radar = res.values;
     setLimitHint(res.limited ? draggingKey : null);
+    // Cumulative change this GESTURE (from drag-start snapshot), not
+    // per-move delta - fires the toast once, the first time it crosses the
+    // +/-2 threshold, not on every subsequent pixel of movement.
+    const cumulative = onboardForm.radar[draggingKey] - dragBase[draggingKey];
+    if (!toastArmedThisDrag && Math.abs(cumulative) >= 2) {
+      toastArmedThisDrag = true;
+      showRadarToast(draggingKey, cumulative);
+    }
     updatePolygonDOM();
   }
   svg.querySelectorAll(".poly-handle").forEach((handle) => {
     handle.addEventListener("pointerdown", (e) => {
-      draggingKey = handle.dataset.stat;
+      const key = handle.dataset.stat;
+      e.stopPropagation();
+      if (onboardForm.locked.includes(key)) {
+        // Locked node: mark active only, per handoff - never starts a drag,
+        // never changes the value. Unlocking is the separate lock button's job.
+        setActiveAxis(key);
+        return;
+      }
+      draggingKey = key;
       dragBase = { ...onboardForm.radar };
-      downX = e.clientX; downY = e.clientY; moved = false; wasLimited = false;
+      downX = e.clientX; downY = e.clientY; moved = false; wasLimited = false; toastArmedThisDrag = false;
       const el = document.getElementById("limitHint");
       if (el) el.style.display = "none";
       handle.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
   });
+  svg.querySelectorAll(".lock-btn-hit").forEach((hit) => {
+    hit.addEventListener("pointerdown", (e) => e.stopPropagation());
+    hit.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleLock(hit.dataset.lockHit);
+    });
+  });
   svg.addEventListener("pointermove", (e) => {
     if (!draggingKey) return;
     if (!moved && Math.hypot(e.clientX - downX, e.clientY - downY) > TAP_THRESHOLD) moved = true;
-    // A locked axis can't be dragged - but it can still be tapped to unlock.
-    if (moved && !onboardForm.locked.includes(draggingKey)) moveTo(e.clientX, e.clientY);
+    if (moved) moveTo(e.clientX, e.clientY);
   });
   svg.addEventListener("pointerup", () => {
-    if (draggingKey && !moved) toggleLock(draggingKey);
+    if (draggingKey) setActiveAxis(draggingKey); // both a tap and a drag-release mark it active
     draggingKey = null;
     dragBase = null;
   });
   svg.addEventListener("pointercancel", () => { draggingKey = null; dragBase = null; });
+  // Tapping anywhere else in the radar (not a node or lock button) while
+  // not dragging clears the active axis immediately.
+  svg.addEventListener("pointerdown", (e) => {
+    if (draggingKey) return;
+    if (e.target.closest(".poly-handle, .lock-btn-hit, .axis-info-btn")) return;
+    clearActiveAxisNow();
+  });
+}
+
+// Growth Focus Radar handoff: Help sheet ("Tentang Fokus") and per-axis
+// info sheets share ONE state slot (helpOpen) - opening either closes the
+// other, same as the handoff's "only one sheet open at a time" rule. Reuses
+// the app-wide #helpOverlay/#closeHelp ids so the existing delegated click
+// handler (backdrop tap, close-button tap -> helpOpen=null; render()) keeps
+// working with zero new wiring - only the inner content is bespoke here.
+function radarSheetsHTML() {
+  if (helpOpen === "radar") {
+    return `
+      <div class="help-overlay" id="helpOverlay">
+        <div class="help-sheet radar-sheet fadeUp">
+          <div class="radar-sheet-title">Tentang Fokus</div>
+          <p class="radar-sheet-body">Radar ini menunjukkan arah yang ingin kamu prioritaskan, bukan nilai dirimu saat ini.</p>
+          <p class="radar-sheet-body">Waktu dan energimu terbatas. Karena itu, saat satu area diperbesar, area lain perlu berbagi ruang.</p>
+          <p class="radar-sheet-body">Kamu bisa mengunci maksimal 3 prioritas utama.</p>
+          <button class="radar-sheet-close" id="closeHelp">Mengerti</button>
+        </div>
+      </div>`;
+  }
+  if (typeof helpOpen === "string" && helpOpen.startsWith("axis:")) {
+    const key = helpOpen.slice(5);
+    return `
+      <div class="help-overlay" id="helpOverlay">
+        <div class="help-sheet radar-sheet fadeUp">
+          <div class="radar-sheet-title">${esc(statLabel(key))}</div>
+          <p class="radar-sheet-body">${esc(AXIS_DEFINITIONS[key] || "")}</p>
+          <button class="radar-sheet-close" id="closeHelp">Tutup</button>
+        </div>
+      </div>`;
+  }
+  return "";
 }
 
 function renderOnboarding() {
@@ -1322,41 +1504,58 @@ function renderOnboarding() {
   const last = onboardStep === ONBOARD_STEPS.length - 1;
 
   let bodyHTML = "";
+  let headingHTML = "";
   if (step.type === "namePromise") {
+    headingHTML = `<h1 class="fr" style="font-size:28px;font-weight:600;margin:0 0 6px">${esc(step.q)}</h1>
+      ${step.sub ? `<p style="color:var(--muted);font-size:14px;margin:0 0 20px">${esc(step.sub)}</p>` : `<div style="height:20px"></div>`}`;
     bodyHTML = `
       <input type="text" id="fld" value="${esc(onboardForm.name)}" placeholder="Nama panggilan" autofocus />
       <p class="fr" style="font-size:15.5px;line-height:1.6;font-style:italic;color:var(--muted);margin:18px 0">${esc(step.promiseText)}</p>`;
   } else if (step.type === "radar") {
-    // Design handoff Screen 1: the two bullets below are the ONLY
-    // always-visible explanatory copy on this screen - the old persistent
-    // "N/3 terkunci" counter line and any "tap the icon" prompt were
-    // explicitly rejected in usability testing. Locking feedback is the
-    // solid-gold dot itself plus a one-time #lockExplainer reveal.
+    // Growth Focus Radar handoff: exact copy, explicit 2-line breaks (not
+    // browser auto-wrap) - raw HTML is safe here, both strings are fixed
+    // literals, never user input.
+    headingHTML = `<h1 class="fr radar-heading">Ke mana kamu mau<br/>fokus sekarang?</h1>
+      <p class="radar-explainer">Ini tentang prioritasmu ke depan, bukan menilai kondisimu saat ini.<br/>Tarik titik untuk menentukan porsi fokus yang paling penting bagimu.</p>`;
     bodyHTML = `
-      <ul style="font-size:11px;line-height:1.6;color:var(--muted);padding-left:16px;margin:0 0 22px">
-        <li>Tap titik di sudut radar untuk mengunci axis itu — <span style="color:var(--accent);font-weight:600">maksimal 3 axis</span> boleh dikunci.</li>
-        <li>Tap ikon <span class="axis-info-chip mono">i</span> untuk lihat penjelasan axis-nya.</li>
-      </ul>
+      <div class="radar-tradeoff-strip">
+        <span class="radar-tradeoff-icon">✦</span>
+        <span class="radar-tradeoff-text">Kamu tidak bisa membuat semua area jadi <span class="radar-accent-strong">10/10</span> sekaligus.</span>
+      </div>
+      <div class="radar-lock-instructions">
+        <span class="radar-lock-instr-item">
+          <svg width="12" height="12" viewBox="0 0 12 12" class="radar-target-icon" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" /><circle cx="6" cy="6" r="1.5" fill="currentColor" /></svg>
+          Pilih <span class="radar-accent-strong">maksimal 3</span> prioritas
+        </span>
+        <span class="radar-lock-instr-divider">|</span>
+        <span class="radar-lock-instr-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" class="radar-lock-instr-icon" fill="none"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 018 0v3" /></svg>
+          Ketuk titik untuk <span class="radar-accent-strong">mengunci</span>
+        </span>
+      </div>
       <div class="poly-wrap">${renderPolygonSVG()}</div>
       <p class="mono" id="limitHint" style="font-size:12px;color:var(--accent);margin-top:10px;text-align:center;display:none"></p>
-      <p class="mono" id="lockExplainer" style="font-size:12px;color:var(--accent);margin-top:6px;text-align:center;display:none"></p>
-      ${openAxisInfo ? `
-      <div style="background:#1a1724;border:1px solid rgba(216,163,85,.3);border-radius:10px;padding:12px 14px;margin-top:12px">
-        <div class="mono" style="font-size:10px;letter-spacing:1px;color:var(--accent);margin-bottom:4px">${esc(statLabel(openAxisInfo).toUpperCase())}</div>
-        <div style="font-size:12.5px;line-height:1.5;color:var(--text)">${esc(AXIS_DEFINITIONS[openAxisInfo] || "")}</div>
-      </div>` : ""}`;
+      <div id="radarDetailSlot">${detailCardHTML()}</div>
+      <div id="radarCounterSlot" class="radar-counter-slot">${counterPillHTML()}</div>
+      <div class="radar-toast" id="radarToast"></div>
+      <div class="radar-max-lock-warning" id="radarMaxLockWarning">Maksimal 3 prioritas.<br/>Buka salah satu prioritas dulu.</div>`;
   }
 
   root.innerHTML = `
     <div class="shell">
-      ${step.type === "radar" ? helpBtnHTML("radar") + helpSheetHTML("radar") : ""}
+      ${step.type === "radar" ? `
+      <div class="radar-header-row">
+        <div class="eyebrow mono radar-header-eyebrow">ELEVA · ONBOARDING</div>
+        <button class="radar-help-btn" data-help="radar" aria-label="Bantuan">?</button>
+      </div>
+      <div class="radar-progress-track"><div class="radar-progress-fill"></div></div>
+      ${radarSheetsHTML()}` : `
       <div class="eyebrow mono">ELEVA · ONBOARDING</div>
       <div class="step-dots">
         ${ONBOARD_STEPS.map((_, i) => `<div class="dot-seg ${i <= onboardStep ? "active" : ""}"></div>`).join("")}
-      </div>
+      </div>`}
       <div class="fadeUp">
-        <h1 class="fr" style="font-size:28px;font-weight:600;margin:0 0 6px">${esc(step.q)}</h1>
-        ${step.sub ? `<p style="color:var(--muted);font-size:14px;margin:0 0 20px">${esc(step.sub)}</p>` : `<div style="height:20px"></div>`}
+        ${headingHTML}
         <div class="field">${bodyHTML}</div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:28px">
@@ -1372,13 +1571,12 @@ function renderOnboarding() {
     document.getElementById("next").disabled = !isStepValid(onboardStep);
   });
   if (step.type === "radar") attachPolygonHandlers();
-  // Per-axis (i) info icons live inside the SVG - tapping one toggles which
-  // axis's definition panel shows below the chart. Full re-render is safe
-  // here: no text input on this screen, no drag in progress during a tap.
+  // Per-axis (i) info icons live inside the SVG - tapping one toggles the
+  // shared helpOpen slot to that axis's info sheet (see radarSheetsHTML).
   document.querySelectorAll("[data-axis-info]").forEach((el) => el.addEventListener("click", (e) => {
     e.stopPropagation();
-    const axis = el.dataset.axisInfo;
-    openAxisInfo = openAxisInfo === axis ? null : axis;
+    const axis = "axis:" + el.dataset.axisInfo;
+    helpOpen = helpOpen === axis ? null : axis;
     renderOnboarding();
   }));
   document.getElementById("back")?.addEventListener("click", () => { onboardStep = Math.max(0, onboardStep - 1); renderOnboarding(); });

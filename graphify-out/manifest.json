@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786628906.7321231,
-    "ast_hash": "2ee31fdab6e30d9b470faa8a02e1a02b",
+    "mtime": 1786676477.4193609,
+    "ast_hash": "93193078034fa7daa2d694b19ad9ef29",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -262,6 +262,11 @@
   "public/assets/eleva-portal-zoom.png": {
     "mtime": 1786620895.1023638,
     "ast_hash": "ac9192b3fa77059b58a537560fdba984",
+    "semantic_hash": ""
+  },
+  "tests/onboarding-radar.e2e.js": {
+    "mtime": 1786677289.351378,
+    "ast_hash": "ee6b25199e7f2494b131f1b8d92927fe",
     "semantic_hash": ""
   }
 }

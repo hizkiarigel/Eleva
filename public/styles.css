@@ -136,43 +136,131 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 
 .banner-warn { background: #3a2e1a; border: 1px solid #d8a35555; color: var(--accent); font-size: 12.5px; padding: 10px 14px; border-radius: 8px; margin-bottom: 20px; }
 
-/* Radar chart - instrument/bezel styling (design handoff Screen 1).
-   Hierarchy: dashed dim scale rings < solid accent-tinted axis lines <
-   the user's data polygon. Depth via tone + hairline only, no shadows. */
-.poly-wrap { display: flex; justify-content: center; padding: 8px 0 4px; }
-.poly-svg { width: 100%; max-width: 320px; height: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
-.poly-bezel { fill: none; stroke: rgba(216, 163, 85, .14); stroke-width: 1; }
-.poly-ring { fill: none; stroke: rgba(255, 255, 255, .07); stroke-width: 1; stroke-dasharray: 2 4; }
-.poly-axis { stroke: rgba(216, 163, 85, .3); stroke-width: 1; }
-.poly-tick { fill: none; stroke: rgba(216, 163, 85, .5); stroke-width: 1; }
-.poly-shape { fill: rgba(216, 163, 85, .16); stroke: var(--accent); stroke-width: 1.75; }
+/* Radar chart - instrument/bezel styling (Growth Focus Radar handoff, v5).
+   Hierarchy: dashed dim guide rings < solid gold outer heptagon < the
+   user's data polygon. .poly-ring/.poly-axis/.poly-label are also reused
+   by the read-only Chapter Analysis comparison chart below (that screen is
+   out of scope for this handoff, but shares this base chrome by design). */
+.poly-wrap { display: flex; justify-content: center; margin: 16px auto 0; padding: 0; }
+.poly-svg { width: 100%; max-width: 325px; height: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+.poly-ring { fill: none; stroke: rgba(216, 163, 85, .6); stroke-width: 1; stroke-dasharray: 3 4; }
+.poly-outer { fill: rgba(216, 163, 85, .05); stroke: #d8a355; stroke-width: 1; }
+.poly-axis { stroke: rgba(216, 163, 85, .28); stroke-width: 1; }
+.poly-scale-num { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 7.5px; text-anchor: start; pointer-events: none; }
+.poly-shape { fill: rgba(216, 163, 85, .28); stroke: #d8a355; stroke-width: 2.25; filter: drop-shadow(0 0 5px rgba(216, 163, 85, .45)); }
 .poly-center { fill: rgba(216, 163, 85, .6); }
-.poly-label { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 8px; letter-spacing: .5px; }
-.poly-label.locked { fill: var(--accent); }
-/* Visual dot: outlined when free, SOLID accent when locked - never green
-   (green = positive/complete everywhere else), never a 🔒 glyph. */
-.poly-dot { fill: var(--bg); stroke: var(--accent); stroke-width: 2; pointer-events: none; }
-.poly-dot.locked { fill: var(--accent); }
+.poly-label { fill: #f1eee8; font-family: "Inter", sans-serif; font-weight: 500; font-size: 12px; line-height: 1.1; }
+.poly-label.locked { fill: #d8a355; }
+/* Value node: unlocked-inactive / unlocked-active (just dragged, or its
+   lock was just tapped) / locked - 3 distinct states, never green. */
+.poly-dot { fill: #1a1724; stroke: rgba(216, 163, 85, .55); stroke-width: 2; pointer-events: none; }
+.poly-dot.active { fill: #241f2e; stroke: #e8b768; stroke-width: 2.75; }
+.poly-dot.locked { fill: #d8a355; stroke: #e8b768; stroke-width: 2.75; }
 /* Oversized invisible hit circle keeps drag/tap usable on touch while the
-   visual dot stays small per the design. */
+   visual dot stays the spec'd size. */
 .poly-handle { fill: transparent; stroke: none; pointer-events: all; cursor: grab; touch-action: none; }
 .poly-handle:active { cursor: grabbing; }
-.poly-value { fill: var(--text); font-family: "IBM Plex Mono", monospace; font-size: 7.5px; pointer-events: none; user-select: none;
-  paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
-.poly-value.locked { fill: var(--accent); }
+.poly-value { fill: #ffffff; font-family: "IBM Plex Mono", monospace; font-weight: 700; font-size: 9.5px; pointer-events: none; user-select: none; }
+.poly-value.locked { fill: #1a1409; }
 .axis-info-btn { cursor: pointer; }
 .axis-info-hit { fill: transparent; pointer-events: all; }
-.axis-info-bg { fill: rgba(216, 163, 85, .75); pointer-events: none; }
-.axis-info-glyph { fill: var(--bg); font-family: "IBM Plex Mono", monospace; font-size: 8px; pointer-events: none; user-select: none; }
-/* Inline preview of the same (i) control inside the bullet copy above the chart. */
-.axis-info-chip { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px;
-  border-radius: 50%; background: rgba(216, 163, 85, .75); color: var(--bg); font-size: 8px; vertical-align: 1px; }
+/* Handoff: "13px circle, 1px border rgba(148,143,156,.6), muted italic 'i'
+   glyph, transparent background" - not a solid-filled accent dot. */
+.axis-info-bg { fill: transparent; stroke: rgba(148, 143, 156, .6); stroke-width: 1; pointer-events: none; }
+.axis-info-glyph { fill: #948f9c; font-family: "Fraunces", serif; font-style: italic; font-size: 8.5px; pointer-events: none; user-select: none; }
+/* Lock buttons (handoff: "Lock button states") - fixed on the outer
+   heptagon vertex, distinct from the draggable value node. */
+.lock-btn { cursor: pointer; }
+.lock-btn-bg { fill: rgba(10, 9, 14, .7); stroke: rgba(216, 163, 85, .55); stroke-width: 1.5; }
+.lock-btn.locked .lock-btn-bg { fill: rgba(216, 163, 85, .28); stroke: #e8b768; filter: drop-shadow(0 0 6px rgba(216, 163, 85, .55)); }
+.lock-btn.disabled { opacity: .4; }
+.lock-icon-svg rect, .lock-icon-svg path { stroke: #948f9c; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+.lock-btn.locked .lock-icon-svg rect, .lock-btn.locked .lock-icon-svg path { stroke: #e8b768; }
+.lock-btn-hit { fill: transparent; pointer-events: all; cursor: pointer; }
 
 .poly-compare { touch-action: auto; }
 .poly-shape-raw { fill: none; stroke: rgba(148, 143, 156, .55); stroke-width: 1.5; stroke-dasharray: 3 3; }
 .poly-shape-calibrated { fill: rgba(216, 163, 85, .14); stroke: var(--accent); stroke-width: 2; }
 .poly-compare-legend { display: flex; justify-content: center; gap: 16px; margin-top: 4px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--muted); }
+
+/* --- Growth Focus Radar screen chrome (handoff v5) - everything around
+   the chart itself: header, progress, copy, trade-off strip,
+   lock-instructions row, detail card, counter pill, toast, warning
+   bubble, sheets. Scoped to this one onboarding step. --- */
+.radar-header-row { display: flex; justify-content: space-between; align-items: center; height: 26px; }
+.radar-header-eyebrow { margin-bottom: 0; }
+.radar-help-btn {
+  width: 32px; height: 32px; flex: none; border-radius: 50%; background: rgba(20, 18, 14, .4);
+  border: 1px solid rgba(216, 163, 85, .5); color: #f1eee8; font-family: "Fraunces", serif; font-size: 14px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.radar-progress-track { height: 4px; border-radius: 2px; background: rgba(148, 100, 60, .28); margin-top: 6px; margin-bottom: 16px; overflow: hidden; }
+.radar-progress-fill { width: 25%; height: 100%; border-radius: 2px; background: #d8a355; }
+.radar-heading { font-family: "Fraunces", serif; font-weight: 500; font-size: 20px; line-height: 1.1; color: #f1eee8; margin: 4px 0 2px; }
+.radar-explainer { font-family: "Inter", sans-serif; font-size: 11px; line-height: 1.28; color: #948f9c; margin: 0 0 16px; }
+.radar-accent-strong { color: #d8a355; font-weight: 600; }
+.radar-tradeoff-strip {
+  display: flex; align-items: center; gap: 7px; min-height: 30px; background: rgba(216, 163, 85, .08);
+  border: 1px solid rgba(216, 163, 85, .35); border-radius: 10px; padding: 5px 10px; margin-bottom: 8px;
+  box-shadow: 0 0 16px rgba(216, 163, 85, .08) inset;
+}
+.radar-tradeoff-icon { color: #d8a355; font-size: 13px; flex: none; }
+.radar-tradeoff-text { font-family: "Inter", sans-serif; font-size: 11px; color: #f1eee8; line-height: 1.35; }
+.radar-lock-instructions {
+  display: flex; justify-content: space-between; align-items: center; min-height: 32px;
+  background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; padding: 5px 10px;
+}
+.radar-lock-instr-item { display: flex; align-items: center; gap: 5px; font-family: "Inter", sans-serif; font-size: 10.5px; color: #948f9c; }
+.radar-target-icon, .radar-lock-instr-icon { color: #d8a355; flex: none; }
+.radar-target-icon circle { stroke: currentColor; stroke-width: 1.5; }
+.radar-lock-instr-icon rect, .radar-lock-instr-icon path { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.radar-lock-instr-divider { font-size: 11px; color: #6f6b78; }
+
+.radar-detail-card {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: fit-content; margin: 10px auto 0;
+  background: #14121a; border: 1px solid rgba(216, 163, 85, .35); border-radius: 10px; padding: 4px 12px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .4);
+}
+.radar-detail-name { font-family: "Fraunces", serif; font-weight: 600; font-size: 12px; color: #d8a355; }
+.radar-detail-state { font-family: "Inter", sans-serif; font-size: 10px; color: #f1eee8; }
+.radar-detail-value { font-size: 13px; font-weight: 700; color: #f1eee8; }
+
+.radar-counter-slot { display: flex; justify-content: center; margin-top: 22px; }
+.radar-counter-pill {
+  display: flex; align-items: center; gap: 7px; min-height: 28px; background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(216, 163, 85, .3); border-radius: 18px; padding: 0 14px;
+}
+.radar-counter-icon { color: #d8a355; flex: none; }
+.radar-counter-icon rect, .radar-counter-icon path { stroke: none; fill: currentColor; }
+.radar-counter-count { color: #d8a355; font-weight: 700; font-size: 12px; }
+.radar-counter-label { color: #f1eee8; font-family: "Inter", sans-serif; font-size: 12px; }
+
+.radar-toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 12px); z-index: 30;
+  background: #14121a; border: 1px solid rgba(216, 163, 85, .35); border-radius: 10px; padding: 8px 16px;
+  font-family: "Inter", sans-serif; font-size: 12.5px; color: #f1eee8; text-align: center; max-width: 88%;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .4); opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease;
+}
+.radar-toast.visible { opacity: 1; transform: translate(-50%, 0); }
+.radar-max-lock-warning {
+  position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%) scale(.96); z-index: 30;
+  background: #14121a; border: 1px solid rgba(216, 163, 85, .35); border-radius: 10px; padding: 12px 18px;
+  font-family: "Inter", sans-serif; font-size: 13px; color: #f1eee8; text-align: center; line-height: 1.5;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .4); opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease;
+}
+.radar-max-lock-warning.visible { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+/* Reuses the app-wide .help-overlay/.help-sheet shell (backdrop + slide-up
+   mechanics, shared with every other screen's help sheet) but with this
+   handoff's own pixel-exact inner typography, scoped via .radar-sheet so
+   nothing here leaks into those other sheets. */
+.radar-sheet-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 19px; color: #f1eee8; margin: 0 0 12px; }
+.radar-sheet.help-sheet p.radar-sheet-body { font-family: "Inter", sans-serif; font-size: 13.5px; line-height: 1.6; color: #948f9c; margin: 0 0 14px; }
+.radar-sheet-close {
+  width: 100%; min-height: 48px; border-radius: 24px; border: none; background: #d8a355; color: #1a1409;
+  font-family: "Fraunces", serif; font-weight: 600; font-size: 14.5px; letter-spacing: .06em; cursor: pointer;
+}
 .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .legend-dot.raw { background: transparent; border: 1px solid var(--muted); }
 .legend-dot.calibrated { background: var(--accent); }

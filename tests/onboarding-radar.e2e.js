@@ -1,0 +1,207 @@
+// Playwright e2e for the Growth Focus Radar onboarding screen (design
+// handoff, "Eleva Onboarding — Growth Focus Radar"). This handoff redesigned
+// the screen's visual layout/copy (header row, progress bar, trade-off
+// strip, lock-instructions row, separate lock buttons, per-axis label
+// placement, detail card, counter pill, toast, warning bubble, bottom
+// sheets) while EXPLICITLY keeping the pre-existing evidence-weighted
+// "synergy" drag-redistribution engine (applySynergyDrag) and its fixed
+// zero-sum total (35, POLY_MIN=1/POLY_MAX=10) untouched - confirmed with
+// the founder via AskUserQuestion before implementing, since the handoff's
+// own written algorithm description was a simpler model that would have
+// been a real regression against the tuned/cited production engine and its
+// downstream applyCalibrationCard dependency.
+//
+// Covers: lock/unlock via the separate lock button, the max-3 cap warning
+// bubble, Continue-button gating (>=1 lock required), drag + synergy
+// redistribution + the >=2 toast, and the Help/axis-info bottom sheets
+// (shared state slot, mutually exclusive).
+//
+// Run: node tests/onboarding-radar.e2e.js
+// Requires: local Postgres (same TEST_DATABASE_URL convention as
+// tests/practicetest.js) and the preinstalled Playwright Chromium at
+// /opt/pw-browsers/chromium.
+
+const assert = require("assert");
+const { spawn } = require("child_process");
+const { chromium } = require("playwright-core");
+
+const PORT = 3999;
+const BASE = `http://localhost:${PORT}`;
+const CHROMIUM = process.env.CHROMIUM_PATH || "/opt/pw-browsers/chromium";
+
+let failures = 0;
+async function test(name, fn) {
+  try {
+    await fn();
+    console.log(`  ok - ${name}`);
+  } catch (e) {
+    failures += 1;
+    console.error(`  FAIL - ${name}: ${e.message}`);
+  }
+}
+
+(async () => {
+  const env = {
+    ...process.env,
+    DATABASE_URL: process.env.TEST_DATABASE_URL || "postgres://postgres:testpass@localhost:5432/eleva_test",
+    SESSION_SECRET: "testsecret", BETA_CODE: "TESTCODE", PORT: String(PORT),
+  };
+  delete env.ANTHROPIC_API_KEY;
+
+  const server = spawn("node", ["server/index.js"], { env, stdio: ["ignore", "pipe", "pipe"] });
+  let serverLog = "";
+  server.stdout.on("data", (d) => { serverLog += d; });
+  server.stderr.on("data", (d) => { serverLog += d; });
+  await new Promise((resolve, reject) => {
+    const deadline = Date.now() + 15000;
+    (function poll() {
+      fetch(`${BASE}/`).then(() => resolve()).catch(() => {
+        if (Date.now() > deadline) return reject(new Error(`server never came up:\n${serverLog}`));
+        setTimeout(poll, 300);
+      });
+    })();
+  });
+
+  const browser = await chromium.launch({ executablePath: CHROMIUM, headless: true });
+  const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+
+  async function reachRadar() {
+    const email = `radar-e2e-${Date.now()}@example.com`;
+    await page.goto(BASE);
+    await page.waitForSelector("#auth2Submit", { timeout: 20000 });
+    await page.click("#auth2ToggleMode");
+    await page.waitForSelector("#auth2BetaCode", { timeout: 5000 });
+    await page.fill("#auth2Email", email);
+    await page.fill("#auth2Password", "password123");
+    await page.fill("#auth2BetaCode", "TESTCODE");
+    await page.click("#auth2ConsentBox");
+    await page.click("#auth2Submit");
+    await page.waitForSelector("text=Siapa namamu?", { timeout: 20000 });
+    await page.fill("#fld", "Radar Tester");
+    await page.click("#next");
+    await page.waitForSelector(".poly-svg", { timeout: 10000 });
+    await page.waitForTimeout(450); // let the .fadeUp entrance settle before measuring
+  }
+  await reachRadar();
+
+  console.log("E2E: layout + copy (handoff v5, 'Growth Focus Radar')");
+  await test("header row, progress bar, trade-off strip, and lock-instructions row all render with the exact handoff copy", async () => {
+    assert.ok(await page.locator("text=Ke mana kamu mau").count(), "heading missing");
+    assert.ok(await page.locator("text=fokus sekarang?").count(), "heading second line missing");
+    assert.ok(await page.locator(".radar-help-btn").count(), "circular help button missing from header row");
+    assert.ok(await page.locator(".radar-progress-fill").count(), "progress bar fill missing");
+    assert.ok(await page.locator("text=Kamu tidak bisa membuat semua area jadi").count(), "trade-off strip copy missing");
+    assert.ok(await page.locator(".radar-lock-instr-item", { hasText: "maksimal 3" }).count(), "lock-instructions 'maksimal 3' item missing");
+    assert.ok(await page.locator(".radar-lock-instr-item", { hasText: "mengunci" }).count(), "lock-instructions 'mengunci' item missing");
+    // All 7 axes, correctly labeled (including the 2-line "Emotional Stability" wrap).
+    for (const label of ["Body", "Growth", "Livelihood", "Emotional", "Stability", "Social", "Purpose", "Autonomy"]) {
+      assert.ok(await page.locator(`text=${label}`).count(), `axis label "${label}" missing`);
+    }
+    assert.strictEqual(await page.locator(".lock-btn").count(), 7, "expected 7 separate lock buttons");
+  });
+
+  console.log("E2E: lock/unlock + max-3 cap + Continue gating");
+  await test("Continue starts disabled, locking an axis enables it, and the detail card + counter pill update", async () => {
+    assert.strictEqual(await page.locator("#next").isDisabled(), true, "Continue must start disabled with 0 locks (handoff: 'until at least 1 axis is locked')");
+    await page.click('[data-lock-hit="body"]');
+    await page.waitForTimeout(120);
+    assert.ok(await page.evaluate(() => document.querySelector('[data-lock-btn-for="body"]').classList.contains("locked")), "body lock button did not toggle locked");
+    assert.strictEqual(await page.locator("#next").isDisabled(), false, "Continue must enable once >=1 axis is locked");
+    const detail = await page.locator(".radar-detail-card").textContent();
+    assert.ok(/Body/.test(detail) && /Dikunci/.test(detail), `detail card wrong: ${detail}`);
+    const counter = await page.locator(".radar-counter-pill").textContent();
+    assert.ok(/1\s*\/\s*3/.test(counter), `counter pill wrong: ${counter}`);
+  });
+
+  await test("locking a 4th axis at the cap does not lock it and shows the exact warning bubble", async () => {
+    await page.click('[data-lock-hit="growth"]');
+    await page.waitForTimeout(80);
+    await page.click('[data-lock-hit="livelihood"]');
+    await page.waitForTimeout(80);
+    assert.ok(/3\s*\/\s*3/.test(await page.locator(".radar-counter-pill").textContent()), "counter should read 3/3 at the cap");
+    await page.click('[data-lock-hit="social"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(
+      await page.evaluate(() => document.querySelector('[data-lock-btn-for="social"]').classList.contains("locked")),
+      false, "a 4th axis must not lock at the cap"
+    );
+    assert.ok(await page.evaluate(() => document.getElementById("radarMaxLockWarning").classList.contains("visible")), "max-lock warning bubble must show");
+    // <br/> between the two sentences produces no textContent whitespace of
+    // its own (that's the visual line break) - the assertion reflects that.
+    const warnText = (await page.locator("#radarMaxLockWarning").textContent()).replace(/\s+/g, " ").trim();
+    assert.strictEqual(warnText, "Maksimal 3 prioritas.Buka salah satu prioritas dulu.", `warning copy wrong: ${warnText}`);
+    // Unlocking one frees a slot back up for a later test.
+    await page.click('[data-lock-hit="livelihood"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(
+      await page.evaluate(() => document.querySelector('[data-lock-btn-for="livelihood"]').classList.contains("locked")),
+      false, "unlocking must clear the locked state"
+    );
+  });
+
+  console.log("E2E: drag redistribution (synergy engine, unchanged) + the >=2 delta toast");
+  await test("dragging an axis by >=2 redistributes via the existing synergy engine and fires the toast once", async () => {
+    const svgBox = await page.locator(".poly-svg").boundingBox();
+    const handleBox = await page.locator('[data-stat="autonomy"]').boundingBox();
+    const beforeSum = await page.evaluate(() =>
+      ["body", "growth", "livelihood", "emotional", "social", "purpose", "autonomy"]
+        .reduce((s, k) => s + Number(document.querySelector(`text[data-value-for="${k}"]`).textContent), 0)
+    );
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(svgBox.x + svgBox.width * 0.15, svgBox.y + svgBox.height * 0.35, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+    const afterSum = await page.evaluate(() =>
+      ["body", "growth", "livelihood", "emotional", "social", "purpose", "autonomy"]
+        .reduce((s, k) => s + Number(document.querySelector(`text[data-value-for="${k}"]`).textContent), 0)
+    );
+    // The engine's fixed zero-sum budget (POLY_TOTAL=35) must survive the
+    // redesign untouched - this is the whole point of keeping applySynergyDrag.
+    assert.strictEqual(Math.round(afterSum), Math.round(beforeSum), `total must stay zero-sum: ${beforeSum} -> ${afterSum}`);
+    const autonomyVal = Number(await page.locator('text[data-value-for="autonomy"]').textContent());
+    assert.ok(autonomyVal > 5, `autonomy should have grown from a drag toward the edge, got ${autonomyVal}`);
+    assert.ok(await page.evaluate(() => document.getElementById("radarToast").classList.contains("visible")), "toast must show after a >=2 delta drag");
+    const toastText = await page.locator("#radarToast").textContent();
+    assert.ok(/^\+\d+ Autonomy membutuhkan ruang dari area lain\.$/.test(toastText), `toast copy wrong: ${toastText}`);
+  });
+
+  console.log("E2E: Help sheet + per-axis info sheet (shared state slot)");
+  await test("Help sheet shows the exact 'Tentang Fokus' copy, and an axis info sheet shows that axis's definition", async () => {
+    await page.click(".radar-help-btn");
+    await page.waitForTimeout(350);
+    assert.strictEqual(await page.locator(".radar-sheet-title").textContent(), "Tentang Fokus");
+    assert.strictEqual(await page.locator(".radar-sheet-body").count(), 3, "Help sheet must have exactly 3 body paragraphs");
+    assert.strictEqual(await page.locator(".radar-sheet-close").textContent(), "Mengerti");
+    await page.click("#helpOverlay");
+    await page.waitForTimeout(350);
+    assert.strictEqual(await page.locator(".radar-sheet").count(), 0, "sheet must close on backdrop tap");
+
+    await page.click('[data-axis-info="purpose"]');
+    await page.waitForTimeout(350);
+    assert.strictEqual(await page.locator(".radar-sheet-title").textContent(), "Purpose");
+    assert.ok((await page.locator(".radar-sheet-body").textContent()).length > 10, "axis info body missing");
+    assert.strictEqual(await page.locator(".radar-sheet-close").textContent(), "Tutup");
+    assert.strictEqual(await page.locator(".radar-sheet").count(), 1, "only one sheet open at a time");
+    await page.click(".radar-sheet-close");
+    await page.waitForTimeout(350);
+    assert.strictEqual(await page.locator(".radar-sheet").count(), 0, "sheet must close on its own close button");
+  });
+
+  console.log("E2E: Continue navigates on to the adaptive phase with the locked/radar state carried over");
+  await test("tapping Continue (with locks in place) advances past the radar step", async () => {
+    await page.waitForSelector("#next:not([disabled])", { timeout: 5000 });
+    await page.click("#next");
+    await page.waitForFunction(() => !document.querySelector(".poly-svg"), null, { timeout: 10000 });
+    assert.strictEqual(await page.locator(".poly-svg").count(), 0, "radar screen should be gone after Continue");
+  });
+
+  await browser.close();
+  server.kill();
+  console.log(failures ? `\n${failures} E2E FAILURE(S)` : "\nALL E2E TESTS PASSED");
+  process.exit(failures ? 1 : 0);
+})().catch((e) => {
+  console.error("E2E run crashed:", e);
+  process.exit(1);
+});
