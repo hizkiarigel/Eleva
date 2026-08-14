@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 45 files · ~360,720 words
+- 45 files · ~361,045 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 565 nodes · 880 edges · 38 communities (31 shown, 7 thin omitted)
-- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 102 edges (avg confidence: 0.51)
+- 566 nodes · 881 edges · 39 communities (32 shown, 7 thin omitted)
+- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 103 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `ae277a5e`
+- Built from commit: `eadb1031`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -49,10 +49,11 @@
 - soma-nutrition-flow.md
 - applyCalibrationCard
 - onboarding-radar.e2e.js
-- questSummaryCard
+- renderDashboard
 - Adaptive Scenario Cards
 - 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
-- buildPathwayOptions
+- renderAuth
+- appHeaderHTML
 
 ## God Nodes (most connected - your core abstractions)
 1. `esc()` - 38 edges
@@ -86,7 +87,7 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (38 total, 7 thin omitted)
+## Communities (39 total, 7 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.05
@@ -125,8 +126,8 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.20
-Nodes (18): api(), authConsentInfoModalHTML(), authFinish(), authHelpModalHTML(), authReducedMotion(), boot(), clearAuthTimers(), fetchChapterAnalysis() (+10 more)
+Cohesion: 0.32
+Nodes (12): api(), authFinish(), boot(), buildPathwayOptions(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder(), pickRandomSubPathway() (+4 more)
 
 ### Community 10 - "attachPolygonHandlers"
 Cohesion: 0.29
@@ -149,8 +150,8 @@ Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
 ### Community 18 - "esc"
-Cohesion: 0.08
-Nodes (38): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML() (+30 more)
+Cohesion: 0.14
+Nodes (20): artifactsSheetHTML(), axisDefinitionsHTML(), completedResultCardHTML(), elevaResponseHTML(), esc(), helpSheetHTML(), jobApplicationFlowHTML(), jobApplicationSummary() (+12 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -200,9 +201,9 @@ Nodes (6): applyCalibrationCard(), applySynergyDrag(), clampCalibrationDelta(), 
 Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 34 - "questSummaryCard"
-Cohesion: 0.25
-Nodes (8): ensureCountdownTicking(), formatCountdown(), nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
+### Community 34 - "renderDashboard"
+Cohesion: 0.10
+Nodes (24): activeSomaQuest(), beginStructuredOrReflectiveFlow(), durasiMenitFromFields(), ensureCountdownTicking(), fileToBase64(), formatCountdown(), helpBtnHTML(), maturityTier() (+16 more)
 
 ### Community 35 - "Adaptive Scenario Cards"
 Cohesion: 0.40
@@ -211,6 +212,10 @@ Nodes (5): graphify Honesty Rules, Adaptive Scenario Cards, Defense-in-Depth Pat
 ### Community 36 - "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)"
 Cohesion: 0.50
 Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
+
+### Community 37 - "renderAuth"
+Cohesion: 0.32
+Nodes (8): authConsentInfoModalHTML(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
 
 ## Knowledge Gaps
 - **177 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+172 more)
@@ -231,6 +236,6 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `index.js` be split into smaller, more focused modules?**
   _Cohesion score 0.0507399577167019 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.046511627906976744 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.045454545454545456 - nodes in this community are weakly interconnected._
 - **Should `claude.js` be split into smaller, more focused modules?**
   _Cohesion score 0.06440677966101695 - nodes in this community are weakly interconnected._

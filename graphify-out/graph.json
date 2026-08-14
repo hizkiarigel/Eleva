@@ -272,6 +272,18 @@
       "norm_label": "parsedurasimenit()"
     },
     {
+      "label": "setRealVH()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L4293",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_setrealvh",
+      "community": 1,
+      "community_name": "app.js",
+      "norm_label": "setrealvh()"
+    },
+    {
       "label": "attachPolygonHandlers()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -848,30 +860,6 @@
       "norm_label": "test()"
     },
     {
-      "label": "activeSomaQuest()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L2804",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_activesomaquest",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "activesomaquest()"
-    },
-    {
-      "label": "appHeaderHTML()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L2635",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_appheaderhtml",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "appheaderhtml()"
-    },
-    {
       "label": "artifactsSheetHTML()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -896,18 +884,6 @@
       "norm_label": "axisdefinitionshtml()"
     },
     {
-      "label": "beginStructuredOrReflectiveFlow()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L3074",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_beginstructuredorreflectiveflow",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "beginstructuredorreflectiveflow()"
-    },
-    {
       "label": "completedResultCardHTML()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -918,18 +894,6 @@
       "community": 18,
       "community_name": "esc",
       "norm_label": "completedresultcardhtml()"
-    },
-    {
-      "label": "durasiMenitFromFields()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L1938",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_durasimenitfromfields",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "durasimenitfromfields()"
     },
     {
       "label": "elevaResponseHTML()",
@@ -954,30 +918,6 @@
       "community": 18,
       "community_name": "esc",
       "norm_label": "esc()"
-    },
-    {
-      "label": "fileToBase64()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L2070",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_filetobase64",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "filetobase64()"
-    },
-    {
-      "label": "helpBtnHTML()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L155",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_helpbtnhtml",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "helpbtnhtml()"
     },
     {
       "label": "helpSheetHTML()",
@@ -1064,30 +1004,6 @@
       "norm_label": "kondisirowhtml()"
     },
     {
-      "label": "maturityTier()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L179",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_maturitytier",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "maturitytier()"
-    },
-    {
-      "label": "mmss()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L1944",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_mmss",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "mmss()"
-    },
-    {
       "label": "observedCardHTML()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -1098,30 +1014,6 @@
       "community": 18,
       "community_name": "esc",
       "norm_label": "observedcardhtml()"
-    },
-    {
-      "label": "openNutritionFlow()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L3113",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_opennutritionflow",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "opennutritionflow()"
-    },
-    {
-      "label": "paceLabel()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L1954",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_pacelabel",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "pacelabel()"
     },
     {
       "label": "practiceQuestionHTML()",
@@ -1160,42 +1052,6 @@
       "norm_label": "practicetestresulthtml()"
     },
     {
-      "label": "renderDashboard()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L3124",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_renderdashboard",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "renderdashboard()"
-    },
-    {
-      "label": "resetOnboardState()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L614",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_resetonboardstate",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "resetonboardstate()"
-    },
-    {
-      "label": "settingsScreenHTML()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L2781",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_settingsscreenhtml",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "settingsscreenhtml()"
-    },
-    {
       "label": "shortfallPromptHTML()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -1206,42 +1062,6 @@
       "community": 18,
       "community_name": "esc",
       "norm_label": "shortfallprompthtml()"
-    },
-    {
-      "label": "speakScript()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L1974",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_speakscript",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "speakscript()"
-    },
-    {
-      "label": "structSummary()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L1960",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_structsummary",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "structsummary()"
-    },
-    {
-      "label": "tabBarHTML()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L2655",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_tabbarhtml",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "tabbarhtml()"
     },
     {
       "label": "targetManualFormHTML()",
@@ -1268,18 +1088,6 @@
       "norm_label": "targetpickerhtml()"
     },
     {
-      "label": "todayLabel()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L595",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_todaylabel",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "todaylabel()"
-    },
-    {
       "label": "unableFormHTML()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -1290,18 +1098,6 @@
       "community": 18,
       "community_name": "esc",
       "norm_label": "unableformhtml()"
-    },
-    {
-      "label": "wordCount()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L593",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_wordcount",
-      "community": 18,
-      "community_name": "esc",
-      "norm_label": "wordcount()"
     },
     {
       "label": "main()",
@@ -2324,6 +2120,42 @@
       "norm_label": "test()"
     },
     {
+      "label": "activeSomaQuest()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L2804",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_activesomaquest",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "activesomaquest()"
+    },
+    {
+      "label": "beginStructuredOrReflectiveFlow()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L3074",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_beginstructuredorreflectiveflow",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "beginstructuredorreflectiveflow()"
+    },
+    {
+      "label": "durasiMenitFromFields()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1938",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_durasimenitfromfields",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "durasimenitfromfields()"
+    },
+    {
       "label": "ensureCountdownTicking()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -2332,8 +2164,20 @@
       "_origin": "ast",
       "id": "public_app_ensurecountdownticking",
       "community": 34,
-      "community_name": "questSummaryCard",
+      "community_name": "renderDashboard",
       "norm_label": "ensurecountdownticking()"
+    },
+    {
+      "label": "fileToBase64()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L2070",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_filetobase64",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "filetobase64()"
     },
     {
       "label": "formatCountdown()",
@@ -2344,8 +2188,44 @@
       "_origin": "ast",
       "id": "public_app_formatcountdown",
       "community": 34,
-      "community_name": "questSummaryCard",
+      "community_name": "renderDashboard",
       "norm_label": "formatcountdown()"
+    },
+    {
+      "label": "helpBtnHTML()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L155",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_helpbtnhtml",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "helpbtnhtml()"
+    },
+    {
+      "label": "maturityTier()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L179",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_maturitytier",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "maturitytier()"
+    },
+    {
+      "label": "mmss()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1944",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_mmss",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "mmss()"
     },
     {
       "label": "nutritionFlowHTML()",
@@ -2356,7 +2236,7 @@
       "_origin": "ast",
       "id": "public_app_nutritionflowhtml",
       "community": 34,
-      "community_name": "questSummaryCard",
+      "community_name": "renderDashboard",
       "norm_label": "nutritionflowhtml()"
     },
     {
@@ -2368,7 +2248,7 @@
       "_origin": "ast",
       "id": "public_app_nutritionprogresslabel",
       "community": 34,
-      "community_name": "questSummaryCard",
+      "community_name": "renderDashboard",
       "norm_label": "nutritionprogresslabel()"
     },
     {
@@ -2380,8 +2260,32 @@
       "_origin": "ast",
       "id": "public_app_nutritiontotalshtml",
       "community": 34,
-      "community_name": "questSummaryCard",
+      "community_name": "renderDashboard",
       "norm_label": "nutritiontotalshtml()"
+    },
+    {
+      "label": "openNutritionFlow()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L3113",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_opennutritionflow",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "opennutritionflow()"
+    },
+    {
+      "label": "paceLabel()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1954",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_pacelabel",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "pacelabel()"
     },
     {
       "label": "questSummaryCard()",
@@ -2392,8 +2296,44 @@
       "_origin": "ast",
       "id": "public_app_questsummarycard",
       "community": 34,
-      "community_name": "questSummaryCard",
+      "community_name": "renderDashboard",
       "norm_label": "questsummarycard()"
+    },
+    {
+      "label": "renderDashboard()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L3124",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_renderdashboard",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "renderdashboard()"
+    },
+    {
+      "label": "resetOnboardState()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L614",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_resetonboardstate",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "resetonboardstate()"
+    },
+    {
+      "label": "settingsScreenHTML()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L2781",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_settingsscreenhtml",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "settingsscreenhtml()"
     },
     {
       "label": "sideQuestRowHTML()",
@@ -2404,8 +2344,44 @@
       "_origin": "ast",
       "id": "public_app_sidequestrowhtml",
       "community": 34,
-      "community_name": "questSummaryCard",
+      "community_name": "renderDashboard",
       "norm_label": "sidequestrowhtml()"
+    },
+    {
+      "label": "speakScript()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1974",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_speakscript",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "speakscript()"
+    },
+    {
+      "label": "structSummary()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1960",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_structsummary",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "structsummary()"
+    },
+    {
+      "label": "tabBarHTML()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L2655",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_tabbarhtml",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "tabbarhtml()"
     },
     {
       "label": "tickCountdowns()",
@@ -2416,32 +2392,140 @@
       "_origin": "ast",
       "id": "public_app_tickcountdowns",
       "community": 34,
-      "community_name": "questSummaryCard",
+      "community_name": "renderDashboard",
       "norm_label": "tickcountdowns()"
     },
     {
-      "label": "buildPathwayOptions()",
+      "label": "wordCount()",
       "file_type": "code",
       "source_file": "public/app.js",
-      "source_location": "L1614",
+      "source_location": "L593",
       "_callable": true,
       "_origin": "ast",
-      "id": "public_app_buildpathwayoptions",
-      "community": 37,
-      "community_name": "buildPathwayOptions",
-      "norm_label": "buildpathwayoptions()"
+      "id": "public_app_wordcount",
+      "community": 34,
+      "community_name": "renderDashboard",
+      "norm_label": "wordcount()"
     },
     {
-      "label": "pickRandomSubPathway()",
+      "label": "authConsentInfoModalHTML()",
       "file_type": "code",
       "source_file": "public/app.js",
-      "source_location": "L1603",
+      "source_location": "L778",
       "_callable": true,
       "_origin": "ast",
-      "id": "public_app_pickrandomsubpathway",
+      "id": "public_app_authconsentinfomodalhtml",
       "community": 37,
-      "community_name": "buildPathwayOptions",
-      "norm_label": "pickrandomsubpathway()"
+      "community_name": "renderAuth",
+      "norm_label": "authconsentinfomodalhtml()"
+    },
+    {
+      "label": "authHelpModalHTML()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L754",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_authhelpmodalhtml",
+      "community": 37,
+      "community_name": "renderAuth",
+      "norm_label": "authhelpmodalhtml()"
+    },
+    {
+      "label": "authReducedMotion()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L569",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_authreducedmotion",
+      "community": 37,
+      "community_name": "renderAuth",
+      "norm_label": "authreducedmotion()"
+    },
+    {
+      "label": "clearAuthTimers()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L555",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_clearauthtimers",
+      "community": 37,
+      "community_name": "renderAuth",
+      "norm_label": "clearauthtimers()"
+    },
+    {
+      "label": "renderAuth()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L791",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_renderauth",
+      "community": 37,
+      "community_name": "renderAuth",
+      "norm_label": "renderauth()"
+    },
+    {
+      "label": "runAuthEntering()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1051",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_runauthentering",
+      "community": 37,
+      "community_name": "renderAuth",
+      "norm_label": "runauthentering()"
+    },
+    {
+      "label": "runAuthFlash()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1025",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_runauthflash",
+      "community": 37,
+      "community_name": "renderAuth",
+      "norm_label": "runauthflash()"
+    },
+    {
+      "label": "runAuthReducedFlash()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1039",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_runauthreducedflash",
+      "community": 37,
+      "community_name": "renderAuth",
+      "norm_label": "runauthreducedflash()"
+    },
+    {
+      "label": "appHeaderHTML()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L2635",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_appheaderhtml",
+      "community": 38,
+      "community_name": "appHeaderHTML",
+      "norm_label": "appheaderhtml()"
+    },
+    {
+      "label": "todayLabel()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L595",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_todaylabel",
+      "community": 38,
+      "community_name": "appHeaderHTML",
+      "norm_label": "todaylabel()"
     },
     {
       "label": "activatePathway()",
@@ -3404,18 +3488,6 @@
       "norm_label": "api()"
     },
     {
-      "label": "authConsentInfoModalHTML()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L778",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_authconsentinfomodalhtml",
-      "community": 9,
-      "community_name": "render",
-      "norm_label": "authconsentinfomodalhtml()"
-    },
-    {
       "label": "authFinish()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -3426,30 +3498,6 @@
       "community": 9,
       "community_name": "render",
       "norm_label": "authfinish()"
-    },
-    {
-      "label": "authHelpModalHTML()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L754",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_authhelpmodalhtml",
-      "community": 9,
-      "community_name": "render",
-      "norm_label": "authhelpmodalhtml()"
-    },
-    {
-      "label": "authReducedMotion()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L569",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_authreducedmotion",
-      "community": 9,
-      "community_name": "render",
-      "norm_label": "authreducedmotion()"
     },
     {
       "label": "boot()",
@@ -3464,16 +3512,16 @@
       "norm_label": "boot()"
     },
     {
-      "label": "clearAuthTimers()",
+      "label": "buildPathwayOptions()",
       "file_type": "code",
       "source_file": "public/app.js",
-      "source_location": "L555",
+      "source_location": "L1614",
       "_callable": true,
       "_origin": "ast",
-      "id": "public_app_clearauthtimers",
+      "id": "public_app_buildpathwayoptions",
       "community": 9,
       "community_name": "render",
-      "norm_label": "clearauthtimers()"
+      "norm_label": "buildpathwayoptions()"
     },
     {
       "label": "fetchChapterAnalysis()",
@@ -3512,6 +3560,18 @@
       "norm_label": "goalplaceholder()"
     },
     {
+      "label": "pickRandomSubPathway()",
+      "file_type": "code",
+      "source_file": "public/app.js",
+      "source_location": "L1603",
+      "_callable": true,
+      "_origin": "ast",
+      "id": "public_app_pickrandomsubpathway",
+      "community": 9,
+      "community_name": "render",
+      "norm_label": "pickrandomsubpathway()"
+    },
+    {
       "label": "render()",
       "file_type": "code",
       "source_file": "public/app.js",
@@ -3534,54 +3594,6 @@
       "community": 9,
       "community_name": "render",
       "norm_label": "renderadaptive()"
-    },
-    {
-      "label": "renderAuth()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L791",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_renderauth",
-      "community": 9,
-      "community_name": "render",
-      "norm_label": "renderauth()"
-    },
-    {
-      "label": "runAuthEntering()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L1051",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_runauthentering",
-      "community": 9,
-      "community_name": "render",
-      "norm_label": "runauthentering()"
-    },
-    {
-      "label": "runAuthFlash()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L1025",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_runauthflash",
-      "community": 9,
-      "community_name": "render",
-      "norm_label": "runauthflash()"
-    },
-    {
-      "label": "runAuthReducedFlash()",
-      "file_type": "code",
-      "source_file": "public/app.js",
-      "source_location": "L1039",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "public_app_runauthreducedflash",
-      "community": 9,
-      "community_name": "render",
-      "norm_label": "runauthreducedflash()"
     },
     {
       "label": "spinnerHTML()",
@@ -14806,6 +14818,18 @@
     },
     {
       "relation": "indirect_call",
+      "confidence": "INFERRED",
+      "source_file": "public/app.js",
+      "source_location": "L4298",
+      "weight": 1.0,
+      "_origin": "ast",
+      "context": "argument",
+      "source": "public_app",
+      "target": "public_app_setrealvh",
+      "confidence_score": 0.5
+    },
+    {
+      "relation": "indirect_call",
       "context": "argument",
       "confidence": "INFERRED",
       "source_file": "public/app.js",
@@ -17033,5 +17057,5 @@
       "source_file": "PRD.md"
     }
   ],
-  "built_at_commit": "ae277a5eadcad329d1fe4d11627c72ff9b73ca79"
+  "built_at_commit": "eadb103122b34ab2ceb48f2990cd8a3853194499"
 }

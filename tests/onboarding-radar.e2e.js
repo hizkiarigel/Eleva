@@ -85,6 +85,34 @@ async function test(name, fn) {
   }
   await reachRadar();
 
+  console.log("E2E: round 4 (repeated real-device report) - real JS-measured viewport height, not CSS dvh");
+  await test("--vh is measured from the real viewport and stays correct (and the layout keeps fitting) even when visualViewport under-reports height, mimicking Safari's toolbar-visible state", async () => {
+    const vh1 = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--vh"));
+    assert.ok(/^8\.4\d*px$/.test(vh1.trim()), `--vh should be ~8.44px at 844px viewport height, got ${vh1}`);
+    // Simulate the exact real-device bug: visualViewport.height under-reporting
+    // the true available space (a visible toolbar eating real pixels) - CSS
+    // dvh alone doesn't reliably reflect this on real Safari, which is why
+    // --vh is measured in JS from visualViewport/innerHeight directly instead.
+    await page.evaluate(() => {
+      Object.defineProperty(window, "visualViewport", {
+        value: { height: window.innerHeight - 120, addEventListener: () => {}, removeEventListener: () => {} },
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("resize"));
+    });
+    await page.waitForTimeout(150);
+    const vh2 = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--vh"));
+    assert.ok(/^7\.2\d*px$/.test(vh2.trim()), `--vh should drop to ~7.24px after a simulated 120px toolbar undercount, got ${vh2}`);
+    const overflow = await page.evaluate(() => { const s = document.querySelector(".shell-radar"); return s.scrollHeight - s.clientHeight; });
+    assert.strictEqual(overflow, 0, `layout must still fit with zero overflow under the simulated undercount, got ${overflow}px`);
+    // Restore the real visualViewport for the rest of the suite.
+    await page.evaluate(() => {
+      delete window.visualViewport;
+      window.dispatchEvent(new Event("resize"));
+    });
+    await page.waitForTimeout(150);
+  });
+
   console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, compressed to avoid scrolling, with a scroll safety net");
   await test("the screen fills the real viewport edge-to-edge and needs no scrolling at any realistic height, but the safety net keeps Continue reachable if it ever doesn't fit", async () => {
     // Round 3 (repeated real-device report): overflow:hidden + an exact

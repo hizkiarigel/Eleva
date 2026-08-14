@@ -4281,4 +4281,22 @@ function render() {
   if (ui.view === "dashboard") return renderDashboard();
 }
 
+// Real viewport-height unit (Growth Focus Radar, round 4 - repeated
+// real-device report of Kembali/Lanjut still clipping even with an
+// explicit height:100dvh). CSS dvh has proven unreliable across real
+// mobile Safari's various toolbar/zoom states - the browser's own
+// window.innerHeight/visualViewport.height is the actual ground truth,
+// so --vh is measured directly from that instead of trusted from CSS,
+// and every "Ndvh" in .shell-radar's compression clamp()s is replaced
+// with calc(var(--vh, 1dvh) * N). Kept live via resize/orientationchange/
+// visualViewport listeners so it tracks the toolbar showing/hiding.
+function setRealVH() {
+  const h = (window.visualViewport ? window.visualViewport.height : window.innerHeight) * 0.01;
+  document.documentElement.style.setProperty("--vh", h + "px");
+}
+setRealVH();
+window.addEventListener("resize", setRealVH);
+window.addEventListener("orientationchange", setRealVH);
+window.visualViewport?.addEventListener("resize", setRealVH);
+
 boot();

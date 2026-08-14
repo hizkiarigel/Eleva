@@ -33,8 +33,9 @@
   "31": "soma-nutrition-flow.md",
   "32": "applyCalibrationCard",
   "33": "onboarding-radar.e2e.js",
-  "34": "questSummaryCard",
+  "34": "renderDashboard",
   "35": "Adaptive Scenario Cards",
   "36": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)",
-  "37": "buildPathwayOptions"
+  "37": "renderAuth",
+  "38": "appHeaderHTML"
 }
