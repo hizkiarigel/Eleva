@@ -152,6 +152,77 @@ async function waitForServer(base, log) {
     assert.ok((await page.locator("text=PILIH PATHWAY").count()) > 0, "expected the pathway-selection screen after the Pathway bridge");
   });
 
+  console.log("E2E: hitting the 6-card cap goes straight to the Pathway bridge - no 'meta' flash first (round 24 bug fix)");
+  await test("after the 6th card, the client already knows the next fetch is guaranteed confident (server's SCENARIO_MAX_CARDS) and skips the loading-sequence stage entirely", async () => {
+    const capContext = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    const capPage = await capContext.newPage();
+    let scenarioCardCalls = 0;
+    // Force exactly 6 non-confident cards (the keyless fallback confirms
+    // after only 2, too fast to exercise this path) - a fixed valid
+    // scenario+4 options every time, confident only if somehow called a
+    // 7th time (which the fix must prevent).
+    await capPage.route("**/api/onboarding/scenario-card", async (route) => {
+      scenarioCardCalls += 1;
+      await route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({
+          confident: scenarioCardCalls > 6,
+          scenario: scenarioCardCalls > 6 ? null : `Skenario uji ke-${scenarioCardCalls}`,
+          options: scenarioCardCalls > 6 ? null : [
+            { axis: "body", text: "Opsi A" }, { axis: "growth", text: "Opsi B" },
+            { axis: "livelihood", text: "Opsi C" }, { axis: "purpose", text: "Opsi D" },
+          ],
+        }),
+      });
+    });
+    await capPage.route("**/api/onboarding/chapter-analysis", async (route) => {
+      await route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({
+          insight: "Insight uji.", pathway: "Architect", subPathway: "Architect", pathwayBlurb: "Blurb uji.",
+          secondaryTrait: null, significantShifts: [], lockTension: [], rawPathwayTop2: [],
+        }),
+      });
+    });
+    const email = `bridge-cap-${Date.now()}@example.com`;
+    await capPage.goto(BASE);
+    await capPage.waitForSelector("#auth2Submit", { timeout: 20000 });
+    await capPage.click("#auth2ToggleMode");
+    await capPage.waitForSelector("#auth2BetaCode", { timeout: 5000 });
+    await capPage.fill("#auth2Email", email);
+    await capPage.fill("#auth2Password", "password123");
+    await capPage.fill("#auth2BetaCode", "TESTCODE");
+    await capPage.click("#auth2ConsentBox");
+    await capPage.click("#auth2Submit");
+    await capPage.waitForSelector("text=Siapa namamu?", { timeout: 20000 });
+    await capPage.fill("#fld", "Cap Tester");
+    await capPage.click("#next");
+    await capPage.waitForSelector(".poly-svg", { timeout: 10000 });
+    await capPage.click('[data-lock-hit="body"]');
+    await capPage.click("#next");
+    for (let i = 1; i <= 6; i++) {
+      await capPage.waitForSelector(".qcard-card", { timeout: 15000 });
+      assert.strictEqual((await capPage.locator(".qcard-count").textContent()).trim(), `KARTU KE-${i}`);
+      const opts = await capPage.locator(".qcard-answer").all();
+      await opts[0].click();
+      await opts[1].click();
+      await capPage.click("#confirmCard");
+      if (i < 6) {
+        // between cards 1-5, the loading-sequence stage for the NEXT card is expected
+        await capPage.waitForSelector(".bridge-root", { timeout: 10000 });
+      }
+    }
+    // After card 6: must land directly on the Pathway bridge, never
+    // re-showing "06-meta" - and the mocked scenario-card route must never
+    // be called a 7th time (the fix skips that request entirely).
+    await capPage.waitForSelector(".bridge-root", { timeout: 10000 });
+    const src = await capPage.locator(".bridge-img").getAttribute("src");
+    assert.strictEqual(src, "/onboarding/bridges/07-pathway.webp", `expected straight to the Pathway stage after card 6, got ${src}`);
+    await capPage.waitForSelector(".tarot-carousel", { timeout: 10000 });
+    assert.strictEqual(scenarioCardCalls, 6, "must not fetch a 7th scenario card - the client already knows it would be confident");
+    await capContext.close();
+  });
+
   console.log("E2E: reduced motion - fade only, no zoom/drift, no breathing overlay");
   await test("prefers-reduced-motion:reduce disables the Ken-Burns transform and the breathing overlay, but the art still shows", async () => {
     const rmContext = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });

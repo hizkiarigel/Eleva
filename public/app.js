@@ -1273,6 +1273,11 @@ const bridgePreloadCache = new Set();
 const BRIDGE_LOADING_SEQUENCE = ["intro", "quest", "evidence", "character", "adaptive", "meta"];
 const BRIDGE_PREVIEW_ORDER = [...BRIDGE_LOADING_SEQUENCE, "pathway"]; // all 7, dev preview only
 const BRIDGE_MIN_DURATION_MS = 2300, BRIDGE_LONGWAIT_MS = 6000;
+// Mirrors server/claude.js's SCENARIO_MAX_CARDS - once this many cards are
+// answered, the server GUARANTEES confident:true on the next scenario-card
+// call (a hard early-return there, no AI call needed) - see
+// beginScenarioBridge()'s use of this below.
+const SCENARIO_MAX_CARDS = 6;
 
 function clearBridgeTimers() {
   bridgeTimers.forEach(clearTimeout);
@@ -1357,6 +1362,15 @@ function runBridge({ stageKey, work, onSuccess, onError }) {
 }
 
 function beginScenarioBridge() {
+  // Founder-reported bug: after the 6th card, the "meta" loading-sequence
+  // bridge flashed for ~1s before immediately swapping to "pathway" once
+  // the (guaranteed-confident) fetch resolved - 2 visuals for what's really
+  // one wait. The cap means the client already KNOWS this fetch can only
+  // ever return confident:true, so skip the optimistic loading-sequence
+  // stage entirely and go straight to pathway - also saves a wasted
+  // scenario-card round trip (it would've returned confident with a null
+  // scenario anyway).
+  if (adaptiveCards.length >= SCENARIO_MAX_CARDS) { beginPathwayBridge(); return; }
   const stageKey = BRIDGE_LOADING_SEQUENCE[Math.min(adaptiveCards.length, BRIDGE_LOADING_SEQUENCE.length - 1)];
   runBridge({
     stageKey,
