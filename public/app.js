@@ -1084,6 +1084,24 @@ async function runAuthEntering(statePrefetch) {
   }, AUTH_ENTERING_HOLD));
 }
 
+// Onboarding cinematic "bridge" screens - full-screen art shown between
+// onboarding steps while Eleva prepares the next personalized question.
+// Registration only for now (asset + config), per explicit instruction:
+// no render/animation/audio wiring yet. Stages are registered one at a
+// time as their art arrives (7 total planned) - keyed by stage ID so a
+// later stage can be added without touching earlier entries.
+const ONBOARDING_BRIDGE_BASE_PATH = "/onboarding/bridges/";
+const ONBOARDING_BRIDGES = {
+  intro: {
+    order: 1,
+    name: "Journey",
+    image: "01-journey", // -> /onboarding/bridges/01-journey.webp
+    headline: "Pertumbuhanmu adalah sebuah perjalanan.",
+    voiceText: "Selamat datang di Eleva. Di sini, kamu tumbuh sambil jalan.",
+    nextType: "personalized_question",
+  },
+};
+
 // Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both
 // gone, folded into the adaptive conversation and the radar chart itself.
 // Growth Focus Radar handoff (v5) and the "Eleva Onboarding Name" handoff:
