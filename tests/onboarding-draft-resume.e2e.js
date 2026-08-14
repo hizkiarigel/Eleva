@@ -128,6 +128,31 @@ async function signUpAndFillName(page, name) {
     await context.close();
   });
 
+  console.log("E2E: refresh while an already-loaded question is on screen restores it exactly - no bridge replay, no question swap (round 23)");
+  await test("a card with a scenario already loaded restores in place, picks intact, never through a bridge", async () => {
+    const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await signUpAndFillName(page, "Same Card Resume");
+    await page.click("#next");
+    await page.waitForSelector(".poly-svg", { timeout: 10000 });
+    await page.click('[data-lock-hit="body"]');
+    await page.click("#next");
+    await page.waitForSelector(".qcard-card", { timeout: 10000 });
+    await page.waitForTimeout(700); // let the debounced draft save (question + picks) land
+    const questionBefore = await page.locator(".qcard-question").textContent();
+    const opts = await page.locator(".qcard-answer").all();
+    await opts[0].click(); // partial pick only - "most preferred", deliberately not confirmed
+    await page.waitForTimeout(700); // debounced save of the pick
+    await page.reload();
+    await page.waitForSelector(".qcard-card, .bridge-root", { timeout: 15000 });
+    assert.strictEqual(await page.locator(".bridge-root").count(), 0, "an already-loaded card must restore directly, never through the bridge animation");
+    await page.waitForSelector(".qcard-card", { timeout: 10000 });
+    const questionAfter = await page.locator(".qcard-question").textContent();
+    assert.strictEqual(questionAfter, questionBefore, "the question must be byte-identical after refresh, never re-generated");
+    assert.strictEqual(await page.locator(".qcard-answer.positive").count(), 1, "the in-progress pick must survive the refresh too");
+    await context.close();
+  });
+
   console.log("E2E: completing onboarding clears the draft (no stale resume after a real profile exists)");
   await test("a completed onboarding never restores a draft on a later refresh", async () => {
     const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });

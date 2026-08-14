@@ -690,7 +690,7 @@ function saveOnboardingDraft() {
 function saveOnboardingDraftNow() {
   clearTimeout(onboardingDraftSaveTimer);
   const draft = {
-    onboardStep, onboardForm, adaptivePhase, adaptiveCards,
+    onboardStep, onboardForm, adaptivePhase, adaptiveCards, adaptiveScenario, adaptiveSelection,
     chapterAnalysis, pathwayOptions, selectedPathwayIndex, pendingPathway, goalInputs,
   };
   api("/api/onboarding/draft", { method: "POST", body: { draft } }).catch(() => {});
@@ -701,11 +701,20 @@ function saveOnboardingDraftNow() {
 // radar step's Continue is clicked (see the "next" handler in
 // renderOnboarding()) - its presence is what distinguishes "still on the
 // static name/radar steps" from "radar is done, in the adaptive AI phase"
-// without needing a separate resume-stage field. A saved "card"/"bridge"
-// phase can't be resumed in place (the in-flight fetch is gone after a
-// refresh), so that case just re-asks via beginScenarioBridge() instead -
-// "analysis"/"goals" restore directly since their data (chapterAnalysis/
-// pathwayOptions) is already in hand.
+// without needing a separate resume-stage field.
+//
+// Round 23 fix: a saved "card" phase with a scenario present means the user
+// was looking at an already-loaded question - restore it EXACTLY as shown
+// (same question, same picks), no bridge, no re-fetch. Round 22 always
+// re-fetched here, which both replayed the bridge animation unnecessarily
+// AND could hand back a genuinely DIFFERENT question (generation isn't
+// deterministic) - confusing and, worse, silently discarding whatever the
+// user had already picked. Only fall back to beginScenarioBridge() (bridge +
+// fresh fetch) when there's truly nothing to show - adaptiveScenario is
+// null exactly when a fetch was still in flight at refresh time: either the
+// very first card (radar Continue never sets it before the first success)
+// or the gap right after confirmCard, which explicitly nulls it out (see
+// that handler) for exactly this reason.
 function restoreOnboardingDraft(draft) {
   resetOnboardState();
   onboardStep = draft.onboardStep || 0;
@@ -724,6 +733,10 @@ function restoreOnboardingDraft(draft) {
   ui = { view: "adaptive" };
   if (draft.adaptivePhase === "analysis" || draft.adaptivePhase === "goals") {
     adaptivePhase = draft.adaptivePhase;
+  } else if (draft.adaptivePhase === "card" && draft.adaptiveScenario) {
+    adaptivePhase = "card";
+    adaptiveScenario = draft.adaptiveScenario;
+    adaptiveSelection = draft.adaptiveSelection || { mostPreferred: null, leastPreferred: null };
   } else {
     beginScenarioBridge();
   }
@@ -2191,6 +2204,15 @@ function renderAdaptive() {
         return;
       }
       adaptiveCards.push(card);
+      // Round 23: null the just-answered scenario/picks out BEFORE the
+      // checkpoint save below - without this, a refresh during the
+      // between-cards fetch would restore straight back into the card just
+      // confirmed (picks and all), letting the user hit "Lanjut" a second
+      // time and double-push it into adaptiveCards. Nulling it makes that
+      // window correctly fall into restoreOnboardingDraft()'s "nothing to
+      // show yet, re-fetch" branch instead.
+      adaptiveScenario = null;
+      adaptiveSelection = { mostPreferred: null, leastPreferred: null };
       // beginScenarioBridge re-evaluates choice-pattern consistency AND axis
       // coverage with the updated card list (via requestScenarioCard), and
       // internally redirects to the pathway bridge once satisfied (min
