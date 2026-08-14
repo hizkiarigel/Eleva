@@ -109,7 +109,7 @@ async function installSpeechSynthesisMock(page) {
     window.__speakLog = [];
     if (!window.speechSynthesis) window.speechSynthesis = { cancel() {} };
     window.speechSynthesis.speak = (utterance) => {
-      window.__speakLog.push({ text: utterance.text, lang: utterance.lang, t: Date.now() });
+      window.__speakLog.push({ text: utterance.text, lang: utterance.lang, volume: utterance.volume, t: Date.now() });
       setTimeout(() => utterance.onstart && utterance.onstart(), 0);
     };
     window.speechSynthesis.cancel = () => {};
@@ -152,6 +152,22 @@ async function reachFirstBridge(page, name) {
   const { server, log } = spawnServer(PORT, {});
   await waitForServer(BASE, log);
   const browser = await chromium.launch({ executablePath: CHROMIUM, headless: true });
+
+  console.log("E2E: unlockBridgeVoiceFallback fires synchronously on the radar Continue click (round 27)");
+  await test("a silent unlock utterance is already in the speechSynthesis log immediately after the click, with no wait needed - the fix for iOS Safari silently dropping deferred speak() calls", async () => {
+    const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await installSpeechSynthesisMock(page);
+    await fillNameAndReachRadar(page, "Unlock Tester");
+    await page.click('[data-lock-hit="body"]');
+    await page.click("#next"); // radar Continue - the earliest point a bridge can appear
+    // No waitForTimeout here on purpose - the unlock call must be synchronous
+    // with the click itself, not deferred through any async chain.
+    const speaks = await speakLog(page);
+    const unlockCalls = speaks.filter((s) => s.text === " " && s.volume === 0);
+    assert.strictEqual(unlockCalls.length, 1, `expected exactly 1 silent unlock call immediately after the click, got ${unlockCalls.length}`);
+    await context.close();
+  });
 
   console.log("E2E: normal playback - voice starts once per bridge appearance");
   await test("the Journey bridge's voice plays exactly once, shortly after it mounts", async () => {
@@ -244,7 +260,10 @@ async function reachFirstBridge(page, name) {
     await mockBridgeAudio(page);
     await reachFirstBridge(page, "Audio Tester 5");
     await page.waitForTimeout(700); // past the start delay
-    const speaks = await speakLog(page);
+    // Round 27: a real click (radar Continue, inside reachFirstBridge) also
+    // fires a one-time silent " " unlock utterance (unlockBridgeVoiceFallback) -
+    // filter it out to isolate the actual fallback voice call.
+    const speaks = (await speakLog(page)).filter((s) => s.text !== " ");
     assert.strictEqual(speaks.length, 1, `expected exactly 1 fallback speak() call, got ${speaks.length}`);
     assert.strictEqual(speaks[0].text, "Selamat datang di Eleva. Di sini, kamu tumbuh sambil jalan.", "fallback must speak the exact same voiceText as the real clip");
     assert.strictEqual(speaks[0].lang, "id-ID", "fallback must speak in Bahasa Indonesia, not the unrelated Practice Test feature's en-US");
@@ -263,7 +282,7 @@ async function reachFirstBridge(page, name) {
     await installSpeechSynthesisMock(page);
     await reachFirstBridge(page, "Audio Tester 6");
     await page.waitForTimeout(700); // past the start delay
-    const speaks = await speakLog(page);
+    const speaks = (await speakLog(page)).filter((s) => s.text !== " "); // exclude the round 27 unlock call
     assert.strictEqual(speaks.length, 1, `expected exactly 1 fallback speak() call on a 404, got ${speaks.length}`);
     await page.waitForSelector(".qcard-card", { timeout: 10000 });
     assert.strictEqual(pageErrors.length, 0, `expected no page errors on a missing audio asset, got ${pageErrors.map(String)}`);

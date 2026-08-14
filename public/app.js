@@ -1362,6 +1362,28 @@ function speakBridgeVoiceFallback(text, gen) {
   window.speechSynthesis.speak(utterance);
 }
 
+// Round 27: iOS Safari (and some other WebKit builds) silently drop
+// speechSynthesis.speak() calls that aren't triggered directly,
+// synchronously, inside a real user-gesture event handler - unlike
+// <audio>.play(), which tolerates a short async gap after a gesture. Our
+// real fallback call above happens deep inside an async chain (a fetch +
+// a 350ms start delay), which fails that requirement on Safari - no
+// error, no onstart, total silence (exactly what was reported: max
+// volume, nothing heard, icon never animates because onstart never
+// fires). Firing one throwaway, silent (volume 0) utterance synchronously
+// from a real click handler satisfies WebKit's gesture requirement for
+// the rest of the page session - documented WebKit workaround, not
+// specific to this codebase. Module-level flag, never reset - this is a
+// page-lifetime unlock, not an app/login-session concern.
+let bridgeVoiceFallbackUnlocked = false;
+function unlockBridgeVoiceFallback() {
+  if (bridgeVoiceFallbackUnlocked || !window.speechSynthesis) return;
+  bridgeVoiceFallbackUnlocked = true;
+  const unlock = new SpeechSynthesisUtterance(" ");
+  unlock.volume = 0;
+  window.speechSynthesis.speak(unlock);
+}
+
 // Audio equivalent of preloadNextBridgeImage's new Image().src=... idiom.
 // Unlike Image, a detached Audio() isn't reliably guaranteed to start
 // fetching from just the .src assignment across browsers - .load() makes
@@ -2182,6 +2204,12 @@ function renderOnboarding() {
   document.getElementById("next").addEventListener("click", () => {
     if (!isStepValid(onboardStep)) return;
     if (!last) { onboardStep++; renderOnboarding(); return; }
+    // Round 27: unlock the speechSynthesis fallback voice HERE, synchronously
+    // inside this real click - the earliest point a bridge can appear. See
+    // unlockBridgeVoiceFallback()'s own comment for why this must happen
+    // synchronously in a gesture handler, not anywhere in the async chain
+    // beginScenarioBridge() kicks off below.
+    unlockBridgeVoiceFallback();
     // Static steps done - freeze the pre-calibration radar for audit, then
     // hand off to the adaptive AI-driven phase. beginScenarioBridge() sets
     // adaptivePhase="bridge" and renders itself, no separate render() call
@@ -2386,6 +2414,7 @@ function renderAdaptive() {
       });
     });
     document.getElementById("confirmCard")?.addEventListener("click", () => {
+      unlockBridgeVoiceFallback(); // round 27 - defensive redundancy, idempotent (see the radar "next" handler's own call)
       const card = {
         scenario: adaptiveScenario.scenario, options: adaptiveScenario.options,
         mostPreferred: adaptiveSelection.mostPreferred, leastPreferred: adaptiveSelection.leastPreferred,
