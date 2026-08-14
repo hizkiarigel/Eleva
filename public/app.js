@@ -1329,21 +1329,6 @@ function renderCounterPillDOM() {
   const nextBtn = document.getElementById("next");
   if (nextBtn) nextBtn.disabled = !isStepValid(onboardStep);
 }
-// Toast (Growth Focus Radar handoff): shown at most twice per session, only
-// when a single drag gesture's cumulative change reaches +/-2 - teaches the
-// redistribution concept without nagging on every small tweak.
-let radarToastShownCount = 0;
-let radarToastTimer = null;
-function showRadarToast(key, delta) {
-  const el = document.getElementById("radarToast");
-  if (!el || radarToastShownCount >= 2) return;
-  radarToastShownCount++;
-  const sign = delta > 0 ? "+" : "";
-  el.textContent = `${sign}${Math.round(delta)} ${statLabel(key)} membutuhkan ruang dari area lain.`;
-  el.classList.add("visible");
-  clearTimeout(radarToastTimer);
-  radarToastTimer = setTimeout(() => el.classList.remove("visible"), 2600);
-}
 // Warning bubble: tapping a 4th lock while 3 are already locked doesn't
 // lock it - a centered bubble explains why instead of a silent no-op.
 let radarWarningTimer = null;
@@ -1386,7 +1371,7 @@ function attachPolygonHandlers() {
   if (!svg) return;
   let draggingKey = null;
   let dragBase = null; // radar snapshot at gesture start - each move recomputes from it
-  let downX = 0, downY = 0, moved = false, wasLimited = false, toastArmedThisDrag = false;
+  let downX = 0, downY = 0, moved = false, wasLimited = false;
   const TAP_THRESHOLD = 8; // px of pointer travel: below = tap, above = drag
   function setLimitHint(key) {
     const el = document.getElementById("limitHint");
@@ -1410,14 +1395,6 @@ function attachPolygonHandlers() {
     const res = applySynergyDrag(dragBase, draggingKey, polyValueFromRadius(dist), onboardForm.locked);
     onboardForm.radar = res.values;
     setLimitHint(res.limited ? draggingKey : null);
-    // Cumulative change this GESTURE (from drag-start snapshot), not
-    // per-move delta - fires the toast once, the first time it crosses the
-    // +/-2 threshold, not on every subsequent pixel of movement.
-    const cumulative = onboardForm.radar[draggingKey] - dragBase[draggingKey];
-    if (!toastArmedThisDrag && Math.abs(cumulative) >= 2) {
-      toastArmedThisDrag = true;
-      showRadarToast(draggingKey, cumulative);
-    }
     updatePolygonDOM();
   }
   svg.querySelectorAll(".poly-handle").forEach((handle) => {
@@ -1432,7 +1409,7 @@ function attachPolygonHandlers() {
       }
       draggingKey = key;
       dragBase = { ...onboardForm.radar };
-      downX = e.clientX; downY = e.clientY; moved = false; wasLimited = false; toastArmedThisDrag = false;
+      downX = e.clientX; downY = e.clientY; moved = false; wasLimited = false;
       const el = document.getElementById("limitHint");
       if (el) el.style.display = "none";
       handle.setPointerCapture(e.pointerId);
@@ -1537,7 +1514,6 @@ function renderOnboarding() {
       <p class="mono" id="limitHint" style="font-size:12px;color:var(--accent);margin-top:10px;text-align:center;display:none"></p>
       <div id="radarDetailSlot">${detailCardHTML()}</div>
       <div id="radarCounterSlot" class="radar-counter-slot">${counterPillHTML()}</div>
-      <div class="radar-toast" id="radarToast"></div>
       <div class="radar-max-lock-warning" id="radarMaxLockWarning">Maksimal 3 prioritas.<br/>Buka salah satu prioritas dulu.</div>`;
   }
 

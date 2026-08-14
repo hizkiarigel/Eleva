@@ -165,8 +165,8 @@ async function test(name, fn) {
     );
   });
 
-  console.log("E2E: drag redistribution (synergy engine, unchanged) + the >=2 delta toast");
-  await test("dragging an axis by >=2 redistributes via the existing synergy engine and fires the toast once", async () => {
+  console.log("E2E: drag redistribution (synergy engine, unchanged)");
+  await test("dragging an axis by >=2 redistributes via the existing synergy engine, with no toast (revision 1: removed as redundant with the counter pill)", async () => {
     const svgBox = await page.locator(".poly-svg").boundingBox();
     const handleBox = await page.locator('[data-stat="autonomy"]').boundingBox();
     const beforeSum = await page.evaluate(() =>
@@ -187,9 +187,7 @@ async function test(name, fn) {
     assert.strictEqual(Math.round(afterSum), Math.round(beforeSum), `total must stay zero-sum: ${beforeSum} -> ${afterSum}`);
     const autonomyVal = Number(await page.locator('text[data-value-for="autonomy"]').textContent());
     assert.ok(autonomyVal > 5, `autonomy should have grown from a drag toward the edge, got ${autonomyVal}`);
-    assert.ok(await page.evaluate(() => document.getElementById("radarToast").classList.contains("visible")), "toast must show after a >=2 delta drag");
-    const toastText = await page.locator("#radarToast").textContent();
-    assert.ok(/^\+\d+ Autonomy membutuhkan ruang dari area lain\.$/.test(toastText), `toast copy wrong: ${toastText}`);
+    assert.strictEqual(await page.locator("#radarToast").count(), 0, "the drag toast was removed (founder feedback: redundant with the counter pill)");
   });
 
   console.log("E2E: Help sheet + per-axis info sheet (shared state slot)");
