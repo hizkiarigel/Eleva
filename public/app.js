@@ -1148,6 +1148,20 @@ const ONBOARDING_BRIDGES = {
     // distant mountains/horizon, L3 golden central realm + blue/emerald
     // side realms, L4 fog/cloud atmosphere, L5 foreground traveler+platform.
   },
+  // Final stage (7/7) - unlike stages 1-6, this does NOT lead to another
+  // personalized question, hence nextType: "pathway_selection" (not
+  // "personalized_question"). Its footer copy is also its own baked into
+  // the artwork ("Membaca arah perjalananmu...", not "Menyiapkan
+  // pertanyaan berikutnya...") - do not treat as interchangeable with the
+  // other 6 stages' loading footer.
+  pathway: {
+    order: 7,
+    name: "Pathway — The Route",
+    image: "07-pathway", // -> /onboarding/bridges/07-pathway.webp
+    headline: "Cara bertumbuhmu membentuk pathway.",
+    voiceText: "Setiap orang punya cara tumbuh yang beda. Itu yang jadi pathway-mu.",
+    nextType: "pathway_selection",
+  },
 };
 
 // Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both
