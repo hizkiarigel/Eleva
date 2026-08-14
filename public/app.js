@@ -1100,6 +1100,17 @@ const ONBOARDING_BRIDGES = {
     voiceText: "Selamat datang di Eleva. Di sini, kamu tumbuh sambil jalan.",
     nextType: "personalized_question",
   },
+  // Full order (7 stages, registered one at a time as art arrives): 1
+  // Journey, 2 Quest, 3 Evidence, 4 Character, 5 Adaptive, 6 META, 7
+  // Pathway. Stages 2-4 and 6-7 not yet registered.
+  adaptive: {
+    order: 5,
+    name: "Adaptive AI — The Guide",
+    image: "05-adaptive", // -> /onboarding/bridges/05-adaptive.webp
+    headline: "Quest berubah saat kamu berubah.",
+    voiceText: "Kalau kondisi kamu berubah, langkah berikutnya ikut menyesuaikan.",
+    nextType: "personalized_question",
+  },
 };
 
 // Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both
