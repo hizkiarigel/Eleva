@@ -154,6 +154,18 @@ async function test(name, fn) {
     await page.waitForTimeout(150);
   });
 
+  console.log("E2E: round 7 (founder feedback) - uniform 2px breathing margin on all four sides");
+  await test("`.shell-radar` sits 2px in from each real viewport edge instead of flush against it", async () => {
+    const { rect, viewportW, viewportH } = await page.evaluate(() => {
+      const r = document.querySelector(".shell-radar").getBoundingClientRect();
+      return { rect: { top: r.top, left: r.left, right: r.right, bottom: r.bottom }, viewportW: window.innerWidth, viewportH: window.innerHeight };
+    });
+    assert.strictEqual(rect.top, 2, `top margin should be exactly 2px, got ${rect.top}`);
+    assert.strictEqual(rect.left, 2, `left margin should be exactly 2px, got ${rect.left}`);
+    assert.strictEqual(viewportW - rect.right, 2, `right margin should be exactly 2px, got ${viewportW - rect.right}`);
+    assert.ok(Math.abs(viewportH - rect.bottom - 2) < 1, `bottom margin should be ~2px, got ${viewportH - rect.bottom}`);
+  });
+
   console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, compressed to avoid scrolling, with a scroll safety net");
   await test("the screen fills the real viewport edge-to-edge and needs no scrolling at any realistic height, but the safety net keeps Continue reachable if it ever doesn't fit", async () => {
     // Round 3 (repeated real-device report): overflow:hidden + an exact

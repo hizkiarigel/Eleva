@@ -89,8 +89,10 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
      real rendered height now equals the true, JS-measured --vh height,
      and margin-top:auto places the button inside the actually-visible
      area instead of past its edge. */
-  position: fixed; inset: 0; height: calc(var(--vh, 1dvh) * 100); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
-  max-width: 560px; margin: 0 auto; display: flex; flex-direction: column;
+  /* Founder: a uniform 2px breathing margin on all four sides, instead of
+     sitting perfectly flush against the real screen edges. */
+  position: fixed; inset: 2px; height: calc(var(--vh, 1dvh) * 100 - 4px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  max-width: 556px; margin: 0 auto; display: flex; flex-direction: column;
   /* Round 4 (repeated real-device report): CSS dvh itself has proven
      unreliable on the founder's real Safari - every "Ndvh" below is now
      calc(var(--vh, 1dvh) * N), where --vh is measured directly from
