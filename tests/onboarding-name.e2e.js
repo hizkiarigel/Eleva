@@ -206,6 +206,7 @@ async function test(name, fn) {
     await page.fill("#fld", "  Rigel  ");
     await page.waitForTimeout(100);
     const nameHeaderRect = await page.locator(".radar-header-row").boundingBox();
+    const nameStepDotsRect = await page.locator(".step-dots").boundingBox();
     const nameNavRect = await page.locator(".onboard-nav-row").boundingBox();
     await page.click("#next");
     await page.waitForSelector(".poly-svg", { timeout: 10000 });
@@ -217,9 +218,17 @@ async function test(name, fn) {
     // onboarding steps (founder: "kerasa banget perbedaannya kalau kalimat
     // header dan button footer bergeser posisinya"). Confirm it here.
     const radarHeaderRect = await page.locator(".radar-header-row").boundingBox();
+    const radarStepDotsRect = await page.locator(".step-dots").boundingBox();
     const radarNavRect = await page.locator(".onboard-nav-row").boundingBox();
     for (const key of ["x", "y", "width", "height"]) {
       assert.strictEqual(nameHeaderRect[key], radarHeaderRect[key], `header row .${key} should match between name and radar steps, got name=${nameHeaderRect[key]} radar=${radarHeaderRect[key]}`);
+    }
+    // Round 17: the gap between the header row and the progress bar was
+    // also matched to radar's flat 6px (was compressing up to 16px on
+    // this screen) - confirm the step-dots bar itself now sits at the
+    // same Y position too.
+    for (const key of ["x", "y", "width", "height"]) {
+      assert.strictEqual(nameStepDotsRect[key], radarStepDotsRect[key], `step-dots .${key} should match between name and radar steps, got name=${nameStepDotsRect[key]} radar=${radarStepDotsRect[key]}`);
     }
     for (const key of ["x", "y", "width", "height"]) {
       assert.strictEqual(nameNavRect[key], radarNavRect[key], `Kembali/Lanjut row .${key} should match between name and radar steps, got name=${nameNavRect[key]} radar=${radarNavRect[key]}`);

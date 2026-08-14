@@ -100,7 +100,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
      lean on the overflow-y:auto safety net above instead of compressing
      all the way to floor, matching the same "compression primary, scroll
      backup" split already proven on the radar screen. */
-  --sn-progress-mt: clamp(5px, calc(var(--vh, 1dvh) * 2.1), min(16px, calc(16 / 390 * 100vw)));
   --sn-title-mt: clamp(8px, calc(var(--vh, 1dvh) * 3.7), min(28px, calc(28 / 390 * 100vw)));
   --sn-title-mb: clamp(5px, calc(var(--vh, 1dvh) * 2.1), min(16px, calc(16 / 390 * 100vw)));
   --sn-explain-mb: clamp(8px, calc(var(--vh, 1dvh) * 3.7), min(28px, calc(28 / 390 * 100vw)));
@@ -117,7 +116,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    Only these two scoped overrides are needed - .radar-header-row/
    .radar-help-btn/.step-dots are already bare (unscoped) classes. */
 .shell-name .radar-header-row { flex: none; }
-.shell-name .step-dots { margin-top: var(--sn-progress-mt); margin-bottom: 0; flex: none; }
+.shell-name .step-dots { margin-top: 6px; margin-bottom: 0; flex: none; }
 .shell-name .onboard-nav-row { margin-top: auto; flex: none; }
 .shell-name .btn-primary { padding: 8px 20px; min-height: 0; }
 .name-title { flex: none; font-family: "Fraunces", serif; font-weight: 500; font-size: var(--sn-title-font); line-height: 1.1; color: #f1ebdd; margin: var(--sn-title-mt) 0 var(--sn-title-mb); }
