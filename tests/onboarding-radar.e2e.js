@@ -216,6 +216,35 @@ async function test(name, fn) {
     await page.waitForTimeout(120);
   });
 
+  console.log("E2E: round 8 (founder feedback) - heptagon grown further (POLY_MAXR 128->136), value numbers drop the trailing '.0'");
+  await test("default axis values render as bare '5' (no '.0'), and the enlarged heptagon still fits inside the SVG's own viewBox with no clipping/overflow at the narrowest supported width", async () => {
+    const bodyValueText = await page.locator('text[data-value-for="body"]').textContent();
+    assert.strictEqual(bodyValueText, "5", `whole-number values must render as bare "5", not "5.0" - got "${bodyValueText}"`);
+
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.waitForTimeout(150);
+    const { overflowsViewBox, hOverflow, margins } = await page.evaluate(() => {
+      const svg = document.getElementById("polySvg");
+      const vb = svg.viewBox.baseVal;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      svg.querySelectorAll(".poly-label, .axis-info-hit, .lock-btn-hit, .poly-outer").forEach((el) => {
+        const b = el.getBBox();
+        minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x + b.width); maxY = Math.max(maxY, b.y + b.height);
+      });
+      const margins = { left: minX - vb.x, top: minY - vb.y, right: (vb.x + vb.width) - maxX, bottom: (vb.y + vb.height) - maxY };
+      return {
+        overflowsViewBox: margins.left < 0 || margins.top < 0 || margins.right < 0 || margins.bottom < 0,
+        hOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        margins,
+      };
+    });
+    assert.strictEqual(overflowsViewBox, false, `every label/icon/outer-ring must stay inside the SVG viewBox at 360px width, got margins ${JSON.stringify(margins)}`);
+    assert.strictEqual(hOverflow, 0, `must not overflow the page horizontally at 360px width, got ${hOverflow}px`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(150);
+  });
+
   console.log("E2E: layout + copy (handoff v5, 'Growth Focus Radar')");
   await test("header row, progress bar, trade-off strip, and lock-instructions row all render with the exact handoff copy", async () => {
     assert.ok(await page.locator("text=Ke mana kamu mau").count(), "heading missing");

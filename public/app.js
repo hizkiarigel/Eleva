@@ -185,15 +185,23 @@ function maturityTier(growthSessions) {
 // guaranteed) ---
 const POLY_ORDER = ["body", "growth", "livelihood", "emotional", "social", "purpose", "autonomy"];
 const POLY_TOTAL = 35; // 7 axes x default 5 - the fixed zero-sum budget
-// POLY_MAXR grown from 110->128 (founder feedback, "perbesar heptagon") -
-// this is the largest safe increase that still keeps axis labels/icons
-// inside the SVG's own viewBox on the narrowest supported phone width
-// (360px) - a literal 1.8x isn't physically possible on a phone-width
-// screen without labels clipping past the edge or the SVG itself
-// overflowing horizontally, which would violate the no-scroll requirement
-// from the previous round. POLY_VIEW_MIN/SIZE below were widened to match
-// (see the "Center invariant" comment).
-const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 128, POLY_MINR = 15;
+// POLY_MAXR: 110 -> 128 (round 2) -> 136 (round 8, founder re-asked for
+// "1.8x"). Verified empirically (Playwright getBBox() of every label/icon
+// vs the SVG's own viewBox, at 360/375/390px widths - the narrowest
+// supported phones): at 128 the tightest element (Livelihood's (i) info
+// icon) had only ~13 viewBox units of clearance to the right edge; the
+// per-axis info-icon offset (axisLabelLayout's iconX gap, see below) was
+// trimmed 11->7 to claw back a few units, and POLY_MAXR pushed from 128 to
+// 136 - the largest value that still leaves a positive, non-zero clipping
+// margin (~9 units, confirmed via the same script) on every label/icon at
+// the narrowest supported width. A literal 1.8x is still not physically
+// possible on a phone-width screen: at 128 the heptagon already used ~61%
+// of the SVG box's width, and label/icon text needs real room *outside*
+// the heptagon itself - 180% would mean the heptagon alone exceeds the
+// entire box, leaving literally zero space for any label. 136 is the
+// honest ceiling until axis labels are redesigned to need less side
+// clearance (e.g. dropping the (i) icons or moving labels off-canvas).
+const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 136, POLY_MINR = 15;
 const POLY_STEP_DEG = 360 / POLY_ORDER.length; // heptagon: ~51.43deg per axis
 // Square viewBox with padding so axis-name labels (anchored outward) never
 // clip; kept square so pointer->viewBox mapping stays a uniform scale.
@@ -207,6 +215,14 @@ const POLY_STEP_DEG = 360 / POLY_ORDER.length; // heptagon: ~51.43deg per axis
 // the same clearance from the viewBox edge as before, just further out.
 const POLY_VIEW_MIN = -60, POLY_VIEW_SIZE = 420;
 const DEFAULT_RADAR = { body: 5, growth: 5, livelihood: 5, emotional: 5, social: 5, purpose: 5, autonomy: 5 };
+
+// Founder feedback: no trailing ".0" clutter on whole numbers in the value
+// nodes - "5" not "5.0" - but a genuinely fractional value (mid-drag, e.g.
+// 5.8) still needs its one decimal place.
+function formatRadarValue(value) {
+  const s = Number(value).toFixed(1);
+  return s.endsWith(".0") ? s.slice(0, -2) : s;
+}
 
 function polyRadius(value) {
   const v = Math.max(POLY_MIN, Math.min(POLY_MAX, value));
@@ -1168,7 +1184,7 @@ function renderPolygonSVG() {
     // small a touch target.
     const maxChars = Math.max(...L.lines.map((l) => l.length));
     const w = maxChars * MONO_CHAR_W;
-    const iconX = L.x + w / 2 + 11;
+    const iconX = L.x + w / 2 + 7;
     const iconY = L.y - 3.5;
     return `<text x="${L.x.toFixed(1)}" y="${L.y.toFixed(1)}" class="poly-label ${isLocked ? "locked" : ""}" data-label-for="${k}" text-anchor="${L.anchor}">${tspans}</text>
       <g class="axis-info-btn" data-axis-info="${k}">
@@ -1201,7 +1217,7 @@ function renderPolygonSVG() {
     const isActive = !isLocked && activeAxisKey === k;
     const dotClass = isLocked ? "locked" : isActive ? "active" : "";
     return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" class="poly-dot ${dotClass}" data-dot-for="${k}" />
-      <text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="poly-value ${isLocked ? "locked" : ""}" data-value-for="${k}" text-anchor="middle">${Number(radar[k]).toFixed(1)}</text>
+      <text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="poly-value ${isLocked ? "locked" : ""}" data-value-for="${k}" text-anchor="middle">${formatRadarValue(radar[k])}</text>
       <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="19" class="poly-handle" data-stat="${k}" />`;
   }).join("");
   const centerDot = `<circle cx="${POLY_CENTER}" cy="${POLY_CENTER}" r="3" class="poly-center" />`;
@@ -1271,7 +1287,7 @@ function updatePolygonDOM() {
     if (valueText) {
       valueText.setAttribute("x", x.toFixed(1));
       valueText.setAttribute("y", (y + 3).toFixed(1));
-      valueText.textContent = Number(onboardForm.radar[k]).toFixed(1);
+      valueText.textContent = formatRadarValue(onboardForm.radar[k]);
       valueText.classList.toggle("locked", isLocked);
     }
     const labelText = svg.querySelector(`text[data-label-for="${k}"]`);

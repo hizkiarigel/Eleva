@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 45 files · ~361,355 words
+- 45 files · ~361,872 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 566 nodes · 881 edges · 38 communities (32 shown, 6 thin omitted)
+- 567 nodes · 884 edges · 38 communities (32 shown, 6 thin omitted)
 - Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 103 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d5745a39`
+- Built from commit: `4cef2e09`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -25,7 +25,7 @@
 - Eleva_Prototype.jsx
 - package.json
 - render
-- attachPolygonHandlers
+- nutritionFlowHTML
 - jobMatch.js
 - practiceTest.js
 - practicetest.e2e.js
@@ -49,7 +49,7 @@
 - soma-nutrition-flow.md
 - applyCalibrationCard
 - onboarding-radar.e2e.js
-- questSummaryCard
+- ensureCountdownTicking
 - Adaptive Scenario Cards
 - 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
 - renderAuth
@@ -63,8 +63,8 @@
 6. `completedResultCardHTML()` - 11 edges
 7. `callClaude()` - 11 edges
 8. `renderAuth()` - 10 edges
-9. `graphify Skill Definition (SKILL.md)` - 10 edges
-10. `statLabel()` - 9 edges
+9. `renderPolygonSVG()` - 10 edges
+10. `graphify Skill Definition (SKILL.md)` - 10 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Growth-Gate (12-word deterministic check)` --semantically_similar_to--> `Discrete Confidence-Score Rubric (0.95/0.85/0.75/0.65/0.55)`  [INFERRED] [semantically similar]
@@ -125,12 +125,12 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.32
-Nodes (12): api(), authFinish(), boot(), buildPathwayOptions(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder(), pickRandomSubPathway() (+4 more)
+Cohesion: 0.22
+Nodes (15): api(), boot(), buildPathwayOptions(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder(), helpBtnHTML(), openNutritionFlow() (+7 more)
 
-### Community 10 - "attachPolygonHandlers"
-Cohesion: 0.29
-Nodes (11): attachPolygonHandlers(), clearActiveAxisNow(), counterPillHTML(), isStepValid(), polyValueFromRadius(), renderCounterPillDOM(), renderOnboarding(), setActiveAxis() (+3 more)
+### Community 10 - "nutritionFlowHTML"
+Cohesion: 0.67
+Nodes (3): nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML()
 
 ### Community 11 - "jobMatch.js"
 Cohesion: 0.08
@@ -149,8 +149,8 @@ Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
 ### Community 18 - "esc"
-Cohesion: 0.08
-Nodes (38): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML() (+30 more)
+Cohesion: 0.09
+Nodes (36): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML() (+28 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -169,8 +169,8 @@ Cohesion: 0.40
 Nodes (5): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence)
 
 ### Community 24 - "renderPolygonSVG"
-Cohesion: 0.23
-Nodes (12): axisLabelLayout(), characterScreenHTML(), heptagonPath(), lockIconSVG(), polyPoint(), polyRadius(), radarSheetsHTML(), radiusPoint() (+4 more)
+Cohesion: 0.13
+Nodes (24): attachPolygonHandlers(), axisLabelLayout(), characterScreenHTML(), clearActiveAxisNow(), counterPillHTML(), formatRadarValue(), heptagonPath(), isStepValid() (+16 more)
 
 ### Community 25 - "Eleva README.md"
 Cohesion: 0.16
@@ -200,9 +200,9 @@ Nodes (6): applyCalibrationCard(), applySynergyDrag(), clampCalibrationDelta(), 
 Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 34 - "questSummaryCard"
-Cohesion: 0.25
-Nodes (8): ensureCountdownTicking(), formatCountdown(), nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
+### Community 34 - "ensureCountdownTicking"
+Cohesion: 0.67
+Nodes (3): ensureCountdownTicking(), formatCountdown(), tickCountdowns()
 
 ### Community 35 - "Adaptive Scenario Cards"
 Cohesion: 0.40
@@ -213,8 +213,8 @@ Cohesion: 0.50
 Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
 
 ### Community 37 - "renderAuth"
-Cohesion: 0.32
-Nodes (8): authConsentInfoModalHTML(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
+Cohesion: 0.28
+Nodes (9): authConsentInfoModalHTML(), authFinish(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash() (+1 more)
 
 ## Knowledge Gaps
 - **177 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+172 more)

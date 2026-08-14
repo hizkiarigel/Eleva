@@ -9,7 +9,7 @@
   "7": "Eleva_Prototype.jsx",
   "8": "package.json",
   "9": "render",
-  "10": "attachPolygonHandlers",
+  "10": "nutritionFlowHTML",
   "11": "jobMatch.js",
   "12": "practiceTest.js",
   "13": "practicetest.e2e.js",
@@ -33,7 +33,7 @@
   "31": "soma-nutrition-flow.md",
   "32": "applyCalibrationCard",
   "33": "onboarding-radar.e2e.js",
-  "34": "questSummaryCard",
+  "34": "ensureCountdownTicking",
   "35": "Adaptive Scenario Cards",
   "36": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)",
   "37": "renderAuth"

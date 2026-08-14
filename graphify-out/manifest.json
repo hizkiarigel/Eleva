@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786684333.6098938,
-    "ast_hash": "29774079922f6904d360d28ff292927a",
+    "mtime": 1786688848.835537,
+    "ast_hash": "9c4abaa54098ae8bd18565d6525fb7a2",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -265,8 +265,8 @@
     "semantic_hash": ""
   },
   "tests/onboarding-radar.e2e.js": {
-    "mtime": 1786687795.099561,
-    "ast_hash": "7668f4801d5fad7d865f0d45121bf1cc",
+    "mtime": 1786688886.667536,
+    "ast_hash": "565d9ec3704ffa51f0cdc789a9142c54",
     "semantic_hash": ""
   }
 }
