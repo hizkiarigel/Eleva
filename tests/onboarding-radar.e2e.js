@@ -154,15 +154,15 @@ async function test(name, fn) {
     await page.waitForTimeout(150);
   });
 
-  console.log("E2E: round 7 (founder feedback) - uniform 2px breathing margin on all four sides");
-  await test("`.shell-radar` sits 2px in from each real viewport edge instead of flush against it", async () => {
+  console.log("E2E: round 7/7b (founder feedback) - breathing margin on all sides, widened to 4px on left/right");
+  await test("`.shell-radar` sits 2px in from the top/bottom real viewport edges and 4px in from the left/right edges", async () => {
     const { rect, viewportW, viewportH } = await page.evaluate(() => {
       const r = document.querySelector(".shell-radar").getBoundingClientRect();
       return { rect: { top: r.top, left: r.left, right: r.right, bottom: r.bottom }, viewportW: window.innerWidth, viewportH: window.innerHeight };
     });
     assert.strictEqual(rect.top, 2, `top margin should be exactly 2px, got ${rect.top}`);
-    assert.strictEqual(rect.left, 2, `left margin should be exactly 2px, got ${rect.left}`);
-    assert.strictEqual(viewportW - rect.right, 2, `right margin should be exactly 2px, got ${viewportW - rect.right}`);
+    assert.strictEqual(rect.left, 4, `left margin should be exactly 4px, got ${rect.left}`);
+    assert.strictEqual(viewportW - rect.right, 4, `right margin should be exactly 4px, got ${viewportW - rect.right}`);
     assert.ok(Math.abs(viewportH - rect.bottom - 2) < 1, `bottom margin should be ~2px, got ${viewportH - rect.bottom}`);
   });
 
