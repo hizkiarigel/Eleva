@@ -1219,6 +1219,23 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .bridge-error-title { font-family: "Fraunces", serif; font-size: 19px; color: #f1eee8; margin: 0; }
 .bridge-error-sub { font-size: 13.5px; color: #948f9c; margin: 0; }
 
+/* Round 26: top-right speaker icon signaling there's voice narration on
+   this bridge - pulsing wave rings while audio (real file or the
+   speechSynthesis fallback) is actually audible, static/dim otherwise so
+   it never claims sound is playing when it isn't. Decorative only. */
+.bridge-audio-icon {
+  position: absolute; top: 24px; right: 20px; z-index: 1; width: 26px; height: 26px;
+  opacity: .55; pointer-events: none;
+}
+.bridge-audio-wave { opacity: 0; transform-origin: 4px 12px; }
+.bridge-audio-icon-playing .bridge-audio-wave-1 { animation: bridge-audio-wave 1.6s ease-out infinite; }
+.bridge-audio-icon-playing .bridge-audio-wave-2 { animation: bridge-audio-wave 1.6s ease-out .3s infinite; }
+@keyframes bridge-audio-wave {
+  0% { opacity: 0; transform: scale(.85); }
+  30% { opacity: .8; }
+  100% { opacity: 0; transform: scale(1.15); }
+}
+
 /* object-fit:contain, not cover: initial build used cover on the
    assumption real (taller-than-9:16) phones would only crop side scenery,
    safely clear of the centered text - verified against an actual mobile
@@ -1235,6 +1252,8 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   .bridge-root, .bridge-root .bridge-img, .bridge-root .bridge-overlay { transition-duration: .2s !important; }
   .bridge-root.bridge-in .bridge-img { transform: none; } /* fade only, no zoom/drift */
   .bridge-overlay { display: none; } /* the breathing light is itself motion - skip it under reduced motion */
+  .bridge-audio-wave { animation: none !important; }
+  .bridge-audio-icon-playing .bridge-audio-wave { opacity: .8; } /* static "on" look instead of pulsing */
 }
 
 /* Dev-only preview bar (round 19, gated server-side via /api/env - see

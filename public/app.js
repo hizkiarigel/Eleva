@@ -1331,8 +1331,35 @@ function ensureBridgeAudioEl() {
   if (!bridgeAudioEl) {
     bridgeAudioEl = new Audio();
     bridgeAudioEl.preload = "auto";
+    bridgeAudioEl.addEventListener("ended", () => setBridgeAudioIconPlaying(false));
   }
   return bridgeAudioEl;
+}
+
+// Toggles the pulsing wave-ring animation on the top-right speaker icon
+// (round 26) - looked up fresh each call, not cached, since renderBridge()
+// recreates the icon's DOM node on every mount.
+function setBridgeAudioIconPlaying(isPlaying) {
+  document.getElementById("bridgeAudioIcon")?.classList.toggle("bridge-audio-icon-playing", isPlaying);
+}
+
+// Round 26: temporary audible fallback while no real static mp3 files exist
+// yet (public/audio/onboarding/ is empty - no TTS provider is configured,
+// see scripts/generate-onboarding-audio.js). Speaks the SAME voiceText via
+// the browser-native speechSynthesis API so testing/demoing isn't silent in
+// the meantime. A dedicated function, not a reuse of speakScript() (Practice
+// Test's own English-only, play-count-limited helper) - different language,
+// different feature, out of scope to touch. Automatically superseded the
+// moment real audio files exist - this only ever fires when the real
+// <audio> element's load/play genuinely fails.
+function speakBridgeVoiceFallback(text, gen) {
+  if (!window.speechSynthesis || !text) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "id-ID";
+  utterance.onstart = () => { if (gen === bridgeAudioGen) setBridgeAudioIconPlaying(true); };
+  utterance.onend = () => { if (gen === bridgeAudioGen) setBridgeAudioIconPlaying(false); };
+  utterance.onerror = () => { if (gen === bridgeAudioGen) setBridgeAudioIconPlaying(false); };
+  window.speechSynthesis.speak(utterance);
 }
 
 // Audio equivalent of preloadNextBridgeImage's new Image().src=... idiom.
@@ -1364,6 +1391,8 @@ function preloadNextBridgeAudio(stageKey) {
 function stopBridgeAudio(withFade) {
   bridgeAudioFadeToken += 1;
   const token = bridgeAudioFadeToken;
+  window.speechSynthesis?.cancel(); // abrupt cut, no fade support here - acceptable for the temporary fallback voice
+  setBridgeAudioIconPlaying(false);
   const el = bridgeAudioEl;
   if (!el || el.paused || el.ended || !withFade) {
     if (el) { el.pause(); el.currentTime = 0; el.volume = 1; }
@@ -1387,12 +1416,11 @@ function stopBridgeAudio(withFade) {
 // renderBridge() whenever bridgeStageKey actually changes (see the guard
 // there). Fades out whatever the previous stage was playing, then starts
 // this stage's clip after a short delay so it feels synced with the visual
-// entrance rather than an instant jump-cut. Fails completely silently on
-// autoplay rejection or a missing/broken asset - voice is an enhancement,
-// never a dependency for onboarding to proceed (the .catch(()=>{}) below is
-// the entire autoplay-rejection handling; a 404/decode error fires the
-// media "error" event, which nothing listens to, so it silently never
-// plays either).
+// entrance rather than an instant jump-cut. Fails over to
+// speakBridgeVoiceFallback() (round 26) on autoplay rejection OR a missing/
+// broken asset - voice is an enhancement, never a dependency for onboarding
+// to proceed, but "enhancement" no longer means "silence" now that a free
+// fallback voice exists.
 function startBridgeAudio(stageKey) {
   clearBridgeAudioTimers();
   stopBridgeAudio(true);
@@ -1403,12 +1431,23 @@ function startBridgeAudio(stageKey) {
   warmBridgeAudio(cfg.audio);
   bridgeAudioTimers.push(setTimeout(() => {
     if (gen !== bridgeAudioGen) return; // superseded before the delay elapsed
+    // <audio>'s "error" event (load/decode failure, e.g. a 404) and
+    // .play()'s promise rejection (autoplay policy, or NotSupportedError)
+    // can both fire for the same failure, in either order - this guard
+    // ensures the fallback voice only ever speaks once per attempt.
+    let fallbackTried = false;
+    const tryFallback = () => {
+      if (fallbackTried || gen !== bridgeAudioGen) return;
+      fallbackTried = true;
+      speakBridgeVoiceFallback(cfg.voiceText, gen);
+    };
     const el = ensureBridgeAudioEl();
     el.pause();
     el.currentTime = 0;
     el.volume = 1;
+    el.onerror = tryFallback;
     el.src = cfg.audio;
-    el.play().catch(() => {});
+    el.play().then(() => setBridgeAudioIconPlaying(true), tryFallback);
   }, BRIDGE_AUDIO_START_DELAY_MS));
 }
 
@@ -1546,6 +1585,13 @@ function renderBridge() {
     <div class="bridge-root" id="bridgeRoot">
       <img class="bridge-img" src="${ONBOARDING_BRIDGE_BASE_PATH}${cfg.image}.webp" alt="${esc(cfg.headline)}" />
       <div class="bridge-overlay"></div>
+      <div class="bridge-audio-icon" id="bridgeAudioIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M4 9v6h4l5 4V5L8 9H4z" fill="#f1eee8" />
+          <path class="bridge-audio-wave bridge-audio-wave-1" d="M16 8.5c1.2 1 2 2.4 2 3.5s-.8 2.5-2 3.5" stroke="#f1eee8" stroke-width="1.6" stroke-linecap="round" fill="none" />
+          <path class="bridge-audio-wave bridge-audio-wave-2" d="M18.5 6c2 1.7 3.3 4 3.3 6s-1.3 4.3-3.3 6" stroke="#f1eee8" stroke-width="1.6" stroke-linecap="round" fill="none" />
+        </svg>
+      </div>
       ${bridgeErrorRetry ? `
       <div class="bridge-error">
         <p class="bridge-error-title">Belum berhasil menyiapkan langkah berikutnya.</p>

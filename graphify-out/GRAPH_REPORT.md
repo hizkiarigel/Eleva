@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 50 files · ~451,872 words
+- 50 files · ~452,693 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 643 nodes · 992 edges · 45 communities (38 shown, 7 thin omitted)
+- 647 nodes · 1001 edges · 42 communities (35 shown, 7 thin omitted)
 - Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 107 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `6028f48c`
+- Built from commit: `5f6bf32f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -39,7 +39,7 @@
 - livelihood.e2e.js
 - auth.e2e.js
 - DEPLOY_RAILWAY.md — Railway Deployment Guide
-- renderPolygonSVG
+- renderAdaptive
 - Eleva README.md
 - Growth-Gate (12-word deterministic check)
 - Task 5: Adaptive Pathway Onboarding
@@ -49,13 +49,10 @@
 - soma-nutrition-flow.md
 - applyCalibrationCard
 - onboarding-radar.e2e.js
-- renderAuth
-- Adaptive Scenario Cards
+- 3-Card Pathway Recommendation Carousel
 - onboarding-name.e2e.js
 - buildPathwayOptions
-- 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
 - questSummaryCard
-- renderAdaptive
 - onboarding-bridge-audio.e2e.js
 - onboarding-draft-resume.e2e.js
 - startBridgeAudio
@@ -93,7 +90,7 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (45 total, 7 thin omitted)
+## Communities (42 total, 7 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.05
@@ -108,8 +105,8 @@ Cohesion: 0.06
 Nodes (56): APPLY, { looksRecoveryThemed, normalizeEvidenceSchema }, main(), { Pool }, analyzeNutritionPhoto(), AXIS_ACTIVITY_PHRASE, callClaude(), CARDIO_ACTIVITY_TYPES (+48 more)
 
 ### Community 3 - "graphify Skill Definition (SKILL.md)"
-Cohesion: 0.22
-Nodes (9): .claude/CLAUDE.md — graphify Trigger Pointer, graphify add/--watch Reference Guide, graphify Exports & Benchmark Reference Guide, graphify GitHub Clone & Cross-Repo Merge Guide, graphify Commit Hook & CLAUDE.md Integration Guide, graphify Query/Path/Explain Reference Guide, graphify Video/Audio Transcription Guide, graphify --update/--cluster-only Reference Guide (+1 more)
+Cohesion: 0.18
+Nodes (11): .claude/CLAUDE.md — graphify Trigger Pointer, graphify add/--watch Reference Guide, graphify Exports & Benchmark Reference Guide, graphify GitHub Clone & Cross-Repo Merge Guide, graphify Commit Hook & CLAUDE.md Integration Guide, graphify Query/Path/Explain Reference Guide, graphify Video/Audio Transcription Guide, graphify --update/--cluster-only Reference Guide (+3 more)
 
 ### Community 4 - "db.js"
 Cohesion: 0.05
@@ -132,8 +129,8 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.21
-Nodes (17): api(), authFinish(), beginPathwayBridge(), beginScenarioBridge(), boot(), clearBridgeTimers(), openNutritionFlow(), preloadNextBridgeImage() (+9 more)
+Cohesion: 0.13
+Nodes (26): api(), authConsentInfoModalHTML(), authFinish(), authHelpModalHTML(), authReducedMotion(), beginPathwayBridge(), beginScenarioBridge(), boot() (+18 more)
 
 ### Community 10 - "onboarding-bridge.e2e.js"
 Cohesion: 0.25
@@ -157,7 +154,7 @@ Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 1
 
 ### Community 18 - "esc"
 Cohesion: 0.09
-Nodes (35): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML() (+27 more)
+Nodes (37): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), characterScreenHTML(), completedResultCardHTML(), durasiMenitFromFields() (+29 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -172,12 +169,12 @@ Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 23 - "DEPLOY_RAILWAY.md — Railway Deployment Guide"
-Cohesion: 0.40
-Nodes (5): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence)
+Cohesion: 0.29
+Nodes (7): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence), Eleva PRD.md, Body Quest Completion Screen Screenshot
 
-### Community 24 - "renderPolygonSVG"
-Cohesion: 0.21
-Nodes (15): attachPolygonHandlers(), axisLabelLayout(), clearActiveAxisNow(), formatRadarValue(), heptagonPath(), lockIconSVG(), polyPoint(), polyRadius() (+7 more)
+### Community 24 - "renderAdaptive"
+Cohesion: 0.11
+Nodes (29): attachPolygonHandlers(), axisLabelLayout(), clearActiveAxisNow(), counterPillHTML(), formatRadarValue(), goalPlaceholder(), helpBtnHTML(), heptagonPath() (+21 more)
 
 ### Community 25 - "Eleva README.md"
 Cohesion: 0.16
@@ -189,7 +186,7 @@ Nodes (7): Discrete Confidence-Score Rubric (0.95/0.85/0.75/0.65/0.55), graphify
 
 ### Community 27 - "Task 5: Adaptive Pathway Onboarding"
 Cohesion: 0.22
-Nodes (9): Chapter Advancement Mechanism, Claude Sonnet (not Haiku) Model Choice, Eleva (AI Character Growth System), Freemium Monetization Model (decided, not built), 3-Card Pathway Recommendation Carousel, Pathway ≠ Chapter Principle, Task 5: Adaptive Pathway Onboarding, Pathway Rename/Reframe v8 (Architect/Warden/Weaver/Pilgrim/Specialist) (+1 more)
+Nodes (11): Adaptive Scenario Cards, Claude Sonnet (not Haiku) Model Choice, Eleva (AI Character Growth System), Locked-Axis Erosion Mechanism (v12), lockTension Mechanism, Freemium Monetization Model (decided, not built), Task 5: Adaptive Pathway Onboarding, 10-Person Closed 14-Day Pilot (+3 more)
 
 ### Community 28 - "server/nutrition.js"
 Cohesion: 0.10
@@ -207,32 +204,20 @@ Nodes (6): applyCalibrationCard(), applySynergyDrag(), clampCalibrationDelta(), 
 Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 34 - "renderAuth"
-Cohesion: 0.32
-Nodes (8): authConsentInfoModalHTML(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
-
-### Community 35 - "Adaptive Scenario Cards"
-Cohesion: 0.40
-Nodes (5): graphify Honesty Rules, Adaptive Scenario Cards, Defense-in-Depth Pattern (don't trust AI self-report, enforce in code), Locked-Axis Erosion Mechanism (v12), lockTension Mechanism
+### Community 34 - "3-Card Pathway Recommendation Carousel"
+Cohesion: 0.50
+Nodes (4): Chapter Advancement Mechanism, 3-Card Pathway Recommendation Carousel, Pathway ≠ Chapter Principle, Pathway Rename/Reframe v8 (Architect/Warden/Weaver/Pilgrim/Specialist)
 
 ### Community 36 - "onboarding-name.e2e.js"
 Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 38 - "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)"
-Cohesion: 0.50
-Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
-
 ### Community 39 - "questSummaryCard"
 Cohesion: 0.25
 Nodes (8): ensureCountdownTicking(), formatCountdown(), nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
 
-### Community 40 - "renderAdaptive"
-Cohesion: 0.17
-Nodes (16): characterScreenHTML(), counterPillHTML(), goalPlaceholder(), helpBtnHTML(), isStepValid(), layoutAxisInfoIcons(), nameSheetHTML(), radarSheetsHTML() (+8 more)
-
 ### Community 41 - "onboarding-bridge-audio.e2e.js"
-Cohesion: 0.15
+Cohesion: 0.13
 Nodes (7): assert, { chromium }, fillNameAndReachRadar(), FIXTURE_PATH, path, reachFirstBridge(), { spawn }
 
 ### Community 42 - "onboarding-draft-resume.e2e.js"
@@ -240,8 +225,8 @@ Cohesion: 0.25
 Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 43 - "startBridgeAudio"
-Cohesion: 0.20
-Nodes (10): clearBridgeAudioTimers(), ensureBridgeAudioEl(), exitBridge(), preloadNextBridgeAudio(), renderBridge(), renderBridgeDevPreview(), startBridgeAudio(), stopBridgeAudio() (+2 more)
+Cohesion: 0.24
+Nodes (11): clearBridgeAudioTimers(), ensureBridgeAudioEl(), preloadNextBridgeAudio(), renderBridge(), renderBridgeDevPreview(), setBridgeAudioIconPlaying(), speakBridgeVoiceFallback(), startBridgeAudio() (+3 more)
 
 ### Community 44 - "generate-onboarding-audio.js"
 Cohesion: 0.22
@@ -255,11 +240,11 @@ Nodes (9): APPLY, BRIDGE_VOICE_LINES, fs, main(), onlyArg, OUTPUT_DIR, path, IMP
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Eleva README.md` connect `Eleva README.md` to `Goal Capture (v13, bridge to First Trial)`, `7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)`, `DEPLOY_RAILWAY.md — Railway Deployment Guide`?**
+- **Why does `Eleva README.md` connect `Eleva README.md` to `Task 5: Adaptive Pathway Onboarding`, `Goal Capture (v13, bridge to First Trial)`, `DEPLOY_RAILWAY.md — Railway Deployment Guide`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
-- **Why does `Task 5: Adaptive Pathway Onboarding` connect `Task 5: Adaptive Pathway Onboarding` to `Adaptive Scenario Cards`, `Goal Capture (v13, bridge to First Trial)`, `7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)`?**
+- **Why does `Task 5: Adaptive Pathway Onboarding` connect `Task 5: Adaptive Pathway Onboarding` to `3-Card Pathway Recommendation Carousel`, `Goal Capture (v13, bridge to First Trial)`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
-- **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `Adaptive Scenario Cards` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`?**
+- **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `graphify Skill Definition (SKILL.md)` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`, `Task 5: Adaptive Pathway Onboarding`?**
   _High betweenness centrality (0.003) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
   _204 weakly-connected nodes found - possible documentation gaps or missing edges._

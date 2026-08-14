@@ -98,6 +98,28 @@ async function mockBridgeAudio(page) {
     route.fulfill({ path: FIXTURE_PATH, contentType: "audio/wav" }));
 }
 
+// Round 26: mocks window.speechSynthesis.speak() to log every call into
+// window.__speakLog and simulate a real backend firing utterance.onstart
+// (headless Chromium's own speechSynthesis backend doesn't reliably fire
+// onstart in this environment - confirmed by hand - so tests that need to
+// assert the icon's "playing" state force it deterministically here rather
+// than depending on a real TTS backend being present).
+async function installSpeechSynthesisMock(page) {
+  await page.addInitScript(() => {
+    window.__speakLog = [];
+    if (!window.speechSynthesis) window.speechSynthesis = { cancel() {} };
+    window.speechSynthesis.speak = (utterance) => {
+      window.__speakLog.push({ text: utterance.text, lang: utterance.lang, t: Date.now() });
+      setTimeout(() => utterance.onstart && utterance.onstart(), 0);
+    };
+    window.speechSynthesis.cancel = () => {};
+  });
+}
+
+async function speakLog(page) {
+  return page.evaluate(() => window.__speakLog || []);
+}
+
 async function audioLog(page) {
   return page.evaluate(() => window.__bridgeAudioLog || []);
 }
@@ -211,30 +233,74 @@ async function reachFirstBridge(page, name) {
     devServer.kill();
   });
 
-  console.log("E2E: autoplay rejection doesn't break the bridge");
-  await test("a forced play() rejection is swallowed silently - onboarding still progresses with no error surfaced", async () => {
+  console.log("E2E: autoplay rejection doesn't break the bridge, and falls over to the speechSynthesis voice (round 26)");
+  await test("a forced play() rejection is swallowed silently, onboarding still progresses, and the fallback voice speaks the stage's exact voiceText", async () => {
     const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
     const pageErrors = [];
     page.on("pageerror", (e) => pageErrors.push(e));
     await installAudioInstrumentation(page, { rejectPlay: true });
+    await installSpeechSynthesisMock(page);
     await mockBridgeAudio(page);
     await reachFirstBridge(page, "Audio Tester 5");
+    await page.waitForTimeout(700); // past the start delay
+    const speaks = await speakLog(page);
+    assert.strictEqual(speaks.length, 1, `expected exactly 1 fallback speak() call, got ${speaks.length}`);
+    assert.strictEqual(speaks[0].text, "Selamat datang di Eleva. Di sini, kamu tumbuh sambil jalan.", "fallback must speak the exact same voiceText as the real clip");
+    assert.strictEqual(speaks[0].lang, "id-ID", "fallback must speak in Bahasa Indonesia, not the unrelated Practice Test feature's en-US");
     await page.waitForSelector(".qcard-card", { timeout: 10000 });
     assert.strictEqual(pageErrors.length, 0, `expected no page errors even with play() rejecting, got ${pageErrors.map(String)}`);
     await context.close();
   });
 
-  console.log("E2E: missing audio asset (404) doesn't break the bridge");
-  await test("with no audio files on disk (real 404 via express.static), onboarding still progresses normally", async () => {
+  console.log("E2E: missing audio asset (404) doesn't break the bridge, and falls over to the speechSynthesis voice (round 26)");
+  await test("with no audio files on disk (real 404 via express.static), onboarding still progresses normally and the fallback voice speaks", async () => {
     const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
     const pageErrors = [];
     page.on("pageerror", (e) => pageErrors.push(e));
     await installAudioInstrumentation(page); // no mockBridgeAudio() - genuine 404
+    await installSpeechSynthesisMock(page);
     await reachFirstBridge(page, "Audio Tester 6");
+    await page.waitForTimeout(700); // past the start delay
+    const speaks = await speakLog(page);
+    assert.strictEqual(speaks.length, 1, `expected exactly 1 fallback speak() call on a 404, got ${speaks.length}`);
     await page.waitForSelector(".qcard-card", { timeout: 10000 });
     assert.strictEqual(pageErrors.length, 0, `expected no page errors on a missing audio asset, got ${pageErrors.map(String)}`);
+    await context.close();
+  });
+
+  console.log("E2E: speaker icon (round 26) is present on all 7 dev-preview stages");
+  await test("the top-right speaker icon renders on every one of the 7 bridge stages", async () => {
+    const devPort = PORT + 2;
+    const { server: devServer, log: devLog } = spawnServer(devPort, { NODE_ENV: "development" });
+    await waitForServer(`http://localhost:${devPort}`, devLog);
+    const devBrowser = await chromium.launch({ executablePath: CHROMIUM, headless: true });
+    const devContext = await devBrowser.newContext({ baseURL: `http://localhost:${devPort}`, viewport: { width: 390, height: 844 } });
+    const devPage = await devContext.newPage();
+    await devPage.goto(`http://localhost:${devPort}/?debug=bridges`);
+    await devPage.waitForSelector(".bridge-dev-controls", { timeout: 10000 });
+    for (let i = 0; i < 7; i++) {
+      assert.strictEqual(await devPage.locator("#bridgeAudioIcon").count(), 1, `expected the speaker icon on stage ${i + 1}/7`);
+      if (i < 6) await devPage.click("#bridgeDevNext");
+    }
+    await devBrowser.close();
+    devServer.kill();
+  });
+
+  console.log("E2E: speaker icon animates while audio is actually playing, stops when it isn't (round 26)");
+  await test("the icon gains bridge-audio-icon-playing while the mocked clip is playing and loses it once the bridge is stopped/exited", async () => {
+    const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await installAudioInstrumentation(page);
+    await mockBridgeAudio(page);
+    await reachFirstBridge(page, "Audio Tester 9");
+    await page.waitForTimeout(700); // past the start delay - the mocked fixture should now be "playing"
+    const playingWhileActive = await page.evaluate(() => document.getElementById("bridgeAudioIcon")?.classList.contains("bridge-audio-icon-playing"));
+    assert.strictEqual(playingWhileActive, true, "expected the icon to be marked playing while the mocked clip is actively playing");
+    await page.waitForSelector(".qcard-card", { timeout: 10000 }); // bridge exits (stopBridgeAudio fires)
+    const iconAfterExit = await page.locator("#bridgeAudioIcon").count();
+    assert.strictEqual(iconAfterExit, 0, "the icon (part of .bridge-root) should be gone once the bridge itself has exited to the question card");
     await context.close();
   });
 
