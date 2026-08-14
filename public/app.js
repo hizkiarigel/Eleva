@@ -1135,7 +1135,10 @@ const AXIS_LABEL_RULES = {
   emotional: { above: false, shift: 0 },
   social: { above: false, shift: 0 },
 };
-const AXIS_LABEL_GAP_ABOVE = 25, AXIS_LABEL_GAP_BELOW = 30;
+// Round 14 (founder): +0.5 line's worth of extra clearance between the
+// label text and the lock circle, alongside shrinking the label font
+// (see .poly-label) - was 25/30.
+const AXIS_LABEL_GAP_ABOVE = 33, AXIS_LABEL_GAP_BELOW = 38;
 // Axis label layout shared by render + updatePolygonDOM: Inter 12px,
 // wrapped to two lines when the name is two words (Emotional Stability),
 // locked axis's label tinted accent. Returns {x, y, anchor, lines}.
@@ -1181,7 +1184,7 @@ function renderPolygonSVG() {
     const y = POLY_CENTER - polyRadius(v);
     return `<text x="${POLY_CENTER + 5}" y="${(y + 2.5).toFixed(1)}" class="poly-scale-num" style="opacity:${op}">${v}</text>`;
   }).join("");
-  const MONO_CHAR_W = 8.3; // Inter 16px advance width at base scale (round 10, font grown 12->16), for icon placement
+  const MONO_CHAR_W = 6.9; // Inter ~10px advance width at base scale (round 14, font shrunk 16->13.3), for the initial pre-measurement placeholder icon placement
   const labels = POLY_ORDER.map((k, i) => {
     const L = axisLabelLayout(i);
     const isLocked = onboardForm.locked.includes(k);
@@ -1213,9 +1216,9 @@ function renderPolygonSVG() {
     const isLocked = onboardForm.locked.includes(k);
     const disabled = !isLocked && onboardForm.locked.length >= MAX_LOCKS;
     return `<g class="lock-btn ${isLocked ? "locked" : ""} ${disabled ? "disabled" : ""}" data-lock-btn-for="${k}">
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="17.5" class="lock-btn-bg" />
-      ${lockIconSVG(x, y, 15.5, isLocked)}
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20.5" class="lock-btn-hit" data-lock-hit="${k}" />
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="15.75" class="lock-btn-bg" />
+      ${lockIconSVG(x, y, 14, isLocked)}
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="18.75" class="lock-btn-hit" data-lock-hit="${k}" />
     </g>`;
   }).join("");
   // Value node: unlocked-inactive / unlocked-active (just dragged or its

@@ -272,7 +272,9 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .poly-scale-num { fill: #c9c9c9; font-family: "IBM Plex Mono", monospace; font-size: 7.5px; text-anchor: start; pointer-events: none; }
 .poly-shape { fill: rgba(216, 163, 85, .28); stroke: #d8a355; stroke-width: 2.25; filter: drop-shadow(0 0 5px rgba(216, 163, 85, .45)); }
 .poly-center { fill: rgba(216, 163, 85, .6); }
-.poly-label { fill: #f1eee8; font-family: "Inter", sans-serif; font-weight: 500; font-size: 16px; line-height: 1.1; }
+/* Round 14 (founder): shrunk back down from round 10's 16 (~12px real) to
+   ~10px real - 16 * (10/12) = 13.3. */
+.poly-label { fill: #f1eee8; font-family: "Inter", sans-serif; font-weight: 500; font-size: 13.3px; line-height: 1.1; }
 .poly-label.locked { fill: #d8a355; }
 /* Value node: unlocked-inactive / unlocked-active (just dragged, or its
    lock was just tapped) / locked - 3 distinct states, never green. */
@@ -339,9 +341,17 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .radar-lock-instr-divider { font-size: 11px; color: #6f6b78; }
 
 .radar-counter-slot { display: flex; justify-content: center; margin-top: 22px; }
+/* Round 14 (founder: text was sitting side-by-side/level with the icon,
+   wanted the text centered instead) - icon on top, text centered below,
+   both centered as a column rather than a left-icon/right-text row. */
+/* Padding/gap use the radar's --rd-* compression clamps (defined on
+   .shell-radar) - the stacked column is taller than the old single-row
+   pill, and needs to compress at short viewports the same way every
+   other radar element already does, or it reintroduces real overflow. */
 .radar-counter-pill {
-  display: flex; align-items: center; gap: 7px; min-height: 28px; background: rgba(255, 255, 255, .05);
-  border: 1px solid rgba(216, 163, 85, .3); border-radius: 18px; padding: 0 14px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: max(2px, calc(var(--rd-xs, 4px) - 2px)); text-align: center;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(216, 163, 85, .3); border-radius: 14px; padding: max(2px, calc(var(--rd-xs, 8px) - 3px)) 16px;
 }
 .radar-counter-icon { color: #d8a355; flex: none; }
 /* Round 13 (founder: doesn't read as a padlock) - was solid-filling the

@@ -282,13 +282,10 @@ async function test(name, fn) {
     await page.waitForTimeout(120);
   });
 
-  console.log("E2E: round 10 (founder feedback) - heptagon box actually fills available width (not height-capped), 16px axis-label font, '<- Kembali' arrow, tight symmetric Lanjut padding");
-  await test("the SVG box is now driven by available width (not an artificially low height-based cap) at a normal viewport height, axis labels are visibly bigger, Kembali has a back arrow, and Lanjut's padding is small and even on every side", async () => {
+  console.log("E2E: round 10 (founder feedback) - heptagon box actually fills available width (not height-capped), '<- Kembali' arrow, tight symmetric Lanjut padding");
+  await test("the SVG box is now driven by available width (not an artificially low height-based cap) at a normal viewport height, Kembali has a back arrow, and Lanjut's padding is small and even on every side", async () => {
     const svgWidth = await page.evaluate(() => document.getElementById("polySvg").getBoundingClientRect().width);
     assert.ok(svgWidth > 340, `at 390px width / 844px height, the heptagon box should now fill most of the available width (>340px), got ${svgWidth}px`);
-
-    const labelFontSize = await page.evaluate(() => getComputedStyle(document.querySelector(".poly-label")).fontSize);
-    assert.strictEqual(labelFontSize, "16px", `axis-label font-size should be 16 (viewBox units), got ${labelFontSize}`);
 
     const backText = await page.locator("#back").textContent();
     assert.strictEqual(backText.trim(), "← Kembali", `back button should read "← Kembali" with an arrow, got "${backText}"`);
@@ -340,13 +337,27 @@ async function test(name, fn) {
     });
     assert.deepStrictEqual(overlaps, [], `these axes' info icon overlaps its own label text: ${overlaps.join(", ")}`);
 
-    const radii = await page.evaluate(() => {
-      const dot = document.querySelector(".poly-dot");
-      const lockBg = document.querySelector(".lock-btn-bg");
-      return { dot: dot.r.baseVal.value, lockBg: lockBg.r.baseVal.value };
+    const dotR = await page.evaluate(() => document.querySelector(".poly-dot").r.baseVal.value);
+    assert.ok(dotR > 12, `value-node radius should be bigger than the pre-round-13 12, got ${dotR}`);
+  });
+
+  console.log("E2E: round 14 (founder last-round polish) - axis label font 12->10px with more breathing room from the lock circle, lock circle 30->27px, counter pill text centered under its icon");
+  await test("axis-label font is ~10px real screen px, the lock-button circle's real diameter is ~27px, and the counter pill stacks its icon above centered text instead of a side-by-side row", async () => {
+    const labelFontSize = await page.evaluate(() => getComputedStyle(document.querySelector(".poly-label")).fontSize);
+    assert.strictEqual(labelFontSize, "13.3px", `axis-label font-size should be 13.3 (viewBox units, ~10px real at typical scale), got ${labelFontSize}`);
+
+    const lockDiameterPx = await page.evaluate(() => document.querySelector(".lock-btn-bg").getBoundingClientRect().width);
+    assert.ok(lockDiameterPx > 20 && lockDiameterPx < 34, `lock-button circle's real on-screen diameter should be roughly in the ~27px ballpark, got ${lockDiameterPx}px`);
+
+    const pillLayout = await page.evaluate(() => {
+      const cs = getComputedStyle(document.querySelector(".radar-counter-pill"));
+      const icon = document.querySelector(".radar-counter-icon").getBoundingClientRect();
+      const label = document.querySelector(".radar-counter-label").getBoundingClientRect();
+      return { flexDirection: cs.flexDirection, textAlign: cs.textAlign, iconBottom: icon.bottom, labelTop: label.top };
     });
-    assert.ok(radii.dot > 12, `value-node radius should be bigger than the previous 12, got ${radii.dot}`);
-    assert.ok(radii.lockBg > 16, `lock-button radius should be bigger than the previous 16, got ${radii.lockBg}`);
+    assert.strictEqual(pillLayout.flexDirection, "column", `counter pill must stack icon-above-text (flex-direction:column), got ${pillLayout.flexDirection}`);
+    assert.strictEqual(pillLayout.textAlign, "center", `counter pill text must be centered, got ${pillLayout.textAlign}`);
+    assert.ok(pillLayout.labelTop >= pillLayout.iconBottom, `the label text must sit below the icon (not level/side-by-side with it), got iconBottom=${pillLayout.iconBottom}, labelTop=${pillLayout.labelTop}`);
   });
 
   console.log("E2E: layout + copy (handoff v5, 'Growth Focus Radar')");
