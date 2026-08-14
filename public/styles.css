@@ -96,6 +96,23 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    space, pushing Kembali/Lanjut down to sit flush against the bottom
    padding - falls back to 0 automatically on short viewports where
    there's no leftover space to begin with. */
+/* Round 5 (founder: repeated real-device clipping survived 4 precision
+   fixes; founder's own workaround - manual pinch-zoom-out - always works,
+   and asked for that to be the default). Wrapping every radar-step child
+   in one scaled box sidesteps the whole "predict the real viewport height
+   exactly" problem: instead of computing just-enough room, it always
+   renders ~15% smaller than the design size, which manufactures a fixed
+   safety margin no measurement error can eat into. Unlike the --rd-* vh
+   clamp()s above (spacing-only, by convention never touch font-size),
+   scale() shrinks text/icons too - matching what the founder's own
+   pinch-zoom screenshot actually looked like. transform-origin: top
+   center keeps the header pinned near the top and lets the freed-up
+   room appear at the bottom, exactly where Lanjut was getting cut off. */
+.radar-scale-wrap {
+  display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%;
+  transform: scale(0.85);
+  transform-origin: top center;
+}
 .shell-radar .onboard-nav-row { margin-top: auto; flex: none; }
 .shell-radar .btn-primary { padding: 14px 18px; }
 .shell-radar .fadeUp { min-height: 0; display: flex; flex-direction: column; }

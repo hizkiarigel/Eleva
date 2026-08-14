@@ -113,6 +113,45 @@ async function test(name, fn) {
     await page.waitForTimeout(150);
   });
 
+  console.log("E2E: round 5 (repeated real-device report survived 4 precision fixes) - flat transform:scale() safety margin, founder's own 'render it zoomed out' proposal");
+  await test("the radar step's content is wrapped in a fixed ~0.85 scale, so Continue sits inside the viewport with room to spare without relying on exact viewport-height math", async () => {
+    const { transform, origin } = await page.evaluate(() => {
+      const wrap = document.querySelector(".radar-scale-wrap");
+      const cs = getComputedStyle(wrap);
+      return { transform: cs.transform, origin: cs.transformOrigin };
+    });
+    assert.notStrictEqual(transform, "none", "radar-scale-wrap must have a transform applied");
+    // matrix(a, b, c, d, tx, ty) with a uniform scale(s) has a === d === s.
+    const m = transform.match(/matrix\(([^,]+),/);
+    assert.ok(m, `expected a matrix() transform, got ${transform}`);
+    const scaleFactor = parseFloat(m[1]);
+    assert.ok(scaleFactor > 0.8 && scaleFactor < 0.9, `scale factor should be ~0.85, got ${scaleFactor}`);
+    const wrapWidth = await page.evaluate(() => document.querySelector(".radar-scale-wrap").offsetWidth);
+    const originX = parseFloat(origin);
+    assert.ok(Math.abs(originX - wrapWidth / 2) < 1, `transform-origin should be horizontally centered within the wrap (width=${wrapWidth}, expected ~${wrapWidth / 2}), got ${origin}`);
+
+    // The actual regression this round targets: at a height representative
+    // of a real phone with a visible browser toolbar (not an impossible
+    // edge case, an everyday one), Lanjut must sit inside the viewport
+    // with headroom to spare - fully visible with no scroll required -
+    // because the flat scale manufactures a safety margin no viewport
+    // measurement, dvh quirk, or toolbar-height guess has to get exactly
+    // right.
+    for (const height of [932, 844, 780, 736, 700, 667]) {
+      await page.setViewportSize({ width: 390, height });
+      await page.waitForTimeout(120);
+      const { nextBottom, viewportH, overflow } = await page.evaluate(() => {
+        const rect = document.getElementById("next").getBoundingClientRect();
+        const s = document.querySelector(".shell-radar");
+        return { nextBottom: rect.bottom, viewportH: window.innerHeight, overflow: s.scrollHeight - s.clientHeight };
+      });
+      assert.ok(nextBottom <= viewportH, `Lanjut must be fully inside the viewport at height=${height} (bottom=${nextBottom}, viewport=${viewportH})`);
+      assert.strictEqual(overflow, 0, `content must fit with zero overflow at height=${height}, got ${overflow}px`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(120);
+  });
+
   console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, compressed to avoid scrolling, with a scroll safety net");
   await test("the screen fills the real viewport edge-to-edge and needs no scrolling at any realistic height, but the safety net keeps Continue reachable if it ever doesn't fit", async () => {
     // Round 3 (repeated real-device report): overflow:hidden + an exact
