@@ -17,7 +17,7 @@
   "15": "Eleva Root CLAUDE.md — graphify Integration Rules",
   "16": "Task 4: Privacy Notice (minimal)",
   "17": "Task 6: Prompt Caching",
-  "18": "renderDashboard",
+  "18": "questSummaryCard",
   "19": "practice-test-flow.md",
   "20": "metaTargets.js",
   "21": "livelihood.e2e.js",
@@ -33,8 +33,6 @@
   "31": "soma-nutrition-flow.md",
   "32": "applyCalibrationCard",
   "33": "onboarding-radar.e2e.js",
-  "34": "Adaptive Scenario Cards",
-  "35": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)",
   "36": "onboarding-name.e2e.js",
   "37": "renderAuth",
   "38": "buildPathwayOptions"

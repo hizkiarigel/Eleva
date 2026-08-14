@@ -80,7 +80,6 @@ async function test(name, fn) {
   console.log("E2E: layout + copy (handoff, 'Eleva Onboarding Name')");
   await test("header row, progress bar (~42%), title, supporting copy, highlight note, and secondary note all render with the exact handoff copy", async () => {
     assert.ok(await page.locator("text=ELEVA · ONBOARDING").count(), "eyebrow missing");
-    assert.ok(await page.locator(".name-help-btn").count(), "help button missing");
     assert.ok(await page.locator("text=Siapa namamu?").count(), "title missing");
     assert.ok(await page.locator("text=Nama ini akan Eleva gunakan").count(), "supporting copy missing");
     assert.ok(await page.locator("#fld").count(), "name input missing");
@@ -89,13 +88,34 @@ async function test(name, fn) {
     assert.ok(await page.locator("text=Semua yang kamu ceritakan di sini membantu Eleva").count(), "highlight note missing");
     assert.ok(await page.locator("text=Data onboardingmu digunakan untuk mempersonalisasi").count(), "secondary note missing");
 
-    const fillWidth = await page.evaluate(() => document.querySelector(".name-progress-fill").getBoundingClientRect().width);
-    const trackWidth = await page.evaluate(() => document.querySelector(".name-progress-track").getBoundingClientRect().width);
-    const pct = (fillWidth / trackWidth) * 100;
-    assert.ok(Math.abs(pct - 42) < 1, `progress fill should be ~42%, got ${pct.toFixed(1)}%`);
+    // Round 15 (founder): header row + progress indicator now reuse the
+    // radar screen's own classes/markup verbatim (.radar-header-row/
+    // .radar-help-btn/.step-dots/.dot-seg), not a bespoke continuous fill
+    // bar - this is step 1 of 2, so only the first segment is .active.
+    assert.ok(await page.locator(".radar-header-row").count(), "header row should reuse .radar-header-row, matching the radar screen");
+    assert.ok(await page.locator(".radar-help-btn").count(), "help button should reuse .radar-help-btn, matching the radar screen");
+    const dotSegs = await page.locator(".step-dots .dot-seg").count();
+    assert.strictEqual(dotSegs, 2, `expected 2 step-dot segments (name is step 1/2), got ${dotSegs}`);
+    const activeDotSegs = await page.locator(".step-dots .dot-seg.active").count();
+    assert.strictEqual(activeDotSegs, 1, `expected only the first step-dot segment active on the name step (step 1/2), got ${activeDotSegs}`);
 
     const backVisible = await page.evaluate(() => getComputedStyle(document.getElementById("back")).visibility);
     assert.strictEqual(backVisible, "hidden", "Kembali must be hidden on the first onboarding step");
+
+    assert.strictEqual(await page.locator(".name-consent").count(), 0, "the 'Dengan tap Lanjut...' consent caption was removed and must not render");
+
+    // Round 15: Kembali/Lanjut now reuse the radar screen's exact shared
+    // classes/layout (.onboard-nav-row/.btn-ghost/.btn-primary) instead of
+    // the handoff's own bespoke gradient CTA.
+    assert.ok(await page.locator(".onboard-nav-row").count(), "nav row should reuse .onboard-nav-row, matching the radar screen");
+    assert.strictEqual(await page.locator(".btn-primary#next").count(), 1, "Lanjut should reuse .btn-primary, matching the radar screen");
+    assert.strictEqual(await page.locator(".btn-ghost#back").count(), 1, "Kembali should reuse .btn-ghost, matching the radar screen");
+    const nextPad = await page.evaluate(() => {
+      const cs = getComputedStyle(document.getElementById("next"));
+      return { top: parseFloat(cs.paddingTop), left: parseFloat(cs.paddingLeft) };
+    });
+    assert.strictEqual(nextPad.top, 8, `Lanjut's padding should match the radar screen's slim padding (top=8px), got ${nextPad.top}`);
+    assert.strictEqual(nextPad.left, 20, `Lanjut's padding should match the radar screen's slim padding (left=20px), got ${nextPad.left}`);
   });
 
   console.log("E2E: input focus state + Lanjut gating on trimmed name length");

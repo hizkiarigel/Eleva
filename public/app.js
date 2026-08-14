@@ -1565,11 +1565,13 @@ function renderOnboarding() {
     // radar screen's sheets" instruction.
     root.innerHTML = `
       <div class="shell shell-name">
-        <div class="name-header-row">
-          <div class="name-eyebrow mono">ELEVA · ONBOARDING</div>
-          <button class="name-help-btn" data-help="name" aria-label="Bantuan">?</button>
+        <div class="radar-header-row">
+          <div class="eyebrow mono radar-header-eyebrow">ELEVA · ONBOARDING</div>
+          <button class="radar-help-btn" data-help="name" aria-label="Bantuan">?</button>
         </div>
-        <div class="name-progress-track"><div class="name-progress-fill"></div></div>
+        <div class="step-dots">
+          ${ONBOARD_STEPS.map((_, i) => `<div class="dot-seg ${i <= onboardStep ? "active" : ""}"></div>`).join("")}
+        </div>
         <h1 class="fr name-title">Siapa namamu?</h1>
         <p class="name-explain">Nama ini akan Eleva gunakan untuk menyapamu sepanjang perjalananmu.</p>
         <input type="text" id="fld" class="name-input" value="${esc(onboardForm.name)}" placeholder="Nama panggilan" autofocus />
@@ -1578,12 +1580,10 @@ function renderOnboarding() {
           <p class="fr name-highlight-text">Semua yang kamu ceritakan di sini membantu Eleva mengenal perjalananmu.</p>
         </div>
         <p class="name-secondary-note">Data onboardingmu digunakan untuk mempersonalisasi pengalaman Eleva.</p>
-        <div class="name-spacer"></div>
-        <div class="name-bottom-row">
-          <button class="name-back-btn" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">Kembali</button>
-          <button class="name-cta" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
+        <div class="onboard-nav-row">
+          <button class="btn-ghost" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">← Kembali</button>
+          <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
         </div>
-        <p class="name-consent">Dengan tap Lanjut, kamu setuju dengan pesan privasi di atas.</p>
       </div>
       ${nameSheetHTML()}`;
   } else if (step.type === "radar") {
