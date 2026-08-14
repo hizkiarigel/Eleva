@@ -265,13 +265,8 @@
     "semantic_hash": ""
   },
   "tests/onboarding-radar.e2e.js": {
-    "mtime": 1786680233.8914392,
-    "ast_hash": "ceaad6d5b2f481478f88cc1bd0115306",
-    "semantic_hash": ""
-  },
-  "scratch_verify_v2.js": {
-    "mtime": 1786680030.299251,
-    "ast_hash": "5a5c231a456afc8166de5f609f05b924",
+    "mtime": 1786681429.5872548,
+    "ast_hash": "c5a764ebfbfe8c81c03e586583d87d32",
     "semantic_hash": ""
   }
 }

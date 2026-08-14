@@ -85,32 +85,28 @@ async function test(name, fn) {
   }
   await reachRadar();
 
-  console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, never scrollable");
-  await test("the screen fills the real viewport edge-to-edge and cannot be scrolled, on both a tall real device and short viewports", async () => {
-    // 932 covers the real-device report (inset:0 alone under-tracked Safari's
-    // small viewport there - explicit height:100dvh was the fix) as well as
-    // the "large leftover space above Kembali/Lanjut" case from a taller
-    // screen than anything tested before.
+  console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, compressed to avoid scrolling, with a scroll safety net");
+  await test("the screen fills the real viewport edge-to-edge and needs no scrolling at any realistic height, but the safety net keeps Continue reachable if it ever doesn't fit", async () => {
+    // Round 3 (repeated real-device report): overflow:hidden + an exact
+    // height:100dvh STILL bottom-clipped Kembali/Lanjut on the founder's
+    // real device even after that fix - real mobile browser toolbar/zoom
+    // states are too varied to guarantee a hard "never scrollable" fit
+    // purely by CSS sizing math. Reverted to overflow-y:auto (matching
+    // .auth2-root's already-proven pattern) as a SAFETY NET, not the
+    // primary mechanism: the compression below still means scrolling is
+    // essentially never needed at any realistic height, but a forced
+    // impossibly-short viewport (400px - shorter than any real phone)
+    // must still be scrollable so the button can never become truly
+    // unreachable, whatever the real device's exact viewport turns out to be.
     for (const height of [932, 844, 736, 667, 600]) {
       await page.setViewportSize({ width: 390, height });
       await page.waitForTimeout(120);
-      const { position, cssHeight, overflow, canScroll } = await page.evaluate(() => {
+      const { position, overflow } = await page.evaluate(() => {
         const shell = document.querySelector(".shell-radar");
-        const before = shell.scrollTop;
-        shell.scrollTop = 999;
-        const after = shell.scrollTop;
-        shell.scrollTop = before;
-        return {
-          position: getComputedStyle(shell).position,
-          cssHeight: getComputedStyle(shell).height,
-          overflow: shell.scrollHeight - shell.clientHeight,
-          canScroll: after !== before,
-        };
+        return { position: getComputedStyle(shell).position, overflow: shell.scrollHeight - shell.clientHeight };
       });
       assert.strictEqual(position, "fixed", `.shell-radar must be position:fixed at height=${height}`);
-      assert.strictEqual(cssHeight, `${height}px`, `.shell-radar must track the real viewport height exactly at height=${height}, got ${cssHeight}`);
-      assert.strictEqual(overflow, 0, `content must fit with zero overflow at height=${height}, got ${overflow}px`);
-      assert.strictEqual(canScroll, false, `screen must not be scrollable at height=${height}`);
+      assert.strictEqual(overflow, 0, `content must fit with zero overflow at any realistic height=${height}, got ${overflow}px`);
     }
     const hOverflow390 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.strictEqual(hOverflow390, 0, `must not overflow horizontally at 390px width, got ${hOverflow390}px`);
@@ -118,6 +114,23 @@ async function test(name, fn) {
     await page.waitForTimeout(120);
     const hOverflow360 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.strictEqual(hOverflow360, 0, `must not overflow horizontally at 360px width (bigger heptagon, revision 1 follow-up), got ${hOverflow360}px`);
+
+    // The safety net itself: an impossibly short viewport must still let
+    // the user reach Continue by scrolling, rather than being permanently
+    // stuck (the actual bug being fixed this round).
+    await page.setViewportSize({ width: 390, height: 400 });
+    await page.waitForTimeout(120);
+    const canScrollWhenForced = await page.evaluate(() => {
+      const s = document.querySelector(".shell-radar");
+      const before = s.scrollTop;
+      s.scrollTop = 9999;
+      const after = s.scrollTop;
+      return after !== before;
+    });
+    assert.strictEqual(canScrollWhenForced, true, "at an impossibly short viewport, the safety net must allow scrolling to reach Continue");
+    const nextReachable = await page.locator("#next").isVisible();
+    assert.strictEqual(nextReachable, true, "Continue must be reachable (scrolled into view) even at an impossibly short viewport");
+
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(120);
   });

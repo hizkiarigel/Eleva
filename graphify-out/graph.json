@@ -2444,18 +2444,6 @@
       "norm_label": "pickrandomsubpathway()"
     },
     {
-      "label": "reach()",
-      "file_type": "code",
-      "source_file": "scratch_verify_v2.js",
-      "source_location": "L8",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "scratch_verify_v2_reach",
-      "community": 38,
-      "community_name": "scratch_verify_v2.js",
-      "norm_label": "reach()"
-    },
-    {
       "label": "activatePathway()",
       "file_type": "code",
       "source_file": "server/db.js",
@@ -5345,28 +5333,6 @@
       "community": 33,
       "community_name": "onboarding-radar.e2e.js",
       "norm_label": "{ spawn }"
-    },
-    {
-      "label": "scratch_verify_v2.js",
-      "file_type": "code",
-      "source_file": "scratch_verify_v2.js",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "scratch_verify_v2",
-      "community": 38,
-      "community_name": "scratch_verify_v2.js",
-      "norm_label": "scratch_verify_v2.js"
-    },
-    {
-      "label": "{ chromium }",
-      "file_type": "code",
-      "source_file": "scratch_verify_v2.js",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "scratch_verify_v2_chromium",
-      "community": 38,
-      "community_name": "scratch_verify_v2.js",
-      "norm_label": "{ chromium }"
     },
     {
       "label": "db.js",
@@ -12982,28 +12948,6 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "scratch_verify_v2.js",
-      "source_location": "L1",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "scratch_verify_v2",
-      "target": "scratch_verify_v2_chromium",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "scratch_verify_v2.js",
-      "source_location": "L8",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "scratch_verify_v2",
-      "target": "scratch_verify_v2_reach",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
       "source_file": "scripts/fix-stale-recovery-quests.js",
       "source_location": "L27",
       "weight": 1.0,
@@ -17089,5 +17033,5 @@
       "source_file": "PRD.md"
     }
   ],
-  "built_at_commit": "712bcc230af7aa2f385a871b07df2439a04f3733"
+  "built_at_commit": "ae277a5eadcad329d1fe4d11627c72ff9b73ca79"
 }

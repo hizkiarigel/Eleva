@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 46 files · ~360,873 words
+- 45 files · ~360,720 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 568 nodes · 882 edges · 39 communities (31 shown, 8 thin omitted)
+- 565 nodes · 880 edges · 38 communities (31 shown, 7 thin omitted)
 - Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 102 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `712bcc23`
+- Built from commit: `ae277a5e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -53,7 +53,6 @@
 - Adaptive Scenario Cards
 - 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
 - buildPathwayOptions
-- scratch_verify_v2.js
 
 ## God Nodes (most connected - your core abstractions)
 1. `esc()` - 38 edges
@@ -87,7 +86,7 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (39 total, 8 thin omitted)
+## Communities (38 total, 7 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.05
@@ -214,9 +213,9 @@ Cohesion: 0.50
 Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
 
 ## Knowledge Gaps
-- **178 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+173 more)
+- **177 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+172 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **8 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **7 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -228,7 +227,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `Adaptive Scenario Cards` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
-  _178 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _177 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `index.js` be split into smaller, more focused modules?**
   _Cohesion score 0.0507399577167019 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
