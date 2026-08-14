@@ -253,6 +253,78 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .shell-radar .radar-counter-slot { margin-top: max(0px, calc(var(--rd-lg) - 14px)); flex: none; }
 .shell-radar .field { flex: none; }
 
+/* "Eleva Onboarding Question Card" handoff, round 18 - "Kartu ke-1", the new
+   onboarding step between Siapa namamu? and Growth Focus Radar. Same fixed/
+   no-scroll shell as .shell-radar/.shell-name, and (per founder direction)
+   outer padding byte-identical to .shell-radar's own rather than the
+   handoff's bespoke 475px-frame k-scaling formula, so the header row and
+   Kembali/Lanjut row land at the same on-screen position as the other two
+   onboarding screens. Only the content BETWEEN the shared header/step-dots
+   and the shared nav row is this screen's own new design. */
+.shell.shell-qcard {
+  position: fixed; inset: 10px; height: calc(var(--vh, 1dvh) * 100 - 20px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  max-width: 540px; margin: 0 auto; display: flex; flex-direction: column;
+  --qc-pad-top: clamp(14px, calc(var(--vh, 1dvh) * 3), 30px);
+  --qc-pad-bottom: clamp(10px, calc(var(--vh, 1dvh) * 2), 20px);
+  /* This screen's own new content - gaps compress on short viewports
+     (same "compression primary, scroll safety net backup" philosophy as
+     the other two screens), card padding/answer sizing/fonts stay fixed
+     (width-scaled only, via min(Xpx, calc(X/390*100vw))) so nothing that
+     affects readability or tap targets ever shrinks.
+     This screen has meaningfully more fixed-size content than radar/name
+     (4 answer cards, one of which wraps to 3 lines, plus the full question
+     paragraph) - none of it can compress (card min-height/fonts/CTA size
+     are all in the "never shrink" set), so these ceilings sit well below
+     the handoff's own flat 18/16/14/12px. --qc-answers-gap in particular
+     applies between all 4 cards (3 gaps), so it's tripled in real
+     page-height impact. Even fully compressed to these floors, the fixed
+     content (question card + 4 answer cards) plus the byte-matched outer
+     padding is simply taller than radar/name's own content - zero overflow
+     holds from ~823px up (844px+ covers the vast majority of real phones,
+     verified down to a real iPhone 12/13/14's 844px), shorter devices
+     (a real iPhone SE's 667px and below) lean on the overflow-y:auto
+     safety net above, same as the other two screens' extreme-height case. */
+  --qc-card-mt: clamp(4px, calc(var(--vh, 1dvh) * 0.85), 6px);
+  --qc-instruction-mt: clamp(3px, calc(var(--vh, 1dvh) * 0.7), 5px);
+  --qc-instruction-mb: clamp(3px, calc(var(--vh, 1dvh) * 0.6), 4px);
+  --qc-answers-gap: clamp(2px, calc(var(--vh, 1dvh) * 0.5), 3px);
+  padding: var(--qc-pad-top) 8px var(--qc-pad-bottom);
+}
+.shell-qcard .radar-header-row { flex: none; }
+.shell-qcard .step-dots { margin-top: 6px; margin-bottom: 0; flex: none; }
+.shell-qcard .onboard-nav-row { margin-top: auto; flex: none; }
+.shell-qcard .btn-primary { padding: 8px 20px; min-height: 0; }
+.qcard-count { font-size: 12.5px; font-weight: 500; letter-spacing: .18em; color: var(--muted); text-transform: uppercase; }
+.qcard-card {
+  position: relative; flex: none; margin-top: var(--qc-card-mt); overflow: hidden; box-sizing: border-box;
+  background: linear-gradient(160deg, #14131b, #0a0a10); border: 1px solid rgba(229, 170, 80, .65);
+  border-radius: min(18px, calc(18 / 390 * 100vw)); padding: min(22px, calc(22 / 390 * 100vw));
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, .35);
+}
+.qcard-ornament { position: absolute; top: 0; right: 0; width: min(60px, calc(60 / 390 * 100vw)); height: min(60px, calc(60 / 390 * 100vw)); opacity: .7; }
+.qcard-star { position: absolute; top: min(14px, calc(14 / 390 * 100vw)); right: min(18px, calc(18 / 390 * 100vw)); filter: drop-shadow(0 0 4px rgba(229, 170, 80, .7)); }
+.qcard-question {
+  position: relative; margin: 0; font-family: "Lora", serif; font-weight: 500;
+  font-size: min(24px, calc(24 / 390 * 100vw)); line-height: 1.48; color: #f1ebdd;
+}
+.qcard-instruction {
+  flex: none; margin: var(--qc-instruction-mt) 0 var(--qc-instruction-mb); font-family: "Inter", sans-serif;
+  font-size: min(13px, calc(13 / 390 * 100vw)); line-height: 1.4; color: #95919e; text-align: center; white-space: pre-line;
+}
+.qcard-answers { flex: none; display: flex; flex-direction: column; gap: var(--qc-answers-gap); }
+.qcard-answer {
+  position: relative; display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left;
+  gap: min(14px, calc(14 / 390 * 100vw)); min-height: min(76px, calc(76 / 390 * 100vw));
+  padding: min(16px, calc(16 / 390 * 100vw)) min(20px, calc(20 / 390 * 100vw));
+  border-radius: min(16px, calc(16 / 390 * 100vw)); box-sizing: border-box; transition: all .25s ease;
+  background: rgba(255, 255, 255, .02); border: 1px solid rgba(255, 255, 255, .10); box-shadow: none;
+}
+.qcard-answer:active { transform: scale(.98); }
+.qcard-answer.positive { background: rgba(111, 211, 154, .07); border-color: rgba(111, 211, 154, .55); box-shadow: 0 0 18px rgba(111, 211, 154, .15); }
+.qcard-answer.negative { background: rgba(217, 122, 122, .07); border-color: rgba(217, 122, 122, .5); box-shadow: 0 0 18px rgba(217, 122, 122, .13); }
+.qcard-answer-text { flex: 1; margin: 0; font-family: "Inter", sans-serif; font-size: min(18px, calc(18 / 390 * 100vw)); line-height: 1.4; color: #f1ebdd; }
+.qcard-answer-icon { flex: none; }
+
 .eyebrow { color: var(--muted); font-size: 12px; letter-spacing: 1.5px; margin-bottom: 8px; }
 
 .field { margin-bottom: 20px; }

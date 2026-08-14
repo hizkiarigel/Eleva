@@ -432,6 +432,7 @@ const root = document.getElementById("root");
 
 let onboardForm = {
   name: "",
+  questionCard: { most: null, least: null }, // "Kartu ke-1" onboarding question card - local-only for now, not yet fed into radar/pathway scoring
   radar: { ...DEFAULT_RADAR },
   radarRaw: null, // frozen snapshot at the moment the radar step is left, before any calibration
   calibrationSum: {}, // {axisKey: cumulative direct calibration delta so far, capped [-3,3]}
@@ -636,6 +637,7 @@ function resetOnboardState() {
   onboardStep = 0;
   onboardForm = {
     name: "",
+    questionCard: { most: null, least: null },
     radar: { ...DEFAULT_RADAR },
     radarRaw: null, // frozen snapshot at the moment the radar step is left, before any calibration
     calibrationSum: {}, // {axisKey: cumulative direct calibration delta so far, capped [-3,3]}
@@ -1090,8 +1092,40 @@ async function runAuthEntering(statePrefetch) {
 // here would be dead weight.
 const ONBOARD_STEPS = [
   { type: "namePromise" },
+  { type: "questionCard" },
   { type: "radar" },
 ];
+
+// "Eleva Onboarding Question Card" handoff ("Kartu ke-1") - fixed scenario
+// question, static/local-only for now (no relation to the AI-generated
+// "Kartu ke-N" scenario cards in the later adaptive phase, see
+// renderAdaptive - same most/least naming, unrelated system). Order matters
+// (answer indices are what onboardForm.questionCard.{most,least} store).
+const QCARD_QUESTION = "Hari Sabtu pagi, kamu bangun tanpa alarm dan tidak ada rencana apa-apa. Hari ini sepenuhnya milikmu — mau kamu isi dengan apa?";
+const QCARD_ANSWERS = [
+  "Keluar jalan-jalan atau olahraga ringan, biarkan tubuh bergerak bebas",
+  "Buka sesuatu yang ingin dipelajari tapi selalu tertunda — podcast, buku, atau kursus singkat",
+  "Cek kondisi keuangan atau beresin hal-hal yang kalau diabaikan bikin kepala penuh",
+  "Duduk santai, tidak melakukan apa-apa dulu — nikmati tenang sebelum hari mulai",
+];
+// Tap state machine (handoff "Interactions & Behavior"): tap 1 -> most; tap
+// 2 on a different card -> least; tapping a selected card again clears it;
+// tapping a 3rd new card while both slots are filled replaces "most" (most-
+// recently-tapped new card becomes "most", "least" untouched).
+function qcardSelect(i) {
+  const qc = onboardForm.questionCard;
+  if (qc.most === i) { qc.most = null; return; }
+  if (qc.least === i) { qc.least = null; return; }
+  if (qc.most === null) { qc.most = i; return; }
+  if (qc.least === null) { qc.least = i; return; }
+  qc.most = i;
+}
+function qcardInstructionText() {
+  const { most, least } = onboardForm.questionCard;
+  if (most !== null && least !== null) return "Pilihanmu sudah lengkap. Tap lagi jika ingin mengubah.";
+  if (most !== null) return "Sekarang pilih 1 yang paling tidak menggambarkanmu.";
+  return "Pilih 1 yang paling menggambarkanmu.\nLalu pilih 1 yang paling tidak menggambarkanmu.";
+}
 
 function isStepValid(step) {
   const s = ONBOARD_STEPS[step];
@@ -1099,6 +1133,9 @@ function isStepValid(step) {
   // least 1 axis is locked" - the screen's whole purpose is picking and
   // locking priorities before moving on.
   if (s.type === "radar") return onboardForm.locked.length >= 1;
+  // "Eleva Onboarding Question Card" handoff: CTA disabled until both a
+  // "most like me" and a "least like me" answer are selected.
+  if (s.type === "questionCard") return onboardForm.questionCard.most !== null && onboardForm.questionCard.least !== null;
   // Privacy consent moved from a separate checkbox to a caption under the
   // primary button (design-handoff round) - tapping Lanjut IS the consent,
   // so only the name gates this step now.
@@ -1586,6 +1623,55 @@ function renderOnboarding() {
         </div>
       </div>
       ${nameSheetHTML()}`;
+  } else if (step.type === "questionCard") {
+    // "Eleva Onboarding Question Card" handoff ("Kartu ke-1"): reuses the
+    // shared .radar-header-row/.step-dots/.onboard-nav-row frame (round 18,
+    // matching the founder's byte-matched-shell direction from rounds
+    // 16-17) but has no help sheet/button of its own - the right side of
+    // the header is a plain "KARTU KE-1" label, not a "?" button.
+    const qc = onboardForm.questionCard;
+    root.innerHTML = `
+      <div class="shell shell-qcard">
+        <div class="radar-header-row">
+          <div class="eyebrow mono radar-header-eyebrow">ELEVA · ONBOARDING</div>
+          <div class="qcard-count mono">KARTU KE-1</div>
+        </div>
+        <div class="step-dots">
+          ${ONBOARD_STEPS.map((_, i) => `<div class="dot-seg ${i <= onboardStep ? "active" : ""}"></div>`).join("")}
+        </div>
+        <div class="qcard-card">
+          <svg class="qcard-ornament" viewBox="0 0 100 100" fill="none">
+            <path d="M78 20 Q92 40 82 70 Q75 90 88 98" stroke="#c9963f" stroke-width="0.6" opacity="0.35" />
+            <path d="M85 30 Q95 55 80 80" stroke="#c9963f" stroke-width="0.5" opacity="0.25" />
+            <circle cx="80" cy="12" r="1.4" fill="#e5aa50" opacity="0.8" />
+            <circle cx="90" cy="24" r="0.8" fill="#e5aa50" opacity="0.5" />
+          </svg>
+          <svg class="qcard-star" width="12" height="12" viewBox="0 0 20 20" fill="#e5aa50">
+            <path d="M10 0 L11.5 8.5 L20 10 L11.5 11.5 L10 20 L8.5 11.5 L0 10 L8.5 8.5 Z" />
+          </svg>
+          <p class="qcard-question">${esc(QCARD_QUESTION)}</p>
+        </div>
+        <p class="qcard-instruction">${esc(qcardInstructionText())}</p>
+        <div class="qcard-answers">
+          ${QCARD_ANSWERS.map((label, i) => {
+            const isMost = qc.most === i, isLeast = qc.least === i;
+            const cls = isMost ? "positive" : isLeast ? "negative" : "";
+            const icon = isMost
+              ? `<svg width="24" height="24" viewBox="0 0 24 24" class="qcard-answer-icon" fill="none"><circle cx="12" cy="12" r="10" stroke="#6fd39a" stroke-width="1.4" /><path d="M7.5 12.5L10.3 15.3L16.5 8.5" stroke="#6fd39a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`
+              : isLeast
+                ? `<svg width="24" height="24" viewBox="0 0 24 24" class="qcard-answer-icon" fill="none"><circle cx="12" cy="12" r="10" stroke="#d97a7a" stroke-width="1.4" /><path d="M7.5 12H16.5" stroke="#d97a7a" stroke-width="1.6" stroke-linecap="round" /></svg>`
+                : "";
+            return `<button class="qcard-answer ${cls}" data-qcard-idx="${i}">
+              <p class="qcard-answer-text">${esc(label)}</p>
+              ${icon}
+            </button>`;
+          }).join("")}
+        </div>
+        <div class="onboard-nav-row">
+          <button class="btn-ghost" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">← Kembali</button>
+          <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
+        </div>
+      </div>`;
   } else if (step.type === "radar") {
     // Growth Focus Radar handoff: exact copy, explicit 2-line breaks (not
     // browser auto-wrap) - raw HTML is safe here, both strings are fixed
@@ -1646,6 +1732,10 @@ function renderOnboarding() {
     e.stopPropagation();
     const axis = "axis:" + el.dataset.axisInfo;
     helpOpen = helpOpen === axis ? null : axis;
+    renderOnboarding();
+  }));
+  document.querySelectorAll("[data-qcard-idx]").forEach((el) => el.addEventListener("click", () => {
+    qcardSelect(Number(el.dataset.qcardIdx));
     renderOnboarding();
   }));
   document.getElementById("back")?.addEventListener("click", () => { onboardStep = Math.max(0, onboardStep - 1); renderOnboarding(); });

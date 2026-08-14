@@ -17,7 +17,7 @@
   "15": "Eleva Root CLAUDE.md — graphify Integration Rules",
   "16": "Task 4: Privacy Notice (minimal)",
   "17": "Task 6: Prompt Caching",
-  "18": "questSummaryCard",
+  "18": "renderDashboard",
   "19": "practice-test-flow.md",
   "20": "metaTargets.js",
   "21": "livelihood.e2e.js",
@@ -33,7 +33,9 @@
   "31": "soma-nutrition-flow.md",
   "32": "applyCalibrationCard",
   "33": "onboarding-radar.e2e.js",
+  "34": "renderPolygonSVG",
+  "35": "onboarding-questioncard.e2e.js",
   "36": "onboarding-name.e2e.js",
-  "37": "renderAuth",
+  "37": "3-Card Pathway Recommendation Carousel",
   "38": "buildPathwayOptions"
 }

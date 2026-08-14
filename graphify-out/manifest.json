@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786697419.3073409,
-    "ast_hash": "584f36f6b5f18e3f4ef04d5697d2c0a0",
+    "mtime": 1786706036.8437276,
+    "ast_hash": "b9c715c26e75d347ae93064267c6bed1",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -140,8 +140,8 @@
     "semantic_hash": "988229385b570503de31cbfadfb76d91"
   },
   "public/index.html": {
-    "mtime": 1786692901.7874444,
-    "ast_hash": "54fe4f711cb75e296c5c4937642214f4",
+    "mtime": 1786705989.6677248,
+    "ast_hash": "37252fc999fe707e713b65baccfe72c0",
     "semantic_hash": ""
   },
   "reference/Eleva_Correlation_Matrix.html": {
@@ -265,13 +265,18 @@
     "semantic_hash": ""
   },
   "tests/onboarding-radar.e2e.js": {
-    "mtime": 1786694967.615397,
-    "ast_hash": "f156ae43199f81504ea006e03f7421fc",
+    "mtime": 1786706465.103753,
+    "ast_hash": "6d8d415a84b4d85c0f88236c8367ad1b",
     "semantic_hash": ""
   },
   "tests/onboarding-name.e2e.js": {
-    "mtime": 1786704082.5749836,
-    "ast_hash": "a28824870f2e0d5eb36b72d2ca27bfac",
+    "mtime": 1786706451.6797523,
+    "ast_hash": "33ee9d98e3123c19b06ee70e82f6282b",
+    "semantic_hash": ""
+  },
+  "tests/onboarding-questioncard.e2e.js": {
+    "mtime": 1786706724.9397686,
+    "ast_hash": "f0e49c3079f45948cf987865e06c4cec",
     "semantic_hash": ""
   }
 }
