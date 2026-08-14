@@ -216,10 +216,16 @@ async function test(name, fn) {
     await page.waitForTimeout(120);
   });
 
-  console.log("E2E: round 8 (founder feedback) - heptagon grown further (POLY_MAXR 128->136), value numbers drop the trailing '.0'");
+  console.log("E2E: round 8/9 (founder feedback) - heptagon grown further (POLY_MAXR 128->136->148), value numbers drop the trailing '.0', scale-guide numbers now light gray");
   await test("default axis values render as bare '5' (no '.0'), and the enlarged heptagon still fits inside the SVG's own viewBox with no clipping/overflow at the narrowest supported width", async () => {
     const bodyValueText = await page.locator('text[data-value-for="body"]').textContent();
     assert.strictEqual(bodyValueText, "5", `whole-number values must render as bare "5", not "5.0" - got "${bodyValueText}"`);
+
+    const scaleNumFill = await page.evaluate(() => {
+      const el = document.querySelector(".poly-scale-num");
+      return getComputedStyle(el).fill;
+    });
+    assert.strictEqual(scaleNumFill, "rgb(201, 201, 201)", `scale-guide numbers (7.5/5/2.5/10) should be light gray (#c9c9c9), got ${scaleNumFill}`);
 
     await page.setViewportSize({ width: 360, height: 780 });
     await page.waitForTimeout(150);

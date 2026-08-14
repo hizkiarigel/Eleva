@@ -185,23 +185,27 @@ function maturityTier(growthSessions) {
 // guaranteed) ---
 const POLY_ORDER = ["body", "growth", "livelihood", "emotional", "social", "purpose", "autonomy"];
 const POLY_TOTAL = 35; // 7 axes x default 5 - the fixed zero-sum budget
-// POLY_MAXR: 110 -> 128 (round 2) -> 136 (round 8, founder re-asked for
-// "1.8x"). Verified empirically (Playwright getBBox() of every label/icon
-// vs the SVG's own viewBox, at 360/375/390px widths - the narrowest
-// supported phones): at 128 the tightest element (Livelihood's (i) info
-// icon) had only ~13 viewBox units of clearance to the right edge; the
-// per-axis info-icon offset (axisLabelLayout's iconX gap, see below) was
-// trimmed 11->7 to claw back a few units, and POLY_MAXR pushed from 128 to
-// 136 - the largest value that still leaves a positive, non-zero clipping
-// margin (~9 units, confirmed via the same script) on every label/icon at
-// the narrowest supported width. A literal 1.8x is still not physically
-// possible on a phone-width screen: at 128 the heptagon already used ~61%
-// of the SVG box's width, and label/icon text needs real room *outside*
-// the heptagon itself - 180% would mean the heptagon alone exceeds the
-// entire box, leaving literally zero space for any label. 136 is the
-// honest ceiling until axis labels are redesigned to need less side
-// clearance (e.g. dropping the (i) icons or moving labels off-canvas).
-const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 136, POLY_MINR = 15;
+// POLY_MAXR: 110 -> 128 (round 2) -> 136 (round 8) -> 148 (round 9, founder
+// still saw round 8's bump as imperceptible). Verified empirically
+// (Playwright getBBox() of every label/icon vs the SVG's own viewBox, at
+// 360/375/390px widths - the narrowest supported phones) at every step.
+// Round 8 alone had almost no margin left to spend (the tightest element,
+// Livelihood's (i) info icon, had ~9 units of clearance at 136) - so round
+// 9 first reclaimed room from elsewhere before growing further: the
+// deliberate-but-purely-stylistic label x-shift (AXIS_LABEL_RULES, "visual
+// rhythm, not derived from angle") was trimmed 16->10, the info-icon's
+// text-to-icon gap 7->5, and its (still comfortably tappable) hit radius
+// 14->12. That freed enough room to push POLY_MAXR to 148 - visibly bigger
+// this time - while every label/icon still keeps a positive, verified
+// clipping margin (~8 units) at the narrowest supported width. A literal
+// 1.8x remains physically impossible on a phone-width screen: even after
+// reclaiming margin from the trims above, the heptagon vertex plus its
+// label/icon overhang is already using nearly the SVG box's full width;
+// 180% would mean the heptagon ALONE exceeds the box, leaving zero space
+// for any label anywhere. 148 is the honest ceiling until axis labels are
+// redesigned to need materially less side clearance (e.g. dropping the
+// (i) icons entirely or moving labels off-canvas into a legend).
+const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 148, POLY_MINR = 15;
 const POLY_STEP_DEG = 360 / POLY_ORDER.length; // heptagon: ~51.43deg per axis
 // Square viewBox with padding so axis-name labels (anchored outward) never
 // clip; kept square so pointer->viewBox mapping stays a uniform scale.
@@ -1119,12 +1123,14 @@ function heptagonPath(r) {
 // Social sit BELOW. Growth+Livelihood shift right of the lock button's own
 // x; Autonomy+Purpose shift left; Body/Emotional/Social stay centered on
 // it - a deliberate asymmetry for visual rhythm, not derived from angle.
+// Magnitude trimmed 16->10 in round 9 to reclaim margin for a bigger
+// heptagon (see POLY_MAXR) - still visually asymmetric, just less so.
 const AXIS_LABEL_RULES = {
   body: { above: true, shift: 0 },
-  growth: { above: true, shift: 16 },
-  autonomy: { above: true, shift: -16 },
-  livelihood: { above: false, shift: 16 },
-  purpose: { above: false, shift: -16 },
+  growth: { above: true, shift: 10 },
+  autonomy: { above: true, shift: -10 },
+  livelihood: { above: false, shift: 10 },
+  purpose: { above: false, shift: -10 },
   emotional: { above: false, shift: 0 },
   social: { above: false, shift: 0 },
 };
@@ -1184,11 +1190,11 @@ function renderPolygonSVG() {
     // small a touch target.
     const maxChars = Math.max(...L.lines.map((l) => l.length));
     const w = maxChars * MONO_CHAR_W;
-    const iconX = L.x + w / 2 + 7;
+    const iconX = L.x + w / 2 + 5;
     const iconY = L.y - 3.5;
     return `<text x="${L.x.toFixed(1)}" y="${L.y.toFixed(1)}" class="poly-label ${isLocked ? "locked" : ""}" data-label-for="${k}" text-anchor="${L.anchor}">${tspans}</text>
       <g class="axis-info-btn" data-axis-info="${k}">
-        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="14" class="axis-info-hit" />
+        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="12" class="axis-info-hit" />
         <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="7.5" class="axis-info-bg" />
         <text x="${iconX.toFixed(1)}" y="${(iconY + 3).toFixed(1)}" class="axis-info-glyph" text-anchor="middle">i</text>
       </g>`;

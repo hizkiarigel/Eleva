@@ -238,7 +238,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .poly-ring { fill: none; stroke: rgba(216, 163, 85, .6); stroke-width: 1; stroke-dasharray: 3 4; }
 .poly-outer { fill: rgba(216, 163, 85, .05); stroke: #d8a355; stroke-width: 1; }
 .poly-axis { stroke: rgba(216, 163, 85, .28); stroke-width: 1; }
-.poly-scale-num { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 7.5px; text-anchor: start; pointer-events: none; }
+.poly-scale-num { fill: #c9c9c9; font-family: "IBM Plex Mono", monospace; font-size: 7.5px; text-anchor: start; pointer-events: none; }
 .poly-shape { fill: rgba(216, 163, 85, .28); stroke: #d8a355; stroke-width: 2.25; filter: drop-shadow(0 0 5px rgba(216, 163, 85, .45)); }
 .poly-center { fill: rgba(216, 163, 85, .6); }
 .poly-label { fill: #f1eee8; font-family: "Inter", sans-serif; font-weight: 500; font-size: 12px; line-height: 1.1; }
