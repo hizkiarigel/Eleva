@@ -287,7 +287,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   --qc-card-mt: clamp(10px, calc(var(--vh, 1dvh) * 2), 16px);
   --qc-instruction-mt: clamp(8px, calc(var(--vh, 1dvh) * 1.5), 12px);
   --qc-instruction-mb: clamp(8px, calc(var(--vh, 1dvh) * 1.5), 12px);
-  --qc-answers-gap: 1px;
+  --qc-answers-gap: 7px;
   padding: var(--qc-pad-top) 8px var(--qc-pad-bottom);
 }
 .shell-qcard .radar-header-row { flex: none; }
@@ -315,8 +315,8 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .qcard-answers { flex: none; display: flex; flex-direction: column; gap: var(--qc-answers-gap); }
 .qcard-answer {
   position: relative; display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left;
-  gap: min(14px, calc(14 / 390 * 100vw)); min-height: min(38px, calc(38 / 390 * 100vw));
-  padding: min(8px, calc(8 / 390 * 100vw)) min(10px, calc(10 / 390 * 100vw));
+  gap: min(14px, calc(14 / 390 * 100vw)); min-height: min(55px, calc(55 / 390 * 100vw));
+  padding: min(12px, calc(12 / 390 * 100vw)) min(15px, calc(15 / 390 * 100vw));
   border-radius: min(16px, calc(16 / 390 * 100vw)); box-sizing: border-box; transition: all .25s ease;
   background: rgba(255, 255, 255, .02); border: 1px solid rgba(255, 255, 255, .10); box-shadow: none;
 }
