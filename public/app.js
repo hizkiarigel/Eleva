@@ -1187,6 +1187,7 @@ const ONBOARDING_BRIDGES = {
     order: 1,
     name: "Journey",
     image: "01-journey", // -> /onboarding/bridges/01-journey.webp
+    audio: "/audio/onboarding/01-journey.mp3",
     headline: "Pertumbuhanmu adalah sebuah perjalanan.",
     voiceText: "Selamat datang di Eleva. Di sini, kamu tumbuh sambil jalan.",
     nextType: "personalized_question",
@@ -1195,6 +1196,7 @@ const ONBOARDING_BRIDGES = {
     order: 2,
     name: "Quest — The Mission",
     image: "02-quest", // -> /onboarding/bridges/02-quest.webp
+    audio: "/audio/onboarding/02-quest.mp3",
     headline: "Targetmu menjadi quest.",
     voiceText: "Targetmu kita ubah jadi quest, biar lebih enak dijalani.",
     nextType: "personalized_question",
@@ -1203,6 +1205,7 @@ const ONBOARDING_BRIDGES = {
     order: 3,
     name: "Evidence — The Proof",
     image: "03-evidence", // -> /onboarding/bridges/03-evidence.webp
+    audio: "/audio/onboarding/03-evidence.mp3",
     headline: "Bukti nyata menggerakkan perjalananmu.",
     voiceText: "Bukan cuma checklist. Yang dihitung itu bukti nyata dari langkahmu.",
     nextType: "personalized_question",
@@ -1211,6 +1214,7 @@ const ONBOARDING_BRIDGES = {
     order: 4,
     name: "Character / Acting — The Becoming",
     image: "04-character", // -> /onboarding/bridges/04-character.webp
+    audio: "/audio/onboarding/04-character.mp3",
     headline: "Karaktermu dibentuk oleh tindakan.",
     voiceText: "Kamu jadi versi baru bukan karena niat, tapi karena apa yang kamu lakukan.",
     nextType: "personalized_question",
@@ -1219,6 +1223,7 @@ const ONBOARDING_BRIDGES = {
     order: 5,
     name: "Adaptive AI — The Guide",
     image: "05-adaptive", // -> /onboarding/bridges/05-adaptive.webp
+    audio: "/audio/onboarding/05-adaptive.mp3",
     headline: "Quest berubah saat kamu berubah.",
     voiceText: "Kalau kondisi kamu berubah, langkah berikutnya ikut menyesuaikan.",
     nextType: "personalized_question",
@@ -1227,6 +1232,7 @@ const ONBOARDING_BRIDGES = {
     order: 6,
     name: "META / World — The Expansion",
     image: "06-meta", // -> /onboarding/bridges/06-meta.webp
+    audio: "/audio/onboarding/06-meta.mp3",
     headline: "Semua langkah membentuk duniamu.",
     voiceText: "Makin kamu jalan, makin banyak bagian Eleva yang kebuka.",
     nextType: "personalized_question",
@@ -1245,6 +1251,7 @@ const ONBOARDING_BRIDGES = {
     order: 7,
     name: "Pathway — The Route",
     image: "07-pathway", // -> /onboarding/bridges/07-pathway.webp
+    audio: "/audio/onboarding/07-pathway.mp3",
     headline: "Cara bertumbuhmu membentuk pathway.",
     voiceText: "Setiap orang punya cara tumbuh yang beda. Itu yang jadi pathway-mu.",
     nextType: "pathway_selection",
@@ -1279,6 +1286,21 @@ const BRIDGE_MIN_DURATION_MS = 2300, BRIDGE_LONGWAIT_MS = 6000;
 // beginScenarioBridge()'s use of this below.
 const SCENARIO_MAX_CARDS = 6;
 
+// Bridge voice narration (round 25, "Phase 3") - short pre-generated clips
+// per stage, played once when that stage's bridge appears. Static files
+// only, no runtime TTS call ever - see ONBOARDING_BRIDGES[stage].audio and
+// scripts/generate-onboarding-audio.js. onboardingVoiceEnabled is an
+// internal flag only (no settings UI this phase) - flip to false to mute
+// without touching the playback logic below.
+let onboardingVoiceEnabled = true;
+let bridgeAudioEl = null;          // single shared <audio>, lazily created, never mounted in the DOM
+let bridgeAudioGen = 0;
+let bridgeAudioStageKey = null;    // last stage that actually (re)started audio - the "did the stage change" gate
+let bridgeAudioTimers = [];        // mirrors bridgeTimers, for the start-delay setTimeout
+let bridgeAudioFadeToken = 0;      // cancels an in-flight fade rAF loop
+const bridgeAudioPreloadCache = new Set();
+const BRIDGE_AUDIO_START_DELAY_MS = 350, BRIDGE_AUDIO_FADE_MS = 200;
+
 function clearBridgeTimers() {
   bridgeTimers.forEach(clearTimeout);
   bridgeTimers = [];
@@ -1297,6 +1319,99 @@ function preloadNextBridgeImage(stageKey) {
   new Image().src = `${ONBOARDING_BRIDGE_BASE_PATH}${next.image}.webp`;
 }
 
+function clearBridgeAudioTimers() {
+  bridgeAudioTimers.forEach(clearTimeout);
+  bridgeAudioTimers = [];
+}
+
+// Lazily created, kept detached from the DOM on purpose - it doesn't need
+// to be visible, so it's immune to renderBridge()'s root.innerHTML full
+// replace (no reparenting trick needed, unlike e.g. auth2Flash).
+function ensureBridgeAudioEl() {
+  if (!bridgeAudioEl) {
+    bridgeAudioEl = new Audio();
+    bridgeAudioEl.preload = "auto";
+  }
+  return bridgeAudioEl;
+}
+
+// Audio equivalent of preloadNextBridgeImage's new Image().src=... idiom.
+// Unlike Image, a detached Audio() isn't reliably guaranteed to start
+// fetching from just the .src assignment across browsers - .load() makes
+// it explicit.
+function warmBridgeAudio(url) {
+  if (!url || bridgeAudioPreloadCache.has(url)) return;
+  bridgeAudioPreloadCache.add(url);
+  const a = new Audio();
+  a.preload = "auto";
+  a.src = url;
+  a.load();
+}
+
+function preloadNextBridgeAudio(stageKey) {
+  const cfg = ONBOARDING_BRIDGES[stageKey];
+  if (!cfg) return;
+  const next = Object.values(ONBOARDING_BRIDGES).find((b) => b.order === cfg.order + 1);
+  if (next?.audio) warmBridgeAudio(next.audio);
+}
+
+// Stops whatever is currently playing. withFade=true prefers a short (~200ms)
+// volume ramp over an abrupt cut when a clip is genuinely mid-playback;
+// already-paused/-ended clips (or withFade=false) just hard-stop - no need
+// to fade a clip that already finished naturally. Runs on its own
+// rAF+token, deliberately NOT through the bridgeTimers/clearTimeout array
+// (mixing interval/rAF ids through one clearer is fragile).
+function stopBridgeAudio(withFade) {
+  bridgeAudioFadeToken += 1;
+  const token = bridgeAudioFadeToken;
+  const el = bridgeAudioEl;
+  if (!el || el.paused || el.ended || !withFade) {
+    if (el) { el.pause(); el.currentTime = 0; el.volume = 1; }
+    return;
+  }
+  const start = performance.now();
+  const from = el.volume;
+  const step = (now) => {
+    if (token !== bridgeAudioFadeToken) return; // superseded by a newer stop/start
+    const t = Math.min(1, (now - start) / BRIDGE_AUDIO_FADE_MS);
+    el.volume = from * (1 - t);
+    if (t < 1) { requestAnimationFrame(step); return; }
+    el.pause();
+    el.currentTime = 0;
+    el.volume = 1;
+  };
+  requestAnimationFrame(step);
+}
+
+// Entry point: "stage X is now the active bridge" - called from
+// renderBridge() whenever bridgeStageKey actually changes (see the guard
+// there). Fades out whatever the previous stage was playing, then starts
+// this stage's clip after a short delay so it feels synced with the visual
+// entrance rather than an instant jump-cut. Fails completely silently on
+// autoplay rejection or a missing/broken asset - voice is an enhancement,
+// never a dependency for onboarding to proceed (the .catch(()=>{}) below is
+// the entire autoplay-rejection handling; a 404/decode error fires the
+// media "error" event, which nothing listens to, so it silently never
+// plays either).
+function startBridgeAudio(stageKey) {
+  clearBridgeAudioTimers();
+  stopBridgeAudio(true);
+  bridgeAudioGen += 1;
+  const gen = bridgeAudioGen;
+  const cfg = ONBOARDING_BRIDGES[stageKey];
+  if (!onboardingVoiceEnabled || !cfg?.audio) return;
+  warmBridgeAudio(cfg.audio);
+  bridgeAudioTimers.push(setTimeout(() => {
+    if (gen !== bridgeAudioGen) return; // superseded before the delay elapsed
+    const el = ensureBridgeAudioEl();
+    el.pause();
+    el.currentTime = 0;
+    el.volume = 1;
+    el.src = cfg.audio;
+    el.play().catch(() => {});
+  }, BRIDGE_AUDIO_START_DELAY_MS));
+}
+
 // Not the generic ui.view==="error" dispatch (its retry calls the global
 // boot(), which would restart the whole app) - this overlay's retry only
 // re-invokes whichever fetch actually failed.
@@ -1310,6 +1425,12 @@ function showBridgeError(err, retryFn) {
 // styles.css) before handing off to the next screen, so the handoff never
 // hard-cuts or flashes white.
 function exitBridge(afterFn) {
+  // The real cleanup point for most exits, not renderBridge()'s stage-change
+  // guard alone: a non-confident scenario-card result or a chapter-analysis
+  // success both hand off straight to a non-bridge screen (adaptivePhase
+  // "card"/"analysis") and never call renderBridge() again for that
+  // instance, so nothing else would ever stop the clip on those paths.
+  stopBridgeAudio(true);
   const el = document.getElementById("bridgeRoot");
   if (!el) { afterFn(); return; }
   el.classList.remove("bridge-in");
@@ -1336,6 +1457,7 @@ function runBridge({ stageKey, work, onSuccess, onError }) {
   adaptivePhase = "bridge";
   render();
   preloadNextBridgeImage(stageKey);
+  preloadNextBridgeAudio(stageKey);
 
   const minDone = new Promise((resolve) => bridgeTimers.push(setTimeout(resolve, BRIDGE_MIN_DURATION_MS)));
   // Past ~6s: freeze at rest (the CSS transitions have already finished by
@@ -1408,6 +1530,18 @@ function beginPathwayBridge() {
 function renderBridge() {
   const cfg = ONBOARDING_BRIDGES[bridgeStageKey];
   if (!cfg) return;
+  // Guarded on the stage actually changing, not "renderBridge() ran again" -
+  // runBridge()'s error path calls showBridgeError() -> render() ->
+  // renderBridge() a SECOND time for the SAME bridgeStageKey (just to bolt
+  // the .bridge-error overlay onto the same markup); without this guard a
+  // scenario-card failure mid-narration would yank the clip back to 0:00
+  // and restart it. Also what gives the dev preview voice for free - it
+  // calls renderBridge() directly on every Prev/Next click, no separate
+  // wiring needed there.
+  if (bridgeStageKey !== bridgeAudioStageKey) {
+    bridgeAudioStageKey = bridgeStageKey;
+    startBridgeAudio(bridgeStageKey);
+  }
   root.innerHTML = `
     <div class="bridge-root" id="bridgeRoot">
       <img class="bridge-img" src="${ONBOARDING_BRIDGE_BASE_PATH}${cfg.image}.webp" alt="${esc(cfg.headline)}" />

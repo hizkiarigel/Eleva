@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786723454.8362763,
-    "ast_hash": "72a0db2964a584ce0151652f1e946984",
+    "mtime": 1786725961.128714,
+    "ast_hash": "8ee78c59b914ae4a9c067d789aded756",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -317,6 +317,21 @@
   "tests/onboarding-draft-resume.e2e.js": {
     "mtime": 1786721458.3642335,
     "ast_hash": "6e93413ee321ae77269234df03e7d437",
+    "semantic_hash": ""
+  },
+  "scripts/generate-onboarding-audio.js": {
+    "mtime": 1786725996.232715,
+    "ast_hash": "f548374ca46adcbc3ab71d5cc96ecdb4",
+    "semantic_hash": ""
+  },
+  "tests/onboarding-bridge-audio.e2e.js": {
+    "mtime": 1786726162.0327184,
+    "ast_hash": "c328b1174cebd69786d91e7607dbdd78",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/bridge-voice.wav": {
+    "mtime": 1786726041.780716,
+    "ast_hash": "f120cdd9d3c4b96aed84d9b512c880f7",
     "semantic_hash": ""
   }
 }

@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 48 files · ~448,565 words
+- 50 files · ~451,872 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 611 nodes · 952 edges · 47 communities (38 shown, 9 thin omitted)
+- 643 nodes · 992 edges · 45 communities (38 shown, 7 thin omitted)
 - Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 107 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d78155bf`
+- Built from commit: `6028f48c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -26,7 +26,7 @@
 - package.json
 - render
 - onboarding-bridge.e2e.js
-- livelihood.js
+- jobMatch.js
 - practiceTest.js
 - practicetest.e2e.js
 - Job Match Analysis (Task 10b)
@@ -56,12 +56,10 @@
 - 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
 - questSummaryCard
 - renderAdaptive
-- jobMatch.js
+- onboarding-bridge-audio.e2e.js
 - onboarding-draft-resume.e2e.js
-- auth.js
-- targets.js
-- structured.js
-- safety.js
+- startBridgeAudio
+- generate-onboarding-audio.js
 
 ## God Nodes (most connected - your core abstractions)
 1. `esc()` - 40 edges
@@ -95,15 +93,15 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (47 total, 9 thin omitted)
+## Communities (45 total, 7 thin omitted)
 
 ### Community 0 - "index.js"
-Cohesion: 0.07
-Nodes (21): ai, app, auth, cookieSession, db, express, jobApplication, jobMatch (+13 more)
+Cohesion: 0.05
+Nodes (32): AuthError, bcrypt, db, login(), normalizeEmail(), signup(), ai, app (+24 more)
 
 ### Community 1 - "app.js"
 Cohesion: 0.04
-Nodes (46): adaptiveCards, adaptiveSelection, ARTIFACT_TYPE_LABEL, authForm, authTimers, AXIS_DEFINITIONS, AXIS_LABEL_RULES, BRIDGE_LOADING_SEQUENCE (+38 more)
+Nodes (48): adaptiveCards, adaptiveSelection, ARTIFACT_TYPE_LABEL, authForm, authTimers, AXIS_DEFINITIONS, AXIS_LABEL_RULES, BRIDGE_LOADING_SEQUENCE (+40 more)
 
 ### Community 2 - "claude.js"
 Cohesion: 0.06
@@ -134,16 +132,16 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.19
-Nodes (18): api(), authFinish(), beginPathwayBridge(), beginScenarioBridge(), boot(), clearBridgeTimers(), exitBridge(), openNutritionFlow() (+10 more)
+Cohesion: 0.21
+Nodes (17): api(), authFinish(), beginPathwayBridge(), beginScenarioBridge(), boot(), clearBridgeTimers(), openNutritionFlow(), preloadNextBridgeImage() (+9 more)
 
 ### Community 10 - "onboarding-bridge.e2e.js"
 Cohesion: 0.25
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 11 - "livelihood.js"
-Cohesion: 0.18
-Nodes (6): apiTests(), assert, jobApplication, jobMatch, targets, test()
+### Community 11 - "jobMatch.js"
+Cohesion: 0.08
+Nodes (12): ACCEPTED_CV_MIMES, ACCEPTED_IMAGE_MIMES, mammoth, MATCH_STATUSES, cleanTargetMetrics(), num(), apiTests(), assert (+4 more)
 
 ### Community 12 - "practiceTest.js"
 Cohesion: 0.10
@@ -159,7 +157,7 @@ Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 1
 
 ### Community 18 - "esc"
 Cohesion: 0.09
-Nodes (37): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), characterScreenHTML(), completedResultCardHTML(), durasiMenitFromFields() (+29 more)
+Nodes (35): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML() (+27 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -178,8 +176,8 @@ Cohesion: 0.40
 Nodes (5): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence)
 
 ### Community 24 - "renderPolygonSVG"
-Cohesion: 0.18
-Nodes (18): attachPolygonHandlers(), axisLabelLayout(), clearActiveAxisNow(), formatRadarValue(), heptagonPath(), lockIconSVG(), polyPoint(), polyRadius() (+10 more)
+Cohesion: 0.21
+Nodes (15): attachPolygonHandlers(), axisLabelLayout(), clearActiveAxisNow(), formatRadarValue(), heptagonPath(), lockIconSVG(), polyPoint(), polyRadius() (+7 more)
 
 ### Community 25 - "Eleva README.md"
 Cohesion: 0.16
@@ -230,44 +228,44 @@ Cohesion: 0.25
 Nodes (8): ensureCountdownTicking(), formatCountdown(), nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
 
 ### Community 40 - "renderAdaptive"
-Cohesion: 0.18
-Nodes (14): counterPillHTML(), goalPlaceholder(), helpBtnHTML(), isStepValid(), layoutAxisInfoIcons(), nameSheetHTML(), renderAdaptive(), renderBridge() (+6 more)
+Cohesion: 0.17
+Nodes (16): characterScreenHTML(), counterPillHTML(), goalPlaceholder(), helpBtnHTML(), isStepValid(), layoutAxisInfoIcons(), nameSheetHTML(), radarSheetsHTML() (+8 more)
 
-### Community 41 - "jobMatch.js"
-Cohesion: 0.22
-Nodes (4): ACCEPTED_CV_MIMES, ACCEPTED_IMAGE_MIMES, mammoth, MATCH_STATUSES
+### Community 41 - "onboarding-bridge-audio.e2e.js"
+Cohesion: 0.15
+Nodes (7): assert, { chromium }, fillNameAndReachRadar(), FIXTURE_PATH, path, reachFirstBridge(), { spawn }
 
 ### Community 42 - "onboarding-draft-resume.e2e.js"
 Cohesion: 0.25
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 43 - "auth.js"
-Cohesion: 0.38
-Nodes (6): AuthError, bcrypt, db, login(), normalizeEmail(), signup()
+### Community 43 - "startBridgeAudio"
+Cohesion: 0.20
+Nodes (10): clearBridgeAudioTimers(), ensureBridgeAudioEl(), exitBridge(), preloadNextBridgeAudio(), renderBridge(), renderBridgeDevPreview(), startBridgeAudio(), stopBridgeAudio() (+2 more)
 
-### Community 45 - "structured.js"
-Cohesion: 0.50
-Nodes (4): CARDIO_ACTIVITIES, num(), SPEED_CAP_KMH, validateStructuredData()
+### Community 44 - "generate-onboarding-audio.js"
+Cohesion: 0.22
+Nodes (9): APPLY, BRIDGE_VOICE_LINES, fs, main(), onlyArg, OUTPUT_DIR, path, IMPORTANT: always listen to every generated file before committing - TTS (+1 more)
 
 ## Knowledge Gaps
-- **191 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+186 more)
+- **204 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+199 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **7 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Eleva README.md` connect `Eleva README.md` to `Goal Capture (v13, bridge to First Trial)`, `7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)`, `DEPLOY_RAILWAY.md — Railway Deployment Guide`?**
-  _High betweenness centrality (0.005) - this node is a cross-community bridge._
+  _High betweenness centrality (0.004) - this node is a cross-community bridge._
 - **Why does `Task 5: Adaptive Pathway Onboarding` connect `Task 5: Adaptive Pathway Onboarding` to `Adaptive Scenario Cards`, `Goal Capture (v13, bridge to First Trial)`, `7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
 - **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `Adaptive Scenario Cards` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`?**
   _High betweenness centrality (0.003) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
-  _191 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _204 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `index.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.07389162561576355 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0507399577167019 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.04081632653061224 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0392156862745098 - nodes in this community are weakly interconnected._
 - **Should `claude.js` be split into smaller, more focused modules?**
   _Cohesion score 0.06440677966101695 - nodes in this community are weakly interconnected._
