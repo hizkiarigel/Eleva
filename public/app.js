@@ -1102,7 +1102,15 @@ const ONBOARDING_BRIDGES = {
   },
   // Full order (7 stages, registered one at a time as art arrives): 1
   // Journey, 2 Quest, 3 Evidence, 4 Character, 5 Adaptive, 6 META, 7
-  // Pathway. Stages 2, 3, 6, 7 not yet registered.
+  // Pathway. Stages 3, 6, 7 not yet registered.
+  quest: {
+    order: 2,
+    name: "Quest — The Mission",
+    image: "02-quest", // -> /onboarding/bridges/02-quest.webp
+    headline: "Targetmu menjadi quest.",
+    voiceText: "Targetmu kita ubah jadi quest, biar lebih enak dijalani.",
+    nextType: "personalized_question",
+  },
   character: {
     order: 4,
     name: "Character / Acting — The Becoming",

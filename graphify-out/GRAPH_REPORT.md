@@ -1,7 +1,7 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 47 files · ~396,968 words
+- 47 files · ~407,315 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c12d6c93`
+- Built from commit: `e193adcd`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 

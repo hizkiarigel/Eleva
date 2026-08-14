@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786708997.760487,
-    "ast_hash": "da2f3e0fc8bf6a0cf509b23e78c99268",
+    "mtime": 1786709214.0804815,
+    "ast_hash": "f0e3badd57bb7a2bf51b4eddb84bf92d",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -292,6 +292,11 @@
   "public/onboarding/bridges/04-character.webp": {
     "mtime": 1786708985.0524874,
     "ast_hash": "9705912cceb8b0d4de88539d7270ab86",
+    "semantic_hash": ""
+  },
+  "public/onboarding/bridges/02-quest.webp": {
+    "mtime": 1786709200.952482,
+    "ast_hash": "2d0689aacc54239eb0592e74cbb474aa",
     "semantic_hash": ""
   }
 }
