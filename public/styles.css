@@ -284,10 +284,10 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
      verified down to a real iPhone 12/13/14's 844px), shorter devices
      (a real iPhone SE's 667px and below) lean on the overflow-y:auto
      safety net above, same as the other two screens' extreme-height case. */
-  --qc-card-mt: clamp(4px, calc(var(--vh, 1dvh) * 0.85), 6px);
-  --qc-instruction-mt: clamp(3px, calc(var(--vh, 1dvh) * 0.7), 5px);
-  --qc-instruction-mb: clamp(3px, calc(var(--vh, 1dvh) * 0.6), 4px);
-  --qc-answers-gap: clamp(2px, calc(var(--vh, 1dvh) * 0.5), 3px);
+  --qc-card-mt: clamp(10px, calc(var(--vh, 1dvh) * 2), 16px);
+  --qc-instruction-mt: clamp(8px, calc(var(--vh, 1dvh) * 1.5), 12px);
+  --qc-instruction-mb: clamp(8px, calc(var(--vh, 1dvh) * 1.5), 12px);
+  --qc-answers-gap: clamp(10px, calc(var(--vh, 1dvh) * 1.8), 14px);
   padding: var(--qc-pad-top) 8px var(--qc-pad-bottom);
 }
 .shell-qcard .radar-header-row { flex: none; }
@@ -306,7 +306,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .qcard-star { position: absolute; top: min(14px, calc(14 / 390 * 100vw)); right: min(18px, calc(18 / 390 * 100vw)); filter: drop-shadow(0 0 4px rgba(229, 170, 80, .7)); }
 .qcard-question {
   position: relative; margin: 0; font-family: "Lora", serif; font-weight: 500;
-  font-size: min(24px, calc(24 / 390 * 100vw)); line-height: 1.48; color: #f1ebdd;
+  font-size: min(22px, calc(22 / 390 * 100vw)); line-height: 1.48; color: #f1ebdd; text-align: justify;
 }
 .qcard-instruction {
   flex: none; margin: var(--qc-instruction-mt) 0 var(--qc-instruction-mb); font-family: "Inter", sans-serif;

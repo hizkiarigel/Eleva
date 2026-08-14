@@ -2084,9 +2084,9 @@ function renderAdaptive() {
               </button>`;
             }).join("")}
           </div>
-          <div class="onboard-nav-row" style="justify-content:flex-end">
-            <button class="btn-primary" id="confirmCard" ${bothPicked ? "" : "disabled"}>Lanjut →</button>
-          </div>
+        </div>
+        <div class="onboard-nav-row" style="justify-content:flex-end">
+          <button class="btn-primary" id="confirmCard" ${bothPicked ? "" : "disabled"}>Lanjut →</button>
         </div>
       </div>`;
     document.querySelectorAll(".qcard-answer").forEach((btn) => {
