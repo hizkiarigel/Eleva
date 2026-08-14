@@ -35,6 +35,7 @@
   "33": "onboarding-radar.e2e.js",
   "34": "Adaptive Scenario Cards",
   "35": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)",
-  "36": "appHeaderHTML",
-  "37": "renderAuth"
+  "36": "onboarding-name.e2e.js",
+  "37": "renderAuth",
+  "38": "buildPathwayOptions"
 }

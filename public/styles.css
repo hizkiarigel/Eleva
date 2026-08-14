@@ -49,6 +49,103 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 
 .shell { max-width: 560px; margin: 0 auto; padding: 48px 24px 80px; position: relative; }
+
+/* "Siapa namamu?" name-input screen (design handoff, "Eleva Onboarding
+   Name") - the screen immediately before the Growth Focus Radar step, and
+   deliberately reuses that screen's proven fixed/no-scroll viewport
+   pattern (position:fixed, --vh JS measurement, overflow-y:auto safety
+   net - see .shell-radar for the full history of why this exact shape was
+   settled on) so it feels visually and behaviorally continuous with it.
+   Sizing follows the handoff's own responsive rule directly in CSS: each
+   value scales as min(VALUEpx, VALUE/390 * 100vw) - i.e. holds its
+   390px-calibrated size at 390px+ width, and shrinks proportionally only
+   below that (k = min(1, frameWidth/390)) - no JS needed for this part. */
+.shell.shell-name {
+  position: fixed; inset: 10px; height: calc(var(--vh, 1dvh) * 100 - 20px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  max-width: 540px; margin: 0 auto; display: flex; flex-direction: column;
+  --sn-pad-h: min(26px, calc(26 / 390 * 100vw));
+  --sn-header-h: min(44px, calc(44 / 390 * 100vw));
+  --sn-help-size: min(42px, calc(42 / 390 * 100vw));
+  --sn-help-font: min(15px, calc(15 / 390 * 100vw));
+  --sn-eyebrow-font: min(11.5px, calc(11.5 / 390 * 100vw));
+  --sn-title-font: min(44px, calc(44 / 390 * 100vw));
+  --sn-explain-font: min(16px, calc(16 / 390 * 100vw));
+  --sn-input-h: min(76px, calc(76 / 390 * 100vw));
+  --sn-input-radius: min(17px, calc(17 / 390 * 100vw));
+  --sn-input-pad: min(21px, calc(21 / 390 * 100vw));
+  --sn-input-font: min(17px, calc(17 / 390 * 100vw));
+  --sn-sparkle-size: min(17px, calc(17 / 390 * 100vw));
+  --sn-highlight-font: min(15.5px, calc(15.5 / 390 * 100vw));
+  --sn-secondary-font: min(14.5px, calc(14.5 / 390 * 100vw));
+  --sn-secondary-indent: min(30px, calc(30 / 390 * 100vw));
+  --sn-bottom-pad: min(28px, calc(28 / 390 * 100vw));
+  --sn-back-font: min(16px, calc(16 / 390 * 100vw));
+  --sn-cta-w: min(152px, calc(152 / 390 * 100vw));
+  --sn-cta-h: min(60px, calc(60 / 390 * 100vw));
+  --sn-cta-radius: min(17px, calc(17 / 390 * 100vw));
+  --sn-cta-font: min(18px, calc(18 / 390 * 100vw));
+  /* Gap/margin values ALSO compress on short viewports (clamp's middle
+     term, calc(var(--vh)*N)), on top of the width-scaling cap - the
+     handoff's own responsive rule only covers width, but a real phone
+     varies in HEIGHT too (unlike the design tool's flat 390x693 frame),
+     and the handoff's own priority order for insufficient vertical space
+     is "gaps between sections, then the flexible spacer, then title-to-
+     description gap" BEFORE ever touching title/input/CTA size - so only
+     these spacing tokens get a vh floor; title-font/input-h/cta-w/cta-h/
+     bottom-pad above stay purely width-scaled, per that same instruction
+     ("never shrink title readability, input touch height, CTA size, or
+     bottom safe-area padding"). */
+  /* Cap reached around a ~750px-tall viewport (near-pixel-perfect on the
+     vast majority of real phones, all taller than that) - compression
+     only actually engages below it. Genuinely shorter viewports (<~650px)
+     lean on the overflow-y:auto safety net above instead of compressing
+     all the way to floor, matching the same "compression primary, scroll
+     backup" split already proven on the radar screen. */
+  --sn-pad-top: clamp(8px, calc(var(--vh, 1dvh) * 3.2), min(24px, calc(24 / 390 * 100vw)));
+  --sn-progress-mt: clamp(5px, calc(var(--vh, 1dvh) * 2.1), min(16px, calc(16 / 390 * 100vw)));
+  --sn-title-mt: clamp(8px, calc(var(--vh, 1dvh) * 3.7), min(28px, calc(28 / 390 * 100vw)));
+  --sn-title-mb: clamp(5px, calc(var(--vh, 1dvh) * 2.1), min(16px, calc(16 / 390 * 100vw)));
+  --sn-explain-mb: clamp(8px, calc(var(--vh, 1dvh) * 3.7), min(28px, calc(28 / 390 * 100vw)));
+  --sn-highlight-gap: min(6px, calc(6 / 390 * 100vw));
+  --sn-highlight-mt: clamp(8px, calc(var(--vh, 1dvh) * 3.5), min(26px, calc(26 / 390 * 100vw)));
+  --sn-secondary-mt: clamp(3px, calc(var(--vh, 1dvh) * 1.9), min(14px, calc(14 / 390 * 100vw)));
+  --sn-spacer-min: clamp(0px, calc(var(--vh, 1dvh) * 3.2), min(24px, calc(24 / 390 * 100vw)));
+  padding: var(--sn-pad-top) var(--sn-pad-h) 0;
+}
+.name-header-row { flex: none; display: flex; align-items: center; justify-content: space-between; height: var(--sn-header-h); }
+.name-eyebrow { font-family: "Inter", sans-serif; font-size: var(--sn-eyebrow-font); font-weight: 500; letter-spacing: .2em; color: #f1ebdd; margin: 0; }
+.name-help-btn {
+  width: var(--sn-help-size); height: var(--sn-help-size); flex: none; border-radius: 50%; background: transparent;
+  border: 1px solid rgba(229, 170, 80, .65); color: #f1ebdd; font-family: "Inter", sans-serif; font-size: var(--sn-help-font);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.name-progress-track { flex: none; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .08); margin-top: var(--sn-progress-mt); overflow: hidden; }
+.name-progress-fill { width: 42%; height: 100%; border-radius: 2px; background: #e5aa50; box-shadow: 0 0 8px rgba(229, 170, 80, .6); }
+.name-title { flex: none; font-family: "Fraunces", serif; font-weight: 500; font-size: var(--sn-title-font); line-height: 1.1; color: #f1ebdd; margin: var(--sn-title-mt) 0 var(--sn-title-mb); }
+.name-explain { flex: none; font-family: "Inter", sans-serif; font-size: var(--sn-explain-font); line-height: 1.5; color: #95919e; margin: 0 0 var(--sn-explain-mb); }
+.name-input {
+  flex: none; width: 100%; height: var(--sn-input-h); box-sizing: border-box; border-radius: var(--sn-input-radius);
+  background: rgba(18, 18, 26, .75); border: 1px solid rgba(229, 170, 80, .65); box-shadow: 0 0 10px rgba(229, 170, 80, .15);
+  padding: 0 var(--sn-input-pad); font-family: "Inter", sans-serif; font-size: var(--sn-input-font); color: #f1ebdd;
+  outline: none; transition: all .15s ease;
+}
+.name-input::placeholder { color: #6f6b78; opacity: 1; }
+.name-input:focus { border: 1.5px solid #f0be74; box-shadow: 0 0 18px rgba(229, 170, 80, .35); }
+.name-highlight-row { flex: none; display: flex; align-items: flex-start; gap: var(--sn-highlight-gap); margin-top: var(--sn-highlight-mt); }
+.name-sparkle { display: block; width: var(--sn-sparkle-size); height: var(--sn-sparkle-size); color: #e5aa50; flex: none; margin-top: 2px; }
+.name-highlight-text { font-family: "Fraunces", serif; font-style: italic; font-size: var(--sn-highlight-font); line-height: 1.45; color: #e5aa50; margin: 0; }
+.name-secondary-note { flex: none; font-family: "Inter", sans-serif; font-size: var(--sn-secondary-font); line-height: 1.45; color: #95919e; margin: var(--sn-secondary-mt) 0 0 var(--sn-secondary-indent); }
+.name-spacer { flex: 1 1 auto; min-height: var(--sn-spacer-min); }
+.name-bottom-row { flex: none; display: flex; align-items: center; justify-content: space-between; padding-bottom: var(--sn-bottom-pad); }
+.name-back-btn { font-family: "Inter", sans-serif; font-size: var(--sn-back-font); font-weight: 500; color: #95919e; cursor: pointer; min-height: 44px; display: flex; align-items: center; background: none; border: none; }
+.name-cta {
+  width: var(--sn-cta-w); height: var(--sn-cta-h); border-radius: var(--sn-cta-radius); border: none;
+  font-family: "Inter", sans-serif; font-weight: 600; font-size: var(--sn-cta-font);
+  display: flex; align-items: center; justify-content: center; transition: all .2s ease;
+  background: linear-gradient(180deg, #ecb968, #e5aa50); color: #1a1409; cursor: pointer; box-shadow: 0 4px 20px rgba(229, 170, 80, .35);
+}
+.name-cta:disabled { background: #3a342b; color: #95919e; cursor: not-allowed; box-shadow: none; }
+.name-consent { flex: none; font-size: 12px; line-height: 1.6; color: #95919e; text-align: center; margin: 10px 0 var(--sn-bottom-pad); }
 .centered { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
 .onboard-nav-row { display: flex; justify-content: space-between; align-items: center; margin-top: 28px; }
 

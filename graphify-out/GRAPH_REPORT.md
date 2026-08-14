@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 45 files · ~363,284 words
+- 46 files · ~364,654 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 568 nodes · 886 edges · 38 communities (31 shown, 7 thin omitted)
+- 575 nodes · 893 edges · 39 communities (32 shown, 7 thin omitted)
 - Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 103 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `dfc7ec0d`
+- Built from commit: `9bd2ba23`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -51,8 +51,9 @@
 - onboarding-radar.e2e.js
 - Adaptive Scenario Cards
 - 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
-- appHeaderHTML
+- onboarding-name.e2e.js
 - renderAuth
+- buildPathwayOptions
 
 ## God Nodes (most connected - your core abstractions)
 1. `esc()` - 38 edges
@@ -60,11 +61,11 @@
 3. `hasKey()` - 15 edges
 4. `renderAdaptive()` - 12 edges
 5. `render()` - 12 edges
-6. `completedResultCardHTML()` - 11 edges
-7. `callClaude()` - 11 edges
-8. `renderAuth()` - 10 edges
-9. `renderPolygonSVG()` - 10 edges
-10. `renderOnboarding()` - 10 edges
+6. `renderOnboarding()` - 11 edges
+7. `completedResultCardHTML()` - 11 edges
+8. `callClaude()` - 11 edges
+9. `renderAuth()` - 10 edges
+10. `renderPolygonSVG()` - 10 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Growth-Gate (12-word deterministic check)` --semantically_similar_to--> `Discrete Confidence-Score Rubric (0.95/0.85/0.75/0.65/0.55)`  [INFERRED] [semantically similar]
@@ -86,7 +87,7 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (38 total, 7 thin omitted)
+## Communities (39 total, 7 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.05
@@ -126,7 +127,7 @@ Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcry
 
 ### Community 9 - "render"
 Cohesion: 0.32
-Nodes (12): api(), authFinish(), boot(), buildPathwayOptions(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder(), pickRandomSubPathway() (+4 more)
+Nodes (12): api(), authFinish(), boot(), fetchChapterAnalysis(), fetchScenarioCard(), goalPlaceholder(), helpBtnHTML(), openNutritionFlow() (+4 more)
 
 ### Community 10 - "esc"
 Cohesion: 0.14
@@ -150,7 +151,7 @@ Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 1
 
 ### Community 18 - "renderDashboard"
 Cohesion: 0.10
-Nodes (24): activeSomaQuest(), beginStructuredOrReflectiveFlow(), durasiMenitFromFields(), ensureCountdownTicking(), fileToBase64(), formatCountdown(), helpBtnHTML(), maturityTier() (+16 more)
+Nodes (24): activeSomaQuest(), appHeaderHTML(), beginStructuredOrReflectiveFlow(), durasiMenitFromFields(), ensureCountdownTicking(), fileToBase64(), formatCountdown(), maturityTier() (+16 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -169,8 +170,8 @@ Cohesion: 0.40
 Nodes (5): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence)
 
 ### Community 24 - "renderOnboarding"
-Cohesion: 0.13
-Nodes (25): attachPolygonHandlers(), axisLabelLayout(), characterScreenHTML(), clearActiveAxisNow(), counterPillHTML(), formatRadarValue(), heptagonPath(), isStepValid() (+17 more)
+Cohesion: 0.12
+Nodes (26): attachPolygonHandlers(), axisLabelLayout(), characterScreenHTML(), clearActiveAxisNow(), counterPillHTML(), formatRadarValue(), heptagonPath(), isStepValid() (+18 more)
 
 ### Community 25 - "Eleva README.md"
 Cohesion: 0.16
@@ -208,12 +209,16 @@ Nodes (5): graphify Honesty Rules, Adaptive Scenario Cards, Defense-in-Depth Pat
 Cohesion: 0.50
 Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
 
+### Community 36 - "onboarding-name.e2e.js"
+Cohesion: 0.33
+Nodes (3): assert, { chromium }, { spawn }
+
 ### Community 37 - "renderAuth"
 Cohesion: 0.32
 Nodes (8): authConsentInfoModalHTML(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
 
 ## Knowledge Gaps
-- **177 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+172 more)
+- **180 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+175 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **7 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -227,7 +232,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `Adaptive Scenario Cards` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
-  _177 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _180 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `index.js` be split into smaller, more focused modules?**
   _Cohesion score 0.0507399577167019 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**

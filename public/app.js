@@ -1084,11 +1084,12 @@ async function runAuthEntering(statePrefetch) {
 
 // Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both
 // gone, folded into the adaptive conversation and the radar chart itself.
+// Growth Focus Radar handoff (v5) and the "Eleva Onboarding Name" handoff:
+// both steps' copy is hardcoded directly in renderOnboarding (needs
+// explicit <br/> line breaks, not just an escaped string) - q/sub fields
+// here would be dead weight.
 const ONBOARD_STEPS = [
-  { type: "namePromise", q: "Siapa namamu?", promiseText: "Semua yang kamu ceritakan di sini hanya untuk kamu dan Eleva." },
-  // Growth Focus Radar handoff (v5): heading/explainer copy for this step is
-  // now hardcoded directly in renderOnboarding (needs explicit <br/> line
-  // breaks, not just an escaped string) - q/sub here would be dead weight.
+  { type: "namePromise" },
   { type: "radar" },
 ];
 
@@ -1531,25 +1532,67 @@ function radarSheetsHTML() {
   return "";
 }
 
+// "Eleva Onboarding Name" handoff: help sheet reuses the exact same shell
+// AND inner content classes as the radar screen's own sheets
+// (.help-sheet.radar-sheet, .radar-sheet-title/-body/-close) per the
+// handoff's explicit "same shell as the radar screen's sheets" note -
+// deliberately not a parallel near-duplicate set of classes. Same
+// #helpOverlay/#closeHelp id reuse as radarSheetsHTML(), so the existing
+// app-wide delegated click handler needs zero new wiring here either.
+function nameSheetHTML() {
+  if (helpOpen !== "name") return "";
+  return `
+    <div class="help-overlay" id="helpOverlay">
+      <div class="help-sheet radar-sheet fadeUp">
+        <div class="radar-sheet-title">Tentang onboarding</div>
+        <p class="radar-sheet-body">Jawabanmu membantu Eleva menyesuaikan pathway, quest, dan arah perkembanganmu.</p>
+        <button class="radar-sheet-close" id="closeHelp">Mengerti</button>
+      </div>
+    </div>`;
+}
+
 function renderOnboarding() {
   const step = ONBOARD_STEPS[onboardStep];
   const last = onboardStep === ONBOARD_STEPS.length - 1;
 
-  let bodyHTML = "";
-  let headingHTML = "";
   if (step.type === "namePromise") {
-    headingHTML = `<h1 class="fr" style="font-size:28px;font-weight:600;margin:0 0 6px">${esc(step.q)}</h1>
-      ${step.sub ? `<p style="color:var(--muted);font-size:14px;margin:0 0 20px">${esc(step.sub)}</p>` : `<div style="height:20px"></div>`}`;
-    bodyHTML = `
-      <input type="text" id="fld" value="${esc(onboardForm.name)}" placeholder="Nama panggilan" autofocus />
-      <p class="fr" style="font-size:15.5px;line-height:1.6;font-style:italic;color:var(--muted);margin:18px 0">${esc(step.promiseText)}</p>`;
+    // "Eleva Onboarding Name" handoff: bespoke shell (.shell-name) mirroring
+    // .shell-radar's fixed/no-scroll viewport pattern so this screen feels
+    // continuous with the one right after it - see .shell-name in
+    // styles.css for why that specific pattern (not a plain scrollable
+    // page) was chosen. Help sheet reuses the radar screen's exact sheet
+    // classes (nameSheetHTML) per the handoff's own "same shell as the
+    // radar screen's sheets" instruction.
+    root.innerHTML = `
+      <div class="shell shell-name">
+        <div class="name-header-row">
+          <div class="name-eyebrow mono">ELEVA · ONBOARDING</div>
+          <button class="name-help-btn" data-help="name" aria-label="Bantuan">?</button>
+        </div>
+        <div class="name-progress-track"><div class="name-progress-fill"></div></div>
+        <h1 class="fr name-title">Siapa namamu?</h1>
+        <p class="name-explain">Nama ini akan Eleva gunakan untuk menyapamu sepanjang perjalananmu.</p>
+        <input type="text" id="fld" class="name-input" value="${esc(onboardForm.name)}" placeholder="Nama panggilan" autofocus />
+        <div class="name-highlight-row">
+          <svg width="17" height="17" viewBox="0 0 24 24" class="name-sparkle"><path d="M12 2l2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2L12 2z" fill="currentColor" /></svg>
+          <p class="fr name-highlight-text">Semua yang kamu ceritakan di sini membantu Eleva mengenal perjalananmu.</p>
+        </div>
+        <p class="name-secondary-note">Data onboardingmu digunakan untuk mempersonalisasi pengalaman Eleva.</p>
+        <div class="name-spacer"></div>
+        <div class="name-bottom-row">
+          <button class="name-back-btn" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">Kembali</button>
+          <button class="name-cta" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
+        </div>
+        <p class="name-consent">Dengan tap Lanjut, kamu setuju dengan pesan privasi di atas.</p>
+      </div>
+      ${nameSheetHTML()}`;
   } else if (step.type === "radar") {
     // Growth Focus Radar handoff: exact copy, explicit 2-line breaks (not
     // browser auto-wrap) - raw HTML is safe here, both strings are fixed
     // literals, never user input.
-    headingHTML = `<h1 class="fr radar-heading">Ke mana kamu mau<br/>fokus sekarang?</h1>
+    const headingHTML = `<h1 class="fr radar-heading">Ke mana kamu mau<br/>fokus sekarang?</h1>
       <p class="radar-explainer">Ini tentang prioritasmu ke depan, bukan menilai kondisimu saat ini.<br/>Tarik titik untuk menentukan porsi fokus yang paling penting bagimu.</p>`;
-    bodyHTML = `
+    const bodyHTML = `
       <div class="radar-tradeoff-strip">
         <span class="radar-tradeoff-icon">✦</span>
         <span class="radar-tradeoff-text">Kamu tidak bisa membuat semua area jadi <span class="radar-accent-strong">10/10</span> sekaligus.</span>
@@ -1569,33 +1612,27 @@ function renderOnboarding() {
       <p class="mono" id="limitHint" style="font-size:12px;color:var(--accent);margin-top:10px;text-align:center;display:none"></p>
       <div id="radarCounterSlot" class="radar-counter-slot">${counterPillHTML()}</div>
       <div class="radar-max-lock-warning" id="radarMaxLockWarning">Maksimal 3 prioritas.<br/>Buka salah satu prioritas dulu.</div>`;
-  }
 
-  root.innerHTML = `
-    <div class="shell ${step.type === "radar" ? "shell-radar" : ""}">
-      ${step.type === "radar" ? `
-      <div class="radar-header-row">
-        <div class="eyebrow mono radar-header-eyebrow">ELEVA · ONBOARDING</div>
-        <button class="radar-help-btn" data-help="radar" aria-label="Bantuan">?</button>
-      </div>
-      <div class="step-dots">
-        ${ONBOARD_STEPS.map((_, i) => `<div class="dot-seg ${i <= onboardStep ? "active" : ""}"></div>`).join("")}
-      </div>
-      ${radarSheetsHTML()}` : `
-      <div class="eyebrow mono">ELEVA · ONBOARDING</div>
-      <div class="step-dots">
-        ${ONBOARD_STEPS.map((_, i) => `<div class="dot-seg ${i <= onboardStep ? "active" : ""}"></div>`).join("")}
-      </div>`}
-      <div class="fadeUp">
-        ${headingHTML}
-        <div class="field">${bodyHTML}</div>
-      </div>
-      <div class="onboard-nav-row">
-        <button class="btn-ghost" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">← Kembali</button>
-        <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
-      </div>
-      ${step.type === "namePromise" ? `<p style="font-size:12px;line-height:1.6;color:var(--muted);text-align:center;margin:14px 0 0">Dengan tap Lanjut, kamu setuju dengan pesan privasi di atas.</p>` : ""}
-    </div>`;
+    root.innerHTML = `
+      <div class="shell shell-radar">
+        <div class="radar-header-row">
+          <div class="eyebrow mono radar-header-eyebrow">ELEVA · ONBOARDING</div>
+          <button class="radar-help-btn" data-help="radar" aria-label="Bantuan">?</button>
+        </div>
+        <div class="step-dots">
+          ${ONBOARD_STEPS.map((_, i) => `<div class="dot-seg ${i <= onboardStep ? "active" : ""}"></div>`).join("")}
+        </div>
+        ${radarSheetsHTML()}
+        <div class="fadeUp">
+          ${headingHTML}
+          <div class="field">${bodyHTML}</div>
+        </div>
+        <div class="onboard-nav-row">
+          <button class="btn-ghost" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">← Kembali</button>
+          <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
+        </div>
+      </div>`;
+  }
 
   const fld = document.getElementById("fld");
   if (fld) fld.addEventListener("input", (e) => {
