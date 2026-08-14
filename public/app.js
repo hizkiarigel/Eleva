@@ -1188,7 +1188,12 @@ function renderPolygonSVG() {
     const tspans = L.lines.map((line, li) => `<tspan x="${L.x.toFixed(1)}" dy="${li === 0 ? 0 : 13}">${esc(line)}</tspan>`).join("");
     // The (i) info icon sits just right of the (always centered) label text,
     // with an oversized invisible hit circle - r=6 visual alone is too
-    // small a touch target.
+    // small a touch target. This is a rough placeholder position (Inter is
+    // a proportional font, a flat per-character estimate consistently
+    // undershoots real width and used to land the icon on top of the text
+    // tail) - layoutAxisInfoIcons() corrects it with a real DOM
+    // measurement immediately after this markup is in the DOM, before the
+    // browser gets a chance to paint.
     const maxChars = Math.max(...L.lines.map((l) => l.length));
     const w = maxChars * MONO_CHAR_W;
     const iconX = L.x + w / 2 + 3;
@@ -1208,9 +1213,9 @@ function renderPolygonSVG() {
     const isLocked = onboardForm.locked.includes(k);
     const disabled = !isLocked && onboardForm.locked.length >= MAX_LOCKS;
     return `<g class="lock-btn ${isLocked ? "locked" : ""} ${disabled ? "disabled" : ""}" data-lock-btn-for="${k}">
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16" class="lock-btn-bg" />
-      ${lockIconSVG(x, y, 14, isLocked)}
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="19" class="lock-btn-hit" data-lock-hit="${k}" />
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="17.5" class="lock-btn-bg" />
+      ${lockIconSVG(x, y, 15.5, isLocked)}
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20.5" class="lock-btn-hit" data-lock-hit="${k}" />
     </g>`;
   }).join("");
   // Value node: unlocked-inactive / unlocked-active (just dragged or its
@@ -1223,9 +1228,9 @@ function renderPolygonSVG() {
     const isLocked = onboardForm.locked.includes(k);
     const isActive = !isLocked && activeAxisKey === k;
     const dotClass = isLocked ? "locked" : isActive ? "active" : "";
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" class="poly-dot ${dotClass}" data-dot-for="${k}" />
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13.5" class="poly-dot ${dotClass}" data-dot-for="${k}" />
       <text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="poly-value ${isLocked ? "locked" : ""}" data-value-for="${k}" text-anchor="middle">${formatRadarValue(radar[k])}</text>
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="19" class="poly-handle" data-stat="${k}" />`;
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20.5" class="poly-handle" data-stat="${k}" />`;
   }).join("");
   const centerDot = `<circle cx="${POLY_CENTER}" cy="${POLY_CENTER}" r="3" class="poly-center" />`;
   return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${rings}${outerHeptagon}${axisLines}${scaleNums}<path d="${pathD}" class="poly-shape" id="polyShape" />${centerDot}${labels}${lockBtns}${handles}</svg>`;
@@ -1386,6 +1391,33 @@ function toggleLock(key) {
   renderCounterPillDOM();
 }
 
+// Round 13 (founder: the "i" info icon overlaps the label text on all 7
+// axes) - the estimate in renderPolygonSVG() above is necessarily rough
+// (Inter is proportional, not monospace), so this corrects every icon's
+// position with a real getBBox() measurement of its label's actual
+// rendered text, right after the radar step's HTML is in the DOM. Axis
+// labels never move after initial render (only value nodes do, via
+// updatePolygonDOM() during drag/lock), so this only needs to run once
+// per full render, not per frame.
+function layoutAxisInfoIcons() {
+  const svg = document.getElementById("polySvg");
+  if (!svg) return;
+  POLY_ORDER.forEach((k) => {
+    const textEl = svg.querySelector(`text[data-label-for="${k}"]`);
+    const group = svg.querySelector(`.axis-info-btn[data-axis-info="${k}"]`);
+    if (!textEl || !group) return;
+    const bbox = textEl.getBBox();
+    const iconX = bbox.x + bbox.width + 10; // gap past the real last character, clear of the visual icon's own radius (7.5)
+    const iconY = bbox.y + bbox.height / 2; // vertically centered on the real (possibly 2-line) text block
+    const hit = group.querySelector(".axis-info-hit");
+    const bg = group.querySelector(".axis-info-bg");
+    const glyph = group.querySelector(".axis-info-glyph");
+    if (hit) { hit.setAttribute("cx", iconX.toFixed(1)); hit.setAttribute("cy", iconY.toFixed(1)); }
+    if (bg) { bg.setAttribute("cx", iconX.toFixed(1)); bg.setAttribute("cy", iconY.toFixed(1)); }
+    if (glyph) { glyph.setAttribute("x", iconX.toFixed(1)); glyph.setAttribute("y", (iconY + 3).toFixed(1)); }
+  });
+}
+
 function attachPolygonHandlers() {
   const svg = document.getElementById("polySvg");
   if (!svg) return;
@@ -1543,7 +1575,9 @@ function renderOnboarding() {
         <div class="eyebrow mono radar-header-eyebrow">ELEVA · ONBOARDING</div>
         <button class="radar-help-btn" data-help="radar" aria-label="Bantuan">?</button>
       </div>
-      <div class="radar-progress-track"><div class="radar-progress-fill"></div></div>
+      <div class="step-dots">
+        ${ONBOARD_STEPS.map((_, i) => `<div class="dot-seg ${i <= onboardStep ? "active" : ""}"></div>`).join("")}
+      </div>
       ${radarSheetsHTML()}` : `
       <div class="eyebrow mono">ELEVA · ONBOARDING</div>
       <div class="step-dots">
@@ -1565,7 +1599,7 @@ function renderOnboarding() {
     onboardForm.name = e.target.value;
     document.getElementById("next").disabled = !isStepValid(onboardStep);
   });
-  if (step.type === "radar") attachPolygonHandlers();
+  if (step.type === "radar") { attachPolygonHandlers(); layoutAxisInfoIcons(); }
   // Per-axis (i) info icons live inside the SVG - tapping one toggles the
   // shared helpOpen slot to that axis's info sheet (see radarSheetsHTML).
   document.querySelectorAll("[data-axis-info]").forEach((el) => el.addEventListener("click", (e) => {

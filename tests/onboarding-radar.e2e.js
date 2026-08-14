@@ -299,7 +299,54 @@ async function test(name, fn) {
     });
     assert.strictEqual(nextPad.top, nextPad.bottom, `Lanjut's top/bottom padding must match, got ${JSON.stringify(nextPad)}`);
     assert.strictEqual(nextPad.left, nextPad.right, `Lanjut's left/right padding must match, got ${JSON.stringify(nextPad)}`);
-    assert.strictEqual(nextPad.top, nextPad.left, `Lanjut's padding must be equal on all four sides, got ${JSON.stringify(nextPad)}`);
+  });
+
+  console.log("E2E: round 13 (founder minor polish) - slimmer Lanjut, counter pill position/icon/font, axis info icon no longer overlaps label text, bigger value/lock circles, 2-segment orange progress");
+  await test("Lanjut is slimmer (less vertical than horizontal padding), the counter pill's lock icon is a proper outline padlock at 10px font, every axis's info icon clears its own label text with real measured spacing, value/lock circles are visibly bigger, and the progress indicator is 2 orange segments", async () => {
+    const nextPad = await page.evaluate(() => {
+      const cs = getComputedStyle(document.getElementById("next"));
+      return { top: parseFloat(cs.paddingTop), left: parseFloat(cs.paddingLeft) };
+    });
+    assert.ok(nextPad.top < nextPad.left, `Lanjut should be slimmer (less vertical than horizontal padding), got ${JSON.stringify(nextPad)}`);
+
+    const counterIconFill = await page.evaluate(() => {
+      const rect = document.querySelector(".radar-counter-icon rect");
+      return { fill: getComputedStyle(rect).fill, stroke: getComputedStyle(rect).stroke };
+    });
+    assert.strictEqual(counterIconFill.fill, "none", `counter pill lock icon must be an outline (fill:none), got ${JSON.stringify(counterIconFill)}`);
+    assert.notStrictEqual(counterIconFill.stroke, "none", `counter pill lock icon must have a visible stroke, got ${JSON.stringify(counterIconFill)}`);
+
+    const counterFontSize = await page.evaluate(() => getComputedStyle(document.querySelector(".radar-counter-label")).fontSize);
+    assert.strictEqual(counterFontSize, "10px", `counter pill font-size should be 10px, got ${counterFontSize}`);
+
+    // The real regression this round targets: every axis's (i) info icon
+    // must sit clear of its own label text (a real DOM getBBox() check,
+    // not trusting the character-count estimate that caused the overlap).
+    const overlaps = await page.evaluate(() => {
+      const svg = document.getElementById("polySvg");
+      const bad = [];
+      svg.querySelectorAll(".poly-label").forEach((textEl) => {
+        const key = textEl.getAttribute("data-label-for");
+        const textBox = textEl.getBBox();
+        // .axis-info-bg is the VISIBLE icon circle - .axis-info-hit is a
+        // deliberately oversized invisible touch target that's expected to
+        // extend closer to the text; only the visible circle matters for
+        // "does it look like it overlaps".
+        const iconBg = svg.querySelector(`.axis-info-btn[data-axis-info="${key}"] .axis-info-bg`);
+        const iconLeftEdge = iconBg.cx.baseVal.value - iconBg.r.baseVal.value;
+        if (iconLeftEdge < textBox.x + textBox.width) bad.push(key);
+      });
+      return bad;
+    });
+    assert.deepStrictEqual(overlaps, [], `these axes' info icon overlaps its own label text: ${overlaps.join(", ")}`);
+
+    const radii = await page.evaluate(() => {
+      const dot = document.querySelector(".poly-dot");
+      const lockBg = document.querySelector(".lock-btn-bg");
+      return { dot: dot.r.baseVal.value, lockBg: lockBg.r.baseVal.value };
+    });
+    assert.ok(radii.dot > 12, `value-node radius should be bigger than the previous 12, got ${radii.dot}`);
+    assert.ok(radii.lockBg > 16, `lock-button radius should be bigger than the previous 16, got ${radii.lockBg}`);
   });
 
   console.log("E2E: layout + copy (handoff v5, 'Growth Focus Radar')");
@@ -307,7 +354,10 @@ async function test(name, fn) {
     assert.ok(await page.locator("text=Ke mana kamu mau").count(), "heading missing");
     assert.ok(await page.locator("text=fokus sekarang?").count(), "heading second line missing");
     assert.ok(await page.locator(".radar-help-btn").count(), "circular help button missing from header row");
-    assert.ok(await page.locator(".radar-progress-fill").count(), "progress bar fill missing");
+    const dotSegs = await page.locator(".step-dots .dot-seg").count();
+    assert.strictEqual(dotSegs, 2, `expected 2 step-dot segments (radar is step 2/2), got ${dotSegs}`);
+    const activeDotSegs = await page.locator(".step-dots .dot-seg.active").count();
+    assert.strictEqual(activeDotSegs, 2, `expected both step-dot segments active/orange on the radar step (step 2/2), got ${activeDotSegs}`);
     assert.ok(await page.locator("text=Kamu tidak bisa membuat semua area jadi").count(), "trade-off strip copy missing");
     assert.ok(await page.locator(".radar-lock-instr-item", { hasText: "maksimal 3" }).count(), "lock-instructions 'maksimal 3' item missing");
     assert.ok(await page.locator(".radar-lock-instr-item", { hasText: "mengunci" }).count(), "lock-instructions 'mengunci' item missing");

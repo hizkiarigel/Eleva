@@ -9,7 +9,7 @@
   "7": "Eleva_Prototype.jsx",
   "8": "package.json",
   "9": "render",
-  "10": "nutritionFlowHTML",
+  "10": "completedResultCardHTML",
   "11": "jobMatch.js",
   "12": "practiceTest.js",
   "13": "practicetest.e2e.js",
@@ -23,7 +23,7 @@
   "21": "livelihood.e2e.js",
   "22": "auth.e2e.js",
   "23": "DEPLOY_RAILWAY.md — Railway Deployment Guide",
-  "24": "renderPolygonSVG",
+  "24": "renderOnboarding",
   "25": "Eleva README.md",
   "26": "Growth-Gate (12-word deterministic check)",
   "27": "Task 5: Adaptive Pathway Onboarding",
@@ -34,5 +34,6 @@
   "32": "applyCalibrationCard",
   "33": "onboarding-radar.e2e.js",
   "34": "ensureCountdownTicking",
+  "35": "3-Card Pathway Recommendation Carousel",
   "37": "renderAuth"
 }

@@ -142,22 +142,31 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    padding - falls back to 0 automatically on short viewports where
    there's no leftover space to begin with. */
 .shell-radar .onboard-nav-row { margin-top: auto; flex: none; }
-/* Round 10 (founder): equal padding on all four sides, tight around the
-   text - not the base .btn-primary's fixed min-height:52px box. */
-.shell-radar .btn-primary { padding: 10px; min-height: 0; }
+/* Round 10 (founder): tight around the text, not the base .btn-primary's
+   fixed min-height:52px box. Round 13 (founder: "terlalu gendut" - too
+   chunky): asymmetric padding, less vertical than horizontal, reads as
+   slimmer than the original equal 10px on all sides. */
+.shell-radar .btn-primary { padding: 8px 20px; min-height: 0; }
 .shell-radar .fadeUp { min-height: 0; display: flex; flex-direction: column; }
 /* Scoped descendant overrides (not edits to the base rules) so the
    Chapter Analysis comparison chart elsewhere, which reuses .poly-svg/
    .poly-wrap outside .shell-radar, is completely unaffected. */
 .shell-radar .radar-header-row { flex: none; }
-.shell-radar .radar-progress-track { margin-bottom: var(--rd-md); flex: none; }
+/* Round 13 (founder): replaced the radar step's own always-25%-filled
+   bar with the same discrete per-step segment indicator every other
+   onboarding step already uses (.step-dots/.dot-seg below) - the radar
+   is genuinely step 2 of 2, so both segments end up .active (orange). */
+.shell-radar .step-dots { margin-top: 6px; margin-bottom: var(--rd-md); flex: none; }
 .shell-radar .radar-heading { margin: var(--rd-xs) 0 var(--rd-xs); flex: none; }
 .shell-radar .radar-explainer { margin: 0 0 var(--rd-md); flex: none; }
 .shell-radar .radar-tradeoff-strip { margin-bottom: var(--rd-sm); flex: none; }
 .shell-radar .radar-lock-instructions { flex: none; }
 .shell-radar .poly-wrap { margin: var(--rd-lg) auto 0; flex: none; }
 .shell-radar .poly-svg { max-width: var(--rd-svg-max); }
-.shell-radar .radar-counter-slot { margin-top: var(--rd-lg); flex: none; }
+/* Round 13 (founder): raise the counter pill up slightly - roughly one
+   text-line's worth less than the compressed spacing above, floored at
+   0 so it can't go negative on a very compressed viewport. */
+.shell-radar .radar-counter-slot { margin-top: max(0px, calc(var(--rd-lg) - 14px)); flex: none; }
 .shell-radar .field { flex: none; }
 
 .eyebrow { color: var(--muted); font-size: 12px; letter-spacing: 1.5px; margin-bottom: 8px; }
@@ -309,8 +318,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   border: 1px solid rgba(216, 163, 85, .5); color: #f1eee8; font-family: "Fraunces", serif; font-size: 14px;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
-.radar-progress-track { height: 4px; border-radius: 2px; background: rgba(148, 100, 60, .28); margin-top: 6px; margin-bottom: 16px; overflow: hidden; }
-.radar-progress-fill { width: 25%; height: 100%; border-radius: 2px; background: #d8a355; }
 .radar-heading { font-family: "Fraunces", serif; font-weight: 500; font-size: 20px; line-height: 1.1; color: #f1eee8; margin: 4px 0 2px; }
 .radar-explainer { font-family: "Inter", sans-serif; font-size: 11px; line-height: 1.28; color: #948f9c; margin: 0 0 16px; }
 .radar-accent-strong { color: #d8a355; font-weight: 600; }
@@ -337,9 +344,13 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   border: 1px solid rgba(216, 163, 85, .3); border-radius: 18px; padding: 0 14px;
 }
 .radar-counter-icon { color: #d8a355; flex: none; }
-.radar-counter-icon rect, .radar-counter-icon path { stroke: none; fill: currentColor; }
-.radar-counter-count { color: #d8a355; font-weight: 700; font-size: 12px; }
-.radar-counter-label { color: #f1eee8; font-family: "Inter", sans-serif; font-size: 12px; }
+/* Round 13 (founder: doesn't read as a padlock) - was solid-filling the
+   shackle's open-arc path, which doesn't render as a loop. Match the
+   outline convention every other padlock icon in the app uses
+   (.lock-icon-svg above). */
+.radar-counter-icon rect, .radar-counter-icon path { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.radar-counter-count { color: #d8a355; font-weight: 700; font-size: 10px; }
+.radar-counter-label { color: #f1eee8; font-family: "Inter", sans-serif; font-size: 10px; }
 
 .radar-max-lock-warning {
   position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%) scale(.96); z-index: 30;
