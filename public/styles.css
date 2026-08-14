@@ -291,9 +291,10 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   padding: var(--qc-pad-top) 8px var(--qc-pad-bottom);
 }
 .shell-qcard .radar-header-row { flex: none; }
-.shell-qcard .step-dots { margin-top: 6px; margin-bottom: 0; flex: none; }
+.shell-qcard .fadeUp { min-height: 0; display: flex; flex-direction: column; }
 .shell-qcard .onboard-nav-row { margin-top: auto; flex: none; }
 .shell-qcard .btn-primary { padding: 8px 20px; min-height: 0; }
+.qcard-header-right { display: flex; align-items: center; gap: 10px; }
 .qcard-count { font-size: 12.5px; font-weight: 500; letter-spacing: .18em; color: var(--muted); text-transform: uppercase; }
 .qcard-card {
   position: relative; flex: none; margin-top: var(--qc-card-mt); overflow: hidden; box-sizing: border-box;
@@ -641,13 +642,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .axis-def { font-size: 13.5px; line-height: 1.5; }
 .axis-def-name { display: block; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
 .axis-def-text { color: var(--muted); }
-
-.scenario-options { display: flex; flex-direction: column; gap: 10px; }
-.scenario-opt { text-align: left; padding: 14px 16px; border-radius: 12px; font-size: 14.5px; line-height: 1.4; border: 1px solid var(--hair-strong); background: var(--surface2); color: var(--text); }
-.scenario-opt:active { transform: scale(.98); }
-.scenario-opt.favorite { border-color: var(--accent); background: #d8a35518; }
-.scenario-opt.least { border-color: #b5544a77; background: #b5544a14; color: var(--muted); }
-.opt-tag { margin-right: 8px; }
 
 /* Homepage redesign (design handoff, 11 Agustus): persistent header + bottom
    tab bar, Home restructure, Kisahmu/Character/Settings screens. Reuses the

@@ -91,15 +91,18 @@ async function test(name, fn) {
     // Round 15 (founder): header row + progress indicator now reuse the
     // radar screen's own classes/markup verbatim (.radar-header-row/
     // .radar-help-btn/.step-dots/.dot-seg), not a bespoke continuous fill
-    // bar - this is step 1 of 3 (round 18 added the "Kartu ke-1" question
-    // card step between name and radar), so only the first segment is
-    // .active.
+    // bar - this is step 1 of 2, so only the first segment is .active.
+    // (Round 18 briefly inserted a "Kartu ke-1" question card as a 3rd
+    // static step here - round 20 reverted that: onboarding is genuinely
+    // just 2 steps, and that screen's visual language was repurposed for
+    // the real adaptive AI question screens instead, see
+    // tests/onboarding-bridge.e2e.js.)
     assert.ok(await page.locator(".radar-header-row").count(), "header row should reuse .radar-header-row, matching the radar screen");
     assert.ok(await page.locator(".radar-help-btn").count(), "help button should reuse .radar-help-btn, matching the radar screen");
     const dotSegs = await page.locator(".step-dots .dot-seg").count();
-    assert.strictEqual(dotSegs, 3, `expected 3 step-dot segments (name is step 1/3), got ${dotSegs}`);
+    assert.strictEqual(dotSegs, 2, `expected 2 step-dot segments (name is step 1/2), got ${dotSegs}`);
     const activeDotSegs = await page.locator(".step-dots .dot-seg.active").count();
-    assert.strictEqual(activeDotSegs, 1, `expected only the first step-dot segment active on the name step (step 1/3), got ${activeDotSegs}`);
+    assert.strictEqual(activeDotSegs, 1, `expected only the first step-dot segment active on the name step (step 1/2), got ${activeDotSegs}`);
 
     const backVisible = await page.evaluate(() => getComputedStyle(document.getElementById("back")).visibility);
     assert.strictEqual(backVisible, "hidden", "Kembali must be hidden on the first onboarding step");
@@ -203,20 +206,15 @@ async function test(name, fn) {
     await page.waitForTimeout(120);
   });
 
-  console.log("E2E: Lanjut navigates on to the question card step with the trimmed name persisted");
-  await test("tapping Lanjut (with a valid name) advances to the 'Kartu ke-1' question card step, and the name was trimmed", async () => {
+  console.log("E2E: Lanjut navigates on to the radar step with the trimmed name persisted");
+  await test("tapping Lanjut (with a valid name) advances to the Growth Focus Radar step, and the name was trimmed", async () => {
     await page.fill("#fld", "  Rigel  ");
     await page.waitForTimeout(100);
     const nameHeaderRect = await page.locator(".radar-header-row").boundingBox();
     const nameStepDotsRect = await page.locator(".step-dots").boundingBox();
     const nameNavRect = await page.locator(".onboard-nav-row").boundingBox();
     await page.click("#next");
-    // Round 18: a new "Kartu ke-1" question card step now sits directly
-    // after the name step (previously Lanjut went straight to the radar
-    // step) - the position-matching checks below now compare against this
-    // adjacent step instead; the equivalent name<->questioncard<->radar
-    // chain is covered in tests/onboarding-questioncard.e2e.js.
-    await page.waitForSelector(".qcard-card", { timeout: 10000 });
+    await page.waitForSelector(".poly-svg", { timeout: 10000 });
     assert.strictEqual(await page.locator(".name-input").count(), 0, "name screen should be gone after Lanjut");
 
     // Round 16/17: the name step's outer padding and header-to-progress-bar
@@ -224,19 +222,18 @@ async function test(name, fn) {
     // so the header row and Kembali/Lanjut row land at the exact same
     // on-screen position across onboarding steps (founder: "kerasa banget
     // perbedaannya kalau kalimat header dan button footer bergeser
-    // posisinya"). The question card step reuses the same shared shell, so
-    // confirm the same positions hold against it too.
-    const qcardHeaderRect = await page.locator(".radar-header-row").boundingBox();
-    const qcardStepDotsRect = await page.locator(".step-dots").boundingBox();
-    const qcardNavRect = await page.locator(".onboard-nav-row").boundingBox();
+    // posisinya"). Confirm it here.
+    const radarHeaderRect = await page.locator(".radar-header-row").boundingBox();
+    const radarStepDotsRect = await page.locator(".step-dots").boundingBox();
+    const radarNavRect = await page.locator(".onboard-nav-row").boundingBox();
     for (const key of ["x", "y", "width", "height"]) {
-      assert.strictEqual(nameHeaderRect[key], qcardHeaderRect[key], `header row .${key} should match between name and question card steps, got name=${nameHeaderRect[key]} qcard=${qcardHeaderRect[key]}`);
+      assert.strictEqual(nameHeaderRect[key], radarHeaderRect[key], `header row .${key} should match between name and radar steps, got name=${nameHeaderRect[key]} radar=${radarHeaderRect[key]}`);
     }
     for (const key of ["x", "y", "width", "height"]) {
-      assert.strictEqual(nameStepDotsRect[key], qcardStepDotsRect[key], `step-dots .${key} should match between name and question card steps, got name=${nameStepDotsRect[key]} qcard=${qcardStepDotsRect[key]}`);
+      assert.strictEqual(nameStepDotsRect[key], radarStepDotsRect[key], `step-dots .${key} should match between name and radar steps, got name=${nameStepDotsRect[key]} radar=${radarStepDotsRect[key]}`);
     }
     for (const key of ["x", "y", "width", "height"]) {
-      assert.strictEqual(nameNavRect[key], qcardNavRect[key], `Kembali/Lanjut row .${key} should match between name and question card steps, got name=${nameNavRect[key]} qcard=${qcardNavRect[key]}`);
+      assert.strictEqual(nameNavRect[key], radarNavRect[key], `Kembali/Lanjut row .${key} should match between name and radar steps, got name=${nameNavRect[key]} radar=${radarNavRect[key]}`);
     }
   });
 

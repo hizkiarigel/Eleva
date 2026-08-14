@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786711954.4670959,
-    "ast_hash": "f7478f9822528850cae8f6c9db4ae7be",
+    "mtime": 1786715615.1630478,
+    "ast_hash": "189b9d3d9fe6e23d2d53efd617e73249",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -265,18 +265,13 @@
     "semantic_hash": ""
   },
   "tests/onboarding-radar.e2e.js": {
-    "mtime": 1786706465.103753,
-    "ast_hash": "6d8d415a84b4d85c0f88236c8367ad1b",
+    "mtime": 1786714798.9350686,
+    "ast_hash": "1022b52adad6c4da6dfc2a1fc21e5575",
     "semantic_hash": ""
   },
   "tests/onboarding-name.e2e.js": {
-    "mtime": 1786706451.6797523,
-    "ast_hash": "33ee9d98e3123c19b06ee70e82f6282b",
-    "semantic_hash": ""
-  },
-  "tests/onboarding-questioncard.e2e.js": {
-    "mtime": 1786706724.9397686,
-    "ast_hash": "f0e49c3079f45948cf987865e06c4cec",
+    "mtime": 1786714762.8070695,
+    "ast_hash": "d68aefc5c2d81580f94e730393d04500",
     "semantic_hash": ""
   },
   "public/onboarding/bridges/01-journey.webp": {
@@ -315,8 +310,8 @@
     "semantic_hash": ""
   },
   "tests/onboarding-bridge.e2e.js": {
-    "mtime": 1786712753.5470753,
-    "ast_hash": "b1a70566008bb543721440141777af89",
+    "mtime": 1786715025.0350628,
+    "ast_hash": "698210eb66d67bb8d605f00f1f078b8b",
     "semantic_hash": ""
   }
 }

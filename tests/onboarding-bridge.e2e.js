@@ -85,11 +85,6 @@ async function waitForServer(base, log) {
     await page.waitForSelector("text=Siapa namamu?", { timeout: 20000 });
     await page.fill("#fld", "Bridge Tester");
     await page.click("#next");
-    await page.waitForSelector(".qcard-card", { timeout: 10000 });
-    const qcardAnswers = await page.locator(".qcard-answer").all();
-    await qcardAnswers[0].click();
-    await qcardAnswers[1].click();
-    await page.click("#next");
     await page.waitForSelector(".poly-svg", { timeout: 10000 });
     await page.click('[data-lock-hit="body"]');
     await page.click("#next");
@@ -111,10 +106,12 @@ async function waitForServer(base, log) {
 
   console.log("E2E: bridge -> card -> bridge loop, then early-confident -> pathway bridge -> analysis (no 3rd card)");
   await test("answering card 1 shows the Quest bridge, answering card 2 shows the Evidence bridge (checking for a 3rd card) which resolves confident (keyless fallback is confident after exactly 2 cards) and hands off to the Pathway bridge and then the pathway-selection screen - never an actual 3rd scenario card", async () => {
-    // card 1
-    await page.waitForSelector(".quest-card", { timeout: 10000 });
-    assert.ok((await page.locator(".mono", { hasText: "KARTU KE-1" }).count()) > 0, "expected KARTU KE-1");
-    const opts1 = await page.locator(".scenario-opt").all();
+    // card 1 - re-skinned with the qcard visual language (round 20), same
+    // real adaptiveScenario/adaptiveSelection data and axis-keyed tap
+    // handler as before, only the markup/classes changed.
+    await page.waitForSelector(".qcard-card", { timeout: 10000 });
+    assert.strictEqual((await page.locator(".qcard-count").textContent()).trim(), "KARTU KE-1", "expected KARTU KE-1");
+    const opts1 = await page.locator(".qcard-answer").all();
     await opts1[0].click();
     await opts1[1].click();
     await page.click("#confirmCard");
@@ -125,9 +122,9 @@ async function waitForServer(base, log) {
     assert.strictEqual(src2, "/onboarding/bridges/02-quest.webp", `expected the Quest stage's image after card 1, got ${src2}`);
 
     // card 2
-    await page.waitForSelector(".quest-card", { timeout: 10000 });
-    assert.ok((await page.locator(".mono", { hasText: "KARTU KE-2" }).count()) > 0, "expected KARTU KE-2");
-    const opts2 = await page.locator(".scenario-opt").all();
+    await page.waitForSelector(".qcard-card", { timeout: 10000 });
+    assert.strictEqual((await page.locator(".qcard-count").textContent()).trim(), "KARTU KE-2", "expected KARTU KE-2");
+    const opts2 = await page.locator(".qcard-answer").all();
     await opts2[0].click();
     await opts2[1].click();
     await page.click("#confirmCard");
@@ -148,7 +145,7 @@ async function waitForServer(base, log) {
       () => document.querySelector(".bridge-img")?.getAttribute("src") === "/onboarding/bridges/07-pathway.webp",
       { timeout: 10000 },
     );
-    assert.strictEqual(await page.locator(".quest-card").count(), 0, "must not show a 3rd scenario card - confident:true should hand off to the pathway bridge instead");
+    assert.strictEqual(await page.locator(".qcard-card").count(), 0, "must not show a 3rd scenario card - confident:true should hand off to the pathway bridge instead");
 
     // pathway selection (chapter analysis result)
     await page.waitForSelector(".tarot-carousel", { timeout: 10000 });
@@ -171,11 +168,6 @@ async function waitForServer(base, log) {
     await rmPage.click("#auth2Submit");
     await rmPage.waitForSelector("text=Siapa namamu?", { timeout: 20000 });
     await rmPage.fill("#fld", "RM Tester");
-    await rmPage.click("#next");
-    await rmPage.waitForSelector(".qcard-card", { timeout: 10000 });
-    const qa = await rmPage.locator(".qcard-answer").all();
-    await qa[0].click();
-    await qa[1].click();
     await rmPage.click("#next");
     await rmPage.waitForSelector(".poly-svg", { timeout: 10000 });
     await rmPage.click('[data-lock-hit="body"]');
@@ -217,11 +209,6 @@ async function waitForServer(base, log) {
     await errPage.waitForSelector("text=Siapa namamu?", { timeout: 20000 });
     await errPage.fill("#fld", "Err Tester");
     await errPage.click("#next");
-    await errPage.waitForSelector(".qcard-card", { timeout: 10000 });
-    const qa = await errPage.locator(".qcard-answer").all();
-    await qa[0].click();
-    await qa[1].click();
-    await errPage.click("#next");
     await errPage.waitForSelector(".poly-svg", { timeout: 10000 });
     await errPage.click('[data-lock-hit="body"]');
     await errPage.click("#next");
@@ -231,7 +218,7 @@ async function waitForServer(base, log) {
     assert.strictEqual(await errPage.locator("#bridgeRetry").textContent(), "Coba lagi");
     assert.strictEqual(await errPage.locator(".shell").count(), 0, "must not fall back to the generic ui.view===\"error\" screen");
     await errPage.click("#bridgeRetry");
-    await errPage.waitForSelector(".quest-card", { timeout: 10000 });
+    await errPage.waitForSelector(".qcard-card", { timeout: 10000 });
     assert.strictEqual(scenarioCardCalls, 2, "retry should re-issue exactly one more scenario-card request, not restart the whole app");
     await errContext.close();
   });

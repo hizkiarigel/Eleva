@@ -80,14 +80,6 @@ async function test(name, fn) {
     await page.waitForSelector("text=Siapa namamu?", { timeout: 20000 });
     await page.fill("#fld", "Radar Tester");
     await page.click("#next");
-    // Round 18: a new "Kartu ke-1" question card step now sits between the
-    // name and radar steps - answer both slots (most/least) so Lanjut is
-    // enabled, then continue on to the radar step as before.
-    await page.waitForSelector(".qcard-card", { timeout: 10000 });
-    const qcardAnswers = await page.locator(".qcard-answer").all();
-    await qcardAnswers[0].click();
-    await qcardAnswers[1].click();
-    await page.click("#next");
     await page.waitForSelector(".poly-svg", { timeout: 10000 });
     await page.waitForTimeout(450); // let the .fadeUp entrance settle before measuring
   }
@@ -373,12 +365,14 @@ async function test(name, fn) {
     assert.ok(await page.locator("text=Ke mana kamu mau").count(), "heading missing");
     assert.ok(await page.locator("text=fokus sekarang?").count(), "heading second line missing");
     assert.ok(await page.locator(".radar-help-btn").count(), "circular help button missing from header row");
-    // Round 18: the "Kartu ke-1" question card step was added between name
-    // and radar, so radar is now step 3/3 (was 2/2) - all 3 segments active.
+    // Round 18 briefly added a "Kartu ke-1" question card step between name
+    // and radar (making radar step 3/3) - round 20 reverted that, so
+    // onboarding is back to 2 steps and radar is step 2/2, both segments
+    // active.
     const dotSegs = await page.locator(".step-dots .dot-seg").count();
-    assert.strictEqual(dotSegs, 3, `expected 3 step-dot segments (radar is step 3/3), got ${dotSegs}`);
+    assert.strictEqual(dotSegs, 2, `expected 2 step-dot segments (radar is step 2/2), got ${dotSegs}`);
     const activeDotSegs = await page.locator(".step-dots .dot-seg.active").count();
-    assert.strictEqual(activeDotSegs, 3, `expected all 3 step-dot segments active/orange on the radar step (step 3/3), got ${activeDotSegs}`);
+    assert.strictEqual(activeDotSegs, 2, `expected both step-dot segments active/orange on the radar step (step 2/2), got ${activeDotSegs}`);
     assert.ok(await page.locator("text=Kamu tidak bisa membuat semua area jadi").count(), "trade-off strip copy missing");
     assert.ok(await page.locator(".radar-lock-instr-item", { hasText: "maksimal 3" }).count(), "lock-instructions 'maksimal 3' item missing");
     assert.ok(await page.locator(".radar-lock-instr-item", { hasText: "mengunci" }).count(), "lock-instructions 'mengunci' item missing");

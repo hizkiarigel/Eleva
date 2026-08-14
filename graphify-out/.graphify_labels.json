@@ -34,8 +34,9 @@
   "32": "applyCalibrationCard",
   "33": "onboarding-radar.e2e.js",
   "34": "renderAuth",
-  "35": "onboarding-questioncard.e2e.js",
+  "35": "Adaptive Scenario Cards",
   "36": "onboarding-name.e2e.js",
   "37": "buildPathwayOptions",
-  "39": "questSummaryCard"
+  "38": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)",
+  "39": "ensureCountdownTicking"
 }
