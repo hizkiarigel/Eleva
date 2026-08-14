@@ -205,9 +205,25 @@ async function test(name, fn) {
   await test("tapping Lanjut (with a valid name) advances to the Growth Focus Radar step, and the name was trimmed", async () => {
     await page.fill("#fld", "  Rigel  ");
     await page.waitForTimeout(100);
+    const nameHeaderRect = await page.locator(".radar-header-row").boundingBox();
+    const nameNavRect = await page.locator(".onboard-nav-row").boundingBox();
     await page.click("#next");
     await page.waitForSelector(".poly-svg", { timeout: 10000 });
     assert.strictEqual(await page.locator(".name-input").count(), 0, "name screen should be gone after Lanjut");
+
+    // Round 16: the name step's outer padding was matched byte-for-byte to
+    // the radar step's own, specifically so the header row and Kembali/
+    // Lanjut row land at the exact same on-screen position across both
+    // onboarding steps (founder: "kerasa banget perbedaannya kalau kalimat
+    // header dan button footer bergeser posisinya"). Confirm it here.
+    const radarHeaderRect = await page.locator(".radar-header-row").boundingBox();
+    const radarNavRect = await page.locator(".onboard-nav-row").boundingBox();
+    for (const key of ["x", "y", "width", "height"]) {
+      assert.strictEqual(nameHeaderRect[key], radarHeaderRect[key], `header row .${key} should match between name and radar steps, got name=${nameHeaderRect[key]} radar=${radarHeaderRect[key]}`);
+    }
+    for (const key of ["x", "y", "width", "height"]) {
+      assert.strictEqual(nameNavRect[key], radarNavRect[key], `Kembali/Lanjut row .${key} should match between name and radar steps, got name=${nameNavRect[key]} radar=${radarNavRect[key]}`);
+    }
   });
 
   await browser.close();

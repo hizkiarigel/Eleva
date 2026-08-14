@@ -63,7 +63,15 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .shell.shell-name {
   position: fixed; inset: 10px; height: calc(var(--vh, 1dvh) * 100 - 20px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
   max-width: 540px; margin: 0 auto; display: flex; flex-direction: column;
-  --sn-pad-h: min(26px, calc(26 / 390 * 100vw));
+  /* Round 16 (founder: header/footer visibly sit at different screen
+     positions vs. the radar step) - top/bottom/horizontal padding now
+     byte-identical to .shell-radar's own (--rd-pad-top/--rd-pad-bottom/
+     the flat 8px below), not this screen's own width-scaled values, so
+     both onboarding screens' header row and Kembali/Lanjut row land at
+     the exact same on-screen position. */
+  --sn-pad-h: 8px;
+  --sn-pad-top: clamp(14px, calc(var(--vh, 1dvh) * 3), 30px);
+  --sn-pad-bottom: clamp(10px, calc(var(--vh, 1dvh) * 2), 20px);
   --sn-title-font: min(44px, calc(44 / 390 * 100vw));
   --sn-explain-font: min(16px, calc(16 / 390 * 100vw));
   --sn-input-h: min(76px, calc(76 / 390 * 100vw));
@@ -92,7 +100,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
      lean on the overflow-y:auto safety net above instead of compressing
      all the way to floor, matching the same "compression primary, scroll
      backup" split already proven on the radar screen. */
-  --sn-pad-top: clamp(8px, calc(var(--vh, 1dvh) * 3.2), min(24px, calc(24 / 390 * 100vw)));
   --sn-progress-mt: clamp(5px, calc(var(--vh, 1dvh) * 2.1), min(16px, calc(16 / 390 * 100vw)));
   --sn-title-mt: clamp(8px, calc(var(--vh, 1dvh) * 3.7), min(28px, calc(28 / 390 * 100vw)));
   --sn-title-mb: clamp(5px, calc(var(--vh, 1dvh) * 2.1), min(16px, calc(16 / 390 * 100vw)));
@@ -100,7 +107,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   --sn-highlight-gap: min(6px, calc(6 / 390 * 100vw));
   --sn-highlight-mt: clamp(8px, calc(var(--vh, 1dvh) * 3.5), min(26px, calc(26 / 390 * 100vw)));
   --sn-secondary-mt: clamp(3px, calc(var(--vh, 1dvh) * 1.9), min(14px, calc(14 / 390 * 100vw)));
-  padding: var(--sn-pad-top) var(--sn-pad-h) 0;
+  padding: var(--sn-pad-top) var(--sn-pad-h) var(--sn-pad-bottom);
 }
 /* Round 15 (founder): header row, progress indicator, and Kembali/Lanjut
    all reuse the radar screen's own classes/markup verbatim
