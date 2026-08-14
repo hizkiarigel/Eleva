@@ -230,6 +230,15 @@ app.post("/api/logout", (req, res) => {
   res.json({ ok: true });
 });
 
+// Onboarding bridge dev-preview gate (round 19) - unauthenticated so the
+// client can check it before/without a login, reporting nothing sensitive
+// (same NODE_ENV read already used for the session cookie's secure flag
+// above). The client only honors ?debug=bridges when this reports
+// "development" - inert on the deployed production app either way.
+app.get("/api/env", (req, res) => {
+  res.json({ env: process.env.NODE_ENV === "production" ? "production" : "development" });
+});
+
 // --- Adaptive onboarding (stateless AI proxies; no character_state yet) ---
 
 app.post("/api/onboarding/scenario-card", requireAuth, async (req, res) => {

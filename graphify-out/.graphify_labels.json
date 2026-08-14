@@ -9,7 +9,7 @@
   "7": "Eleva_Prototype.jsx",
   "8": "package.json",
   "9": "render",
-  "10": "completedResultCardHTML",
+  "10": "onboarding-bridge.e2e.js",
   "11": "jobMatch.js",
   "12": "practiceTest.js",
   "13": "practicetest.e2e.js",
@@ -36,7 +36,6 @@
   "34": "renderAuth",
   "35": "onboarding-questioncard.e2e.js",
   "36": "onboarding-name.e2e.js",
-  "37": "Adaptive Scenario Cards",
-  "38": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)",
-  "39": "ensureCountdownTicking"
+  "37": "buildPathwayOptions",
+  "39": "questSummaryCard"
 }

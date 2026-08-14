@@ -596,7 +596,7 @@ function authReducedMotion() {
 // Chapter Analysis). v6: cards are one scenario + 4 options (one per
 // unlocked axis); each choice also calibrates the radar via the SAME
 // redistribution engine as manual dragging - see applyCalibrationCard. ---
-let adaptivePhase = "card"; // "loading" | "card" | "thinking" | "analysis" | "goals"
+let adaptivePhase = "card"; // "bridge" | "card" | "analysis" | "goals"
 let adaptiveCards = []; // [{scenario, options:[{axis,text}], mostPreferred, leastPreferred}, ...] - length also serves as the card counter
 let adaptiveScenario = null; // {scenario, options} for the card currently on screen
 let adaptiveSelection = { mostPreferred: null, leastPreferred: null }; // in-progress picks for the current card
@@ -658,6 +658,14 @@ function resetOnboardState() {
   onboardError = "";
   openAxisInfo = null;
   lockExplainerShown = false;
+  // Defensive - no current call site reaches resetOnboardState() mid-bridge,
+  // but bumping bridgeGen here means any bridge instance somehow still in
+  // flight (e.g. a stale promise from a torn-down session) can never mutate
+  // the freshly-reset state below it.
+  bridgeGen += 1;
+  clearBridgeTimers();
+  bridgeStageKey = null;
+  bridgeErrorRetry = null;
 }
 
 // Applies one card's two signals (favorite = +1, least-favorite = -1) to the
@@ -1084,12 +1092,15 @@ async function runAuthEntering(statePrefetch) {
   }, AUTH_ENTERING_HOLD));
 }
 
-// Onboarding cinematic "bridge" screens - full-screen art shown between
-// onboarding steps while Eleva prepares the next personalized question.
-// Registration only for now (asset + config), per explicit instruction:
-// no render/animation/audio wiring yet. Stages are registered one at a
-// time as their art arrives (7 total planned) - keyed by stage ID so a
-// later stage can be added without touching earlier entries.
+// Onboarding cinematic "bridge" screens - full-screen art shown during the
+// adaptive AI-generation wait (in place of the old generic spinner), so a
+// 3-5s delay reads as an intentional cinematic beat rather than a frozen
+// app. Order: 1 Journey, 2 Quest, 3 Evidence, 4 Character, 5 Adaptive, 6
+// META (all shown before a scenario card, one per card in sequence), 7
+// Pathway (shown once, during chapter-analysis, leading to pathway
+// selection rather than another question - see nextType below). Rendering/
+// state-machine lives further down (runBridge() and friends), right after
+// ONBOARD_STEPS.
 const ONBOARDING_BRIDGE_BASE_PATH = "/onboarding/bridges/";
 const ONBOARDING_BRIDGES = {
   intro: {
@@ -1100,9 +1111,6 @@ const ONBOARDING_BRIDGES = {
     voiceText: "Selamat datang di Eleva. Di sini, kamu tumbuh sambil jalan.",
     nextType: "personalized_question",
   },
-  // Full order (7 stages, registered one at a time as art arrives): 1
-  // Journey, 2 Quest, 3 Evidence, 4 Character, 5 Adaptive, 6 META, 7
-  // Pathway. Stages 6, 7 not yet registered.
   quest: {
     order: 2,
     name: "Quest — The Mission",
@@ -1135,7 +1143,6 @@ const ONBOARDING_BRIDGES = {
     voiceText: "Kalau kondisi kamu berubah, langkah berikutnya ikut menyesuaikan.",
     nextType: "personalized_question",
   },
-  // Stage 7 (Pathway) not yet registered.
   meta: {
     order: 6,
     name: "META / World — The Expansion",
@@ -1163,6 +1170,172 @@ const ONBOARDING_BRIDGES = {
     nextType: "pathway_selection",
   },
 };
+
+// Bridge state machine (round 19) - replaces the old generic spinner during
+// the adaptive AI-generation wait. bridgeGen is a per-mount "instance
+// token": every runBridge() call bumps it, and any earlier instance's
+// pending .then() callbacks compare their captured gen against the current
+// bridgeGen and no-op if they don't match - this is what stops a
+// superseded bridge (e.g. one whose fetch is still resolving after a newer
+// bridge has already taken over) from mutating state or double-firing.
+// Mirrors the authTimers/clearAuthTimers idiom already proven in the auth
+// zoom-gate flow, kept as a separate array since the two flows never run
+// concurrently but sharing one array would be a latent bug waiting to happen.
+let bridgeGen = 0;
+let bridgeStageKey = null;
+let bridgeTimers = [];
+let bridgeErrorRetry = null;    // set only while the error overlay is showing
+let bridgeDevPreviewIndex = 0;  // dev-preview only, see tryStartBridgeDevPreview
+const bridgePreloadCache = new Set();
+// Orders 1-6 - one bridge per scenario card, in sequence. Order 7 (pathway)
+// isn't in this list: it's shown once, during chapter-analysis, not tied to
+// a card index - see beginPathwayBridge.
+const BRIDGE_LOADING_SEQUENCE = ["intro", "quest", "evidence", "character", "adaptive", "meta"];
+const BRIDGE_PREVIEW_ORDER = [...BRIDGE_LOADING_SEQUENCE, "pathway"]; // all 7, dev preview only
+const BRIDGE_MIN_DURATION_MS = 2300, BRIDGE_LONGWAIT_MS = 6000;
+
+function clearBridgeTimers() {
+  bridgeTimers.forEach(clearTimeout);
+  bridgeTimers = [];
+}
+
+// Preload exactly the next stage in sequence, keyed off .order (not object-
+// key iteration order) so it's correct regardless of literal key ordering
+// in ONBOARDING_BRIDGES. At most 2 images resident at once this way (~250-
+// 380KB compressed each) - no eager preload of all 7.
+function preloadNextBridgeImage(stageKey) {
+  const cfg = ONBOARDING_BRIDGES[stageKey];
+  if (!cfg) return;
+  const next = Object.values(ONBOARDING_BRIDGES).find((b) => b.order === cfg.order + 1);
+  if (!next || bridgePreloadCache.has(next.image)) return;
+  bridgePreloadCache.add(next.image);
+  new Image().src = `${ONBOARDING_BRIDGE_BASE_PATH}${next.image}.webp`;
+}
+
+// Not the generic ui.view==="error" dispatch (its retry calls the global
+// boot(), which would restart the whole app) - this overlay's retry only
+// re-invokes whichever fetch actually failed.
+function showBridgeError(err, retryFn) {
+  onboardError = err?.message || "Request gagal";
+  bridgeErrorRetry = retryFn;
+  render();
+}
+
+// Fades .bridge-root out (CSS transition, see .bridge-root.bridge-exit in
+// styles.css) before handing off to the next screen, so the handoff never
+// hard-cuts or flashes white.
+function exitBridge(afterFn) {
+  const el = document.getElementById("bridgeRoot");
+  if (!el) { afterFn(); return; }
+  el.classList.remove("bridge-in");
+  el.classList.add("bridge-exit");
+  setTimeout(afterFn, 350); // matches .bridge-root.bridge-exit's CSS transition duration
+}
+
+// The core orchestrator: mounts a bridge stage, kicks off `work()`, and
+// resolves onSuccess/onError only once BOTH the fetch has settled AND the
+// minimum display duration has passed (whichever is later) - never forces
+// a full 5s if content is ready sooner, never flashes if it's ready before
+// the floor. `gen`/`settled` together guard against every race called out
+// in the spec: a stale instance superseded mid-flight, the min-duration
+// timer and the fetch resolving in either order for the SAME instance, and
+// a rapid double-trigger only ever letting the first instance's outcome
+// through (the second bumps bridgeGen, silently retiring the first).
+function runBridge({ stageKey, work, onSuccess, onError }) {
+  bridgeGen += 1;
+  const gen = bridgeGen;
+  clearBridgeTimers();
+  bridgeStageKey = stageKey;
+  bridgeErrorRetry = null;
+  onboardError = "";
+  adaptivePhase = "bridge";
+  render();
+  preloadNextBridgeImage(stageKey);
+
+  const minDone = new Promise((resolve) => bridgeTimers.push(setTimeout(resolve, BRIDGE_MIN_DURATION_MS)));
+  // Past ~6s: freeze at rest (the CSS transitions have already finished by
+  // then anyway) rather than restart the push-in/fade cycle - .bridge-
+  // longwait is a documented hook for this, no visual change today since
+  // nothing is still animating at that point.
+  bridgeTimers.push(setTimeout(() => {
+    if (gen === bridgeGen) document.getElementById("bridgeRoot")?.classList.add("bridge-longwait");
+  }, BRIDGE_LONGWAIT_MS));
+
+  let settled = false;
+  const finish = (fn) => {
+    if (gen !== bridgeGen || settled) return;
+    settled = true;
+    clearBridgeTimers();
+    fn();
+  };
+  const retry = () => runBridge({ stageKey, work, onSuccess, onError });
+
+  Promise.resolve().then(work).then(
+    (result) => minDone.then(() => finish(() => exitBridge(() => onSuccess(result)))),
+    (err) => minDone.then(() => finish(() => showBridgeError(err, () => (onError ? onError(err, retry) : retry())))),
+  );
+}
+
+function beginScenarioBridge() {
+  const stageKey = BRIDGE_LOADING_SEQUENCE[Math.min(adaptiveCards.length, BRIDGE_LOADING_SEQUENCE.length - 1)];
+  runBridge({
+    stageKey,
+    work: requestScenarioCard,
+    onSuccess: (result) => {
+      if (result.confident) { beginPathwayBridge(); return; } // straight to the pathway bridge, no "card" flash - matches the old confident-skips-card behavior
+      adaptiveScenario = { scenario: result.scenario, options: result.options };
+      adaptiveSelection = { mostPreferred: null, leastPreferred: null };
+      adaptivePhase = "card";
+      render();
+    },
+  });
+}
+
+function beginPathwayBridge() {
+  runBridge({
+    stageKey: "pathway",
+    work: requestChapterAnalysis,
+    // Chapter-analysis failure re-asks scenario-card fresh (matches the
+    // OLD inline catch-fallback exactly, app.js pre-round-19) rather than
+    // blindly retrying chapter-analysis itself - re-fetching a scenario
+    // card re-evaluates confidence server-side and can route straight
+    // back here once satisfied, same as before.
+    onError: () => beginScenarioBridge(),
+    onSuccess: (analysis) => {
+      chapterAnalysis = analysis;
+      pathwayOptions = buildPathwayOptions(analysis);
+      selectedPathwayIndex = null;
+      adaptivePhase = "analysis";
+      render();
+    },
+  });
+}
+
+function renderBridge() {
+  const cfg = ONBOARDING_BRIDGES[bridgeStageKey];
+  if (!cfg) return;
+  root.innerHTML = `
+    <div class="bridge-root" id="bridgeRoot">
+      <img class="bridge-img" src="${ONBOARDING_BRIDGE_BASE_PATH}${cfg.image}.webp" alt="${esc(cfg.headline)}" />
+      <div class="bridge-overlay"></div>
+      ${bridgeErrorRetry ? `
+      <div class="bridge-error">
+        <p class="bridge-error-title">Belum berhasil menyiapkan langkah berikutnya.</p>
+        <p class="bridge-error-sub">Coba lagi sebentar.</p>
+        <button class="btn-primary" id="bridgeRetry">Coba lagi</button>
+      </div>` : ""}
+    </div>`;
+  document.getElementById("bridgeRetry")?.addEventListener("click", () => {
+    const retryFn = bridgeErrorRetry;
+    bridgeErrorRetry = null;
+    retryFn?.();
+  });
+  // requestAnimationFrame so .bridge-in is added on the frame AFTER the
+  // markup (with opacity:0 baseline) has painted - CSS transitions don't
+  // fire if their target class is already present at first paint, same
+  // reason the auth zoom-gate toggles .visible/.zooming a beat after mount.
+  requestAnimationFrame(() => document.getElementById("bridgeRoot")?.classList.add("bridge-in"));
+}
 
 // Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both
 // gone, folded into the adaptive conversation and the radar chart itself.
@@ -1823,46 +1996,34 @@ function renderOnboarding() {
     if (!isStepValid(onboardStep)) return;
     if (!last) { onboardStep++; renderOnboarding(); return; }
     // Static steps done - freeze the pre-calibration radar for audit, then
-    // hand off to the adaptive AI-driven phase.
+    // hand off to the adaptive AI-driven phase. beginScenarioBridge() sets
+    // adaptivePhase="bridge" and renders itself, no separate render() call
+    // needed here first.
     onboardForm.radarRaw = { ...onboardForm.radar };
-    adaptivePhase = "loading";
     adaptiveCards = [];
     ui = { view: "adaptive" };
-    render();
-    fetchScenarioCard();
+    beginScenarioBridge();
   });
 }
 
-async function fetchScenarioCard() {
-  onboardError = "";
-  try {
-    const result = await api("/api/onboarding/scenario-card", {
-      method: "POST",
-      body: {
-        profile: { name: onboardForm.name },
-        radarSnapshot: onboardForm.radar,
-        lockedAxes: onboardForm.locked,
-        previousCards: adaptiveCards,
-      },
-    });
-    // Server decides when the choice pattern is consistent enough AND every
-    // unlocked axis has been tested at least once (min 2, max 6 - enforced
-    // server-side, not just requested here) - confident:true means stop and
-    // move straight to Chapter Analysis instead of showing another card.
-    if (result.confident) {
-      await fetchChapterAnalysis();
-      return;
-    }
-    adaptiveScenario = { scenario: result.scenario, options: result.options };
-    adaptiveSelection = { mostPreferred: null, leastPreferred: null };
-    adaptivePhase = "card";
-    render();
-  } catch (e) {
-    onboardError = e.message;
-    adaptivePhase = "card";
-    adaptiveScenario = null;
-    render();
-  }
+// Pure fetch, no state/render side effects - orchestrated by
+// beginScenarioBridge() (see the bridge state machine near
+// ONBOARDING_BRIDGES) which owns the "bridge -> card | next bridge" state
+// transitions instead. Server decides when the choice pattern is consistent
+// enough AND every unlocked axis has been tested at least once (min 2, max
+// 6 - enforced server-side, not just requested here) - confident:true means
+// the caller should move straight to Chapter Analysis instead of showing
+// another card.
+async function requestScenarioCard() {
+  return api("/api/onboarding/scenario-card", {
+    method: "POST",
+    body: {
+      profile: { name: onboardForm.name },
+      radarSnapshot: onboardForm.radar,
+      lockedAxes: onboardForm.locked,
+      previousCards: adaptiveCards,
+    },
+  });
 }
 
 // Task 9: sub-pathway archetype for a given pathway, from the fixed 15-name
@@ -1903,35 +2064,24 @@ function buildPathwayOptions(analysis) {
   return [option1, option2, option3];
 }
 
-async function fetchChapterAnalysis() {
-  onboardError = "";
-  adaptivePhase = "thinking";
-  render();
-  try {
-    chapterAnalysis = await api("/api/onboarding/chapter-analysis", {
-      method: "POST",
-      body: {
-        profile: { name: onboardForm.name },
-        radarSnapshot: onboardForm.radar,
-        radarRaw: onboardForm.radarRaw,
-        lockedAxes: onboardForm.locked,
-        lockedOriginalValue: onboardForm.lockedOriginalValue,
-        cards: adaptiveCards,
-      },
-    });
-    pathwayOptions = buildPathwayOptions(chapterAnalysis);
-    selectedPathwayIndex = null;
-    adaptivePhase = "analysis";
-    render();
-  } catch (e) {
-    onboardError = e.message;
-    // Fall back to the card phase with no current scenario, so the retry
-    // button re-asks the server - which re-evaluates confidence and routes
-    // straight back here once satisfied. No dead end, no stale card shown.
-    adaptivePhase = "card";
-    adaptiveScenario = null;
-    render();
-  }
+// Pure fetch, no state/render side effects - orchestrated by
+// beginPathwayBridge() (see the bridge state machine near
+// ONBOARDING_BRIDGES), which shows the "pathway" bridge stage while this
+// resolves, then applies the result on success or falls back to
+// beginScenarioBridge() on failure (matching this function's old inline
+// catch-fallback exactly, just moved to the orchestration layer).
+async function requestChapterAnalysis() {
+  return api("/api/onboarding/chapter-analysis", {
+    method: "POST",
+    body: {
+      profile: { name: onboardForm.name },
+      radarSnapshot: onboardForm.radar,
+      radarRaw: onboardForm.radarRaw,
+      lockedAxes: onboardForm.locked,
+      lockedOriginalValue: onboardForm.lockedOriginalValue,
+      cards: adaptiveCards,
+    },
+  });
 }
 
 async function submitOnboarding(pathway, pathwayNoun, goals) {
@@ -1954,10 +2104,7 @@ async function submitOnboarding(pathway, pathwayNoun, goals) {
 }
 
 function renderAdaptive() {
-  if (adaptivePhase === "loading" || adaptivePhase === "thinking") {
-    root.innerHTML = spinnerHTML(adaptivePhase === "thinking" ? "Aku sedang mencoba memahami ceritamu..." : "Menyiapkan pertanyaan...");
-    return;
-  }
+  if (adaptivePhase === "bridge") { renderBridge(); return; }
 
   if (adaptivePhase === "card") {
     const sel = adaptiveSelection;
@@ -1967,13 +2114,18 @@ function renderAdaptive() {
       : !sel.leastPreferred
         ? "Sekarang tap satu dari sisanya yang paling nggak sesuai sama kamu."
         : "Siap lanjut, atau tap ulang buat ganti pilihan.";
+    // adaptiveScenario is always populated here now (round 19) - the only
+    // path into this phase is beginScenarioBridge()'s onSuccess, which sets
+    // it right before adaptivePhase="card"; fetch failures surface through
+    // the bridge's own error overlay instead, never by landing here with a
+    // null scenario. onboardError still shown below, but now only for the
+    // applyCalibrationCard try/catch further down, not a fetch failure.
     root.innerHTML = `
       <div class="shell">
         ${helpBtnHTML("card")}${helpSheetHTML("card")}
         <div class="eyebrow mono">ELEVA · ONBOARDING</div>
         <div class="mono" style="font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:20px">KARTU KE-${adaptiveCards.length + 1}</div>
         ${onboardError ? `<p style="color:var(--rust);font-size:13.5px;margin:0 0 16px">${esc(onboardError)}</p>` : ""}
-        ${!adaptiveScenario ? `<button class="btn-primary" id="retryCard">Coba lagi</button>` : `
         <div class="fadeUp">
           <div class="quest-card" style="margin-bottom:14px">
             <p class="fr" style="font-size:19px;line-height:1.65;margin:0;font-weight:500">${esc(adaptiveScenario.scenario)}</p>
@@ -1989,9 +2141,8 @@ function renderAdaptive() {
             }).join("")}
           </div>
           <button class="btn-primary full" id="confirmCard" style="margin-top:18px" ${bothPicked ? "" : "disabled"}>Lanjut →</button>
-        </div>`}
+        </div>
       </div>`;
-    document.getElementById("retryCard")?.addEventListener("click", fetchScenarioCard);
     document.querySelectorAll(".scenario-opt").forEach((btn) => {
       btn.addEventListener("click", () => {
         const axis = btn.dataset.axis;
@@ -2009,7 +2160,7 @@ function renderAdaptive() {
         renderAdaptive();
       });
     });
-    document.getElementById("confirmCard")?.addEventListener("click", async () => {
+    document.getElementById("confirmCard")?.addEventListener("click", () => {
       const card = {
         scenario: adaptiveScenario.scenario, options: adaptiveScenario.options,
         mostPreferred: adaptiveSelection.mostPreferred, leastPreferred: adaptiveSelection.leastPreferred,
@@ -2022,13 +2173,13 @@ function renderAdaptive() {
         return;
       }
       adaptiveCards.push(card);
-      adaptivePhase = "loading";
-      render();
-      // fetchScenarioCard re-evaluates choice-pattern consistency AND axis
-      // coverage with the updated card list, and internally redirects to
-      // fetchChapterAnalysis once satisfied (min 2/max 6, full unlocked-axis
-      // coverage - all enforced server-side) - no fixed-count loop needed here.
-      await fetchScenarioCard();
+      // beginScenarioBridge re-evaluates choice-pattern consistency AND axis
+      // coverage with the updated card list (via requestScenarioCard), and
+      // internally redirects to the pathway bridge once satisfied (min
+      // 2/max 6, full unlocked-axis coverage - all enforced server-side) -
+      // no fixed-count loop needed here. Sets adaptivePhase="bridge" and
+      // renders itself.
+      beginScenarioBridge();
     });
     return;
   }
@@ -4566,4 +4717,38 @@ window.addEventListener("resize", setRealVH);
 window.addEventListener("orientationchange", setRealVH);
 window.visualViewport?.addEventListener("resize", setRealVH);
 
-boot();
+// Dev-only preview of all 7 onboarding bridge stages (round 19), so the
+// founder can review the art/motion without redoing the whole onboarding
+// flow or waiting on real AI generation. Gated server-side (GET /api/env,
+// unauthenticated) rather than trusting the query param alone - inert on
+// the deployed production app even if someone guesses the URL, since /api/env
+// there always reports "production" and this bails out to the normal
+// boot() path.
+async function tryStartBridgeDevPreview() {
+  if (new URLSearchParams(window.location.search).get("debug") !== "bridges") return false;
+  let env;
+  try { ({ env } = await api("/api/env")); } catch { return false; }
+  if (env !== "development") return false;
+  ui = { view: "adaptive" };
+  bridgeDevPreviewIndex = 0;
+  renderBridgeDevPreview();
+  return true;
+}
+function renderBridgeDevPreview() {
+  bridgeStageKey = BRIDGE_PREVIEW_ORDER[bridgeDevPreviewIndex];
+  bridgeErrorRetry = null;
+  renderBridge(); // identical markup/CSS to production - no separate preview-only rendering for the art itself
+  document.getElementById("bridgeRoot")?.insertAdjacentHTML("beforeend", `
+    <div class="bridge-dev-controls">
+      <button id="bridgeDevPrev" ${bridgeDevPreviewIndex === 0 ? "disabled" : ""}>‹ Prev</button>
+      <span class="mono">${bridgeDevPreviewIndex + 1}/${BRIDGE_PREVIEW_ORDER.length} · ${esc(ONBOARDING_BRIDGES[bridgeStageKey].name)}</span>
+      <button id="bridgeDevNext" ${bridgeDevPreviewIndex === BRIDGE_PREVIEW_ORDER.length - 1 ? "disabled" : ""}>Next ›</button>
+    </div>`);
+  document.getElementById("bridgeDevPrev")?.addEventListener("click", () => { bridgeDevPreviewIndex--; renderBridgeDevPreview(); });
+  document.getElementById("bridgeDevNext")?.addEventListener("click", () => { bridgeDevPreviewIndex++; renderBridgeDevPreview(); });
+}
+
+(async () => {
+  if (await tryStartBridgeDevPreview()) return;
+  boot();
+})();

@@ -1173,3 +1173,89 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 @media (prefers-reduced-motion: reduce) {
   .auth2-root, .auth2-root * { transition-duration: .05s !important; animation-duration: .05s !important; }
 }
+
+/* Onboarding bridge cinematic transitions (round 19) - full-screen art shown
+   during the adaptive AI-generation wait, replacing the old generic spinner.
+   Full-bleed via the app's own JS-maintained --vh (setRealVH() above, kept
+   live on resize/orientationchange/visualViewport) rather than raw 100dvh,
+   matching .auth2-root's inset:0 full-bleed precedent - NOT the .shell-*
+   10px-inset contained-card pattern used by the onboarding step screens,
+   since this needs true edge-to-edge coverage. CSS transitions (not
+   @keyframes) driven by JS class toggles, same mechanism as the auth
+   zoom-gate's .auth2-zoom-wrap/.zooming pattern. */
+.bridge-root {
+  position: fixed; inset: 0; width: 100%; height: calc(var(--vh, 1dvh) * 100);
+  overflow: hidden; background: #05050a; z-index: 50;
+  opacity: 0; transition: opacity .25s ease-out;
+}
+.bridge-root.bridge-in { opacity: 1; }
+.bridge-root.bridge-exit { transition: opacity .35s ease; opacity: 0; }
+
+.bridge-img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; object-position: center;
+  opacity: 0; transform: scale(1) translate3d(0, 0, 0);
+  transition: opacity .7s ease, transform 4.5s cubic-bezier(.16, .7, .2, 1);
+  will-change: opacity, transform;
+}
+/* Minimal Ken-Burns push-in: scale 1 -> 1.022, drift up ~5px, over the
+   image's own 4.5s transition above - deliberately subtle per spec (no
+   strong zoom, no panning). Headline/wordmark/footer text is baked into
+   the art itself, so no separate text-animation layer is needed. */
+.bridge-root.bridge-in .bridge-img { opacity: 1; transform: scale(1.022) translate3d(0, -5px, 0); }
+
+/* Extremely slow, barely-visible warm light breathing - optional per spec,
+   kept subtle (opacity .06 at rest, .1 once "in"). */
+.bridge-overlay {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 45%, rgba(232, 183, 104, .08) 0%, rgba(0, 0, 0, 0) 60%);
+  opacity: .06; transition: opacity 5s ease;
+}
+.bridge-root.bridge-in .bridge-overlay { opacity: .1; }
+/* Past ~6s (BRIDGE_LONGWAIT_MS in app.js): freeze at rest rather than
+   restart the push-in/breathing cycle - by this point the transitions
+   above have already finished anyway, so this is a documented hook for
+   future long-wait treatment, not a visible change today. */
+.bridge-root.bridge-longwait .bridge-img, .bridge-root.bridge-longwait .bridge-overlay { transition: none; }
+
+.bridge-error {
+  position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 32px; text-align: center; background: rgba(5, 5, 10, .72); backdrop-filter: blur(3px);
+}
+.bridge-error-title { font-family: "Fraunces", serif; font-size: 19px; color: #f1eee8; margin: 0; }
+.bridge-error-sub { font-size: 13.5px; color: #948f9c; margin: 0; }
+
+/* object-fit:contain, not cover: initial build used cover on the
+   assumption real (taller-than-9:16) phones would only crop side scenery,
+   safely clear of the centered text - verified against an actual mobile
+   screenshot and that assumption was WRONG (the headline runs close to
+   the full 941px art width with little margin, so cover's side-crop on a
+   real 390x844 viewport clips "PERTUMBUHANMU"/"...perjalanan." at both
+   edges). contain always shows the full frame - wordmark, headline,
+   footer, all guaranteed visible - letterboxed against .bridge-root's
+   #05050a background, which closely matches the art's own near-black
+   background so the letterbox bars read as essentially seamless (verified
+   visually at 390x844, 768x1024, 1440x900). */
+
+@media (prefers-reduced-motion: reduce) {
+  .bridge-root, .bridge-root .bridge-img, .bridge-root .bridge-overlay { transition-duration: .2s !important; }
+  .bridge-root.bridge-in .bridge-img { transform: none; } /* fade only, no zoom/drift */
+  .bridge-overlay { display: none; } /* the breathing light is itself motion - skip it under reduced motion */
+}
+
+/* Dev-only preview bar (round 19, gated server-side via /api/env - see
+   tryStartBridgeDevPreview in app.js) - steps through all 7 stages without
+   touching real fetches/auth/onboarding state. Not part of the production
+   bridge experience itself. */
+.bridge-dev-controls {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px calc(env(safe-area-inset-bottom, 0px) + 10px);
+  background: rgba(5, 5, 10, .78); backdrop-filter: blur(4px);
+  font-size: 12px; color: #f1eee8;
+}
+.bridge-dev-controls button {
+  background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .15); color: #f1eee8;
+  border-radius: 8px; padding: 6px 12px; font-size: 12px;
+}
+.bridge-dev-controls button:disabled { opacity: .35; cursor: default; }
