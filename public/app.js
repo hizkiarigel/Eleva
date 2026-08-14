@@ -1135,6 +1135,19 @@ const ONBOARDING_BRIDGES = {
     voiceText: "Kalau kondisi kamu berubah, langkah berikutnya ikut menyesuaikan.",
     nextType: "personalized_question",
   },
+  // Stage 7 (Pathway) not yet registered.
+  meta: {
+    order: 6,
+    name: "META / World — The Expansion",
+    image: "06-meta", // -> /onboarding/bridges/06-meta.webp
+    headline: "Semua langkah membentuk duniamu.",
+    voiceText: "Makin kamu jalan, makin banyak bagian Eleva yang kebuka.",
+    nextType: "personalized_question",
+    // Future parallax guidance only (NOT implemented yet) - preserve this
+    // layer hierarchy when that pass happens: L1 stars/distant sky, L2
+    // distant mountains/horizon, L3 golden central realm + blue/emerald
+    // side realms, L4 fog/cloud atmosphere, L5 foreground traveler+platform.
+  },
 };
 
 // Just 2 static steps now - Situasi/Values/Fear and Growth Focus (v2) are both
