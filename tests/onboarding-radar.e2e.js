@@ -86,11 +86,15 @@ async function test(name, fn) {
   await reachRadar();
 
   console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, never scrollable");
-  await test("the screen fills the real viewport edge-to-edge and cannot be scrolled, even on a short viewport", async () => {
-    for (const height of [844, 736, 667, 600]) {
+  await test("the screen fills the real viewport edge-to-edge and cannot be scrolled, on both a tall real device and short viewports", async () => {
+    // 932 covers the real-device report (inset:0 alone under-tracked Safari's
+    // small viewport there - explicit height:100dvh was the fix) as well as
+    // the "large leftover space above Kembali/Lanjut" case from a taller
+    // screen than anything tested before.
+    for (const height of [932, 844, 736, 667, 600]) {
       await page.setViewportSize({ width: 390, height });
       await page.waitForTimeout(120);
-      const { position, overflow, canScroll } = await page.evaluate(() => {
+      const { position, cssHeight, overflow, canScroll } = await page.evaluate(() => {
         const shell = document.querySelector(".shell-radar");
         const before = shell.scrollTop;
         shell.scrollTop = 999;
@@ -98,14 +102,22 @@ async function test(name, fn) {
         shell.scrollTop = before;
         return {
           position: getComputedStyle(shell).position,
+          cssHeight: getComputedStyle(shell).height,
           overflow: shell.scrollHeight - shell.clientHeight,
           canScroll: after !== before,
         };
       });
       assert.strictEqual(position, "fixed", `.shell-radar must be position:fixed at height=${height}`);
+      assert.strictEqual(cssHeight, `${height}px`, `.shell-radar must track the real viewport height exactly at height=${height}, got ${cssHeight}`);
       assert.strictEqual(overflow, 0, `content must fit with zero overflow at height=${height}, got ${overflow}px`);
       assert.strictEqual(canScroll, false, `screen must not be scrollable at height=${height}`);
     }
+    const hOverflow390 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.strictEqual(hOverflow390, 0, `must not overflow horizontally at 390px width, got ${hOverflow390}px`);
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.waitForTimeout(120);
+    const hOverflow360 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.strictEqual(hOverflow360, 0, `must not overflow horizontally at 360px width (bigger heptagon, revision 1 follow-up), got ${hOverflow360}px`);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(120);
   });
@@ -127,14 +139,13 @@ async function test(name, fn) {
   });
 
   console.log("E2E: lock/unlock + max-3 cap + Continue gating");
-  await test("Continue starts disabled, locking an axis enables it, and the detail card + counter pill update", async () => {
+  await test("Continue starts disabled, locking an axis enables it, and the counter pill updates (no detail card - removed as redundant, revision 1 follow-up)", async () => {
     assert.strictEqual(await page.locator("#next").isDisabled(), true, "Continue must start disabled with 0 locks (handoff: 'until at least 1 axis is locked')");
     await page.click('[data-lock-hit="body"]');
     await page.waitForTimeout(120);
     assert.ok(await page.evaluate(() => document.querySelector('[data-lock-btn-for="body"]').classList.contains("locked")), "body lock button did not toggle locked");
     assert.strictEqual(await page.locator("#next").isDisabled(), false, "Continue must enable once >=1 axis is locked");
-    const detail = await page.locator(".radar-detail-card").textContent();
-    assert.ok(/Body/.test(detail) && /Dikunci/.test(detail), `detail card wrong: ${detail}`);
+    assert.strictEqual(await page.locator(".radar-detail-card").count(), 0, "the 'Name / Bebas|Dikunci / X/10' detail card was removed - it must never appear");
     const counter = await page.locator(".radar-counter-pill").textContent();
     assert.ok(/1\s*\/\s*3/.test(counter), `counter pill wrong: ${counter}`);
   });

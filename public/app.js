@@ -185,7 +185,15 @@ function maturityTier(growthSessions) {
 // guaranteed) ---
 const POLY_ORDER = ["body", "growth", "livelihood", "emotional", "social", "purpose", "autonomy"];
 const POLY_TOTAL = 35; // 7 axes x default 5 - the fixed zero-sum budget
-const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 110, POLY_MINR = 15;
+// POLY_MAXR grown from 110->128 (founder feedback, "perbesar heptagon") -
+// this is the largest safe increase that still keeps axis labels/icons
+// inside the SVG's own viewBox on the narrowest supported phone width
+// (360px) - a literal 1.8x isn't physically possible on a phone-width
+// screen without labels clipping past the edge or the SVG itself
+// overflowing horizontally, which would violate the no-scroll requirement
+// from the previous round. POLY_VIEW_MIN/SIZE below were widened to match
+// (see the "Center invariant" comment).
+const POLY_MIN = 1, POLY_MAX = 10, POLY_CENTER = 150, POLY_MAXR = 128, POLY_MINR = 15;
 const POLY_STEP_DEG = 360 / POLY_ORDER.length; // heptagon: ~51.43deg per axis
 // Square viewBox with padding so axis-name labels (anchored outward) never
 // clip; kept square so pointer->viewBox mapping stays a uniform scale.
@@ -195,7 +203,9 @@ const POLY_STEP_DEG = 360 / POLY_ORDER.length; // heptagon: ~51.43deg per axis
 // text, so the padding widened again (Livelihood's icon was clipping at
 // the old -34/368 bounds).
 // Center invariant: POLY_VIEW_MIN + POLY_VIEW_SIZE/2 === POLY_CENTER.
-const POLY_VIEW_MIN = -46, POLY_VIEW_SIZE = 392;
+// Widened alongside POLY_MAXR's increase (110->128) so labels/icons keep
+// the same clearance from the viewBox edge as before, just further out.
+const POLY_VIEW_MIN = -60, POLY_VIEW_SIZE = 420;
 const DEFAULT_RADAR = { body: 5, growth: 5, livelihood: 5, emotional: 5, social: 5, purpose: 5, autonomy: 5 };
 
 function polyRadius(value) {
@@ -1102,7 +1112,7 @@ const AXIS_LABEL_RULES = {
   emotional: { above: false, shift: 0 },
   social: { above: false, shift: 0 },
 };
-const AXIS_LABEL_GAP_ABOVE = 22, AXIS_LABEL_GAP_BELOW = 26;
+const AXIS_LABEL_GAP_ABOVE = 25, AXIS_LABEL_GAP_BELOW = 30;
 // Axis label layout shared by render + updatePolygonDOM: Inter 12px,
 // wrapped to two lines when the name is two words (Emotional Stability),
 // locked axis's label tinted accent. Returns {x, y, anchor, lines}.
@@ -1162,8 +1172,8 @@ function renderPolygonSVG() {
     const iconY = L.y - 3.5;
     return `<text x="${L.x.toFixed(1)}" y="${L.y.toFixed(1)}" class="poly-label ${isLocked ? "locked" : ""}" data-label-for="${k}" text-anchor="${L.anchor}">${tspans}</text>
       <g class="axis-info-btn" data-axis-info="${k}">
-        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="12" class="axis-info-hit" />
-        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="6.5" class="axis-info-bg" />
+        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="14" class="axis-info-hit" />
+        <circle cx="${iconX.toFixed(1)}" cy="${iconY.toFixed(1)}" r="7.5" class="axis-info-bg" />
         <text x="${iconX.toFixed(1)}" y="${(iconY + 3).toFixed(1)}" class="axis-info-glyph" text-anchor="middle">i</text>
       </g>`;
   }).join("");
@@ -1175,9 +1185,9 @@ function renderPolygonSVG() {
     const isLocked = onboardForm.locked.includes(k);
     const disabled = !isLocked && onboardForm.locked.length >= MAX_LOCKS;
     return `<g class="lock-btn ${isLocked ? "locked" : ""} ${disabled ? "disabled" : ""}" data-lock-btn-for="${k}">
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13.5" class="lock-btn-bg" />
-      ${lockIconSVG(x, y, 12, isLocked)}
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16" class="lock-btn-hit" data-lock-hit="${k}" />
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16" class="lock-btn-bg" />
+      ${lockIconSVG(x, y, 14, isLocked)}
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="19" class="lock-btn-hit" data-lock-hit="${k}" />
     </g>`;
   }).join("");
   // Value node: unlocked-inactive / unlocked-active (just dragged or its
@@ -1190,9 +1200,9 @@ function renderPolygonSVG() {
     const isLocked = onboardForm.locked.includes(k);
     const isActive = !isLocked && activeAxisKey === k;
     const dotClass = isLocked ? "locked" : isActive ? "active" : "";
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="10" class="poly-dot ${dotClass}" data-dot-for="${k}" />
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" class="poly-dot ${dotClass}" data-dot-for="${k}" />
       <text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="poly-value ${isLocked ? "locked" : ""}" data-value-for="${k}" text-anchor="middle">${Number(radar[k]).toFixed(1)}</text>
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16" class="poly-handle" data-stat="${k}" />`;
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="19" class="poly-handle" data-stat="${k}" />`;
   }).join("");
   const centerDot = `<circle cx="${POLY_CENTER}" cy="${POLY_CENTER}" r="3" class="poly-center" />`;
   return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${rings}${outerHeptagon}${axisLines}${scaleNums}<path d="${pathD}" class="poly-shape" id="polyShape" />${centerDot}${labels}${lockBtns}${handles}</svg>`;
@@ -1281,40 +1291,27 @@ function updatePolygonDOM() {
 }
 
 // Which axis is "active" - just dragged, or its lock was just toggled -
-// showing a gold label + the detail-card row for 3.2s, then auto-clearing
+// shows a gold label + a brighter node stroke for 3.2s, then auto-clears
 // (Growth Focus Radar handoff). Distinct from "locked": an unlocked axis
 // can be active too, right after a drag or a tap on its (now separate)
 // lock button. DOM-patched, never a full renderOnboarding(), so it can
 // never interrupt an in-progress drag gesture.
+// Revision 1 follow-up (founder feedback): the separate "Name / Bebas /
+// X/10" detail-card row this used to also show was removed as redundant -
+// the gold label + counter pill already carry that information.
 let activeAxisKey = null;
 let activeAxisTimer = null;
-function renderDetailCardDOM() {
-  const slot = document.getElementById("radarDetailSlot");
-  if (slot) slot.innerHTML = detailCardHTML();
-}
 function setActiveAxis(key) {
   activeAxisKey = key;
   clearTimeout(activeAxisTimer);
-  activeAxisTimer = setTimeout(() => { activeAxisKey = null; updatePolygonDOM(); renderDetailCardDOM(); }, 3200);
+  activeAxisTimer = setTimeout(() => { activeAxisKey = null; updatePolygonDOM(); }, 3200);
   updatePolygonDOM();
-  renderDetailCardDOM();
 }
 function clearActiveAxisNow() {
   if (!activeAxisKey) return;
   activeAxisKey = null;
   clearTimeout(activeAxisTimer);
   updatePolygonDOM();
-  renderDetailCardDOM();
-}
-function detailCardHTML() {
-  if (!activeAxisKey) return "";
-  const k = activeAxisKey;
-  const isLocked = onboardForm.locked.includes(k);
-  return `<div class="radar-detail-card">
-    <span class="radar-detail-name">${esc(statLabel(k))}</span>
-    <span class="radar-detail-state">${isLocked ? "Dikunci" : "Bebas"}</span>
-    <span class="radar-detail-value mono">${Math.round(onboardForm.radar[k])}/10</span>
-  </div>`;
 }
 function counterPillHTML() {
   const n = onboardForm.locked.length;
@@ -1512,7 +1509,6 @@ function renderOnboarding() {
       </div>
       <div class="poly-wrap">${renderPolygonSVG()}</div>
       <p class="mono" id="limitHint" style="font-size:12px;color:var(--accent);margin-top:10px;text-align:center;display:none"></p>
-      <div id="radarDetailSlot">${detailCardHTML()}</div>
       <div id="radarCounterSlot" class="radar-counter-slot">${counterPillHTML()}</div>
       <div class="radar-max-lock-warning" id="radarMaxLockWarning">Maksimal 3 prioritas.<br/>Buka salah satu prioritas dulu.</div>`;
   }
