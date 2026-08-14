@@ -263,13 +263,40 @@ app.post("/api/onboarding/chapter-analysis", requireAuth, async (req, res) => {
   }
 });
 
+// Bug fix: refreshing mid-onboarding always dropped the user back to
+// "Siapa namamu?", because nothing about in-progress onboarding (name/
+// radar/the up-to-6-card AI question loop/pathway/goals) persisted anywhere
+// until POST /api/profile at the very end. The client saves a snapshot here
+// after every step/card, and GET /api/state (below) hands it back so a
+// refresh resumes instead of restarting. Opaque JSON, shape owned entirely
+// by the client (public/app.js's saveOnboardingDraft/restoreOnboardingDraft) -
+// the server only stores/returns it, with a defensive size cap since it's
+// otherwise unvalidated client input.
+app.post("/api/onboarding/draft", requireAuth, async (req, res) => {
+  try {
+    const { draft } = req.body;
+    if (draft != null) {
+      if (typeof draft !== "object" || Array.isArray(draft)) return res.status(400).json({ error: "Draft tidak valid." });
+      if (JSON.stringify(draft).length > 100000) return res.status(400).json({ error: "Draft terlalu besar." });
+    }
+    await db.saveOnboardingDraft(req.userId, draft ?? null);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan progres onboarding." });
+  }
+});
+
 // --- App routes (all require auth, all scoped by req.userId from session) ---
 
 // Full app state for the frontend: profile, stats, chapter, today's day, aiActive flag
 app.get("/api/state", requireAuth, async (req, res) => {
   try {
     const state = await db.getState(req.userId);
-    if (!state || !state.profile) return res.json({ profile: null });
+    if (!state || !state.profile) {
+      const onboardingDraft = await db.getOnboardingDraft(req.userId);
+      return res.json({ profile: null, onboardingDraft });
+    }
 
     // Resonance check: after 14 days, a trial Pathway with enough real growth
     // sessions (same unit chapter-advance already uses) activates for good.
@@ -594,6 +621,7 @@ app.post("/api/profile", requireAuth, async (req, res) => {
       secondaryTrait: secondaryTrait || null,
       goals,
     });
+    await db.saveOnboardingDraft(req.userId, null);
 
     res.json({ ok: true });
   } catch (e) {

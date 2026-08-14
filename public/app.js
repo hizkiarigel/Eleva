@@ -666,6 +666,69 @@ function resetOnboardState() {
   bridgeErrorRetry = null;
 }
 
+// Bug fix: refreshing mid-onboarding always dropped the user back to "Siapa
+// namamu?" - nothing about progress (name/radar/the up-to-6-card AI question
+// loop/pathway/goals) persisted anywhere until POST /api/profile at the very
+// end. Debounced save of everything needed to resume, POSTed to
+// /api/onboarding/draft; GET /api/state hands it back (see boot()) whenever
+// no profile exists yet. Fire-and-forget - a failed save just means the next
+// refresh falls back to the last successfully saved point, never worse than
+// today's "always restart" behavior.
+let onboardingDraftSaveTimer = null;
+// Debounced - fine for the frequent, non-critical saves fired from render()
+// (typing, dragging, re-opening a help sheet).
+function saveOnboardingDraft() {
+  clearTimeout(onboardingDraftSaveTimer);
+  onboardingDraftSaveTimer = setTimeout(saveOnboardingDraftNow, 500);
+}
+// Immediate - used at the specific moments a step/card is irreversibly
+// completed (radar Continue, confirmCard) right before the client's own
+// in-memory state is about to move on. A debounced save at those points can
+// lose exactly the update that mattered if the user refreshes within the
+// debounce window - confirmed by hand: refreshing ~300ms after confirming a
+// card mid-flight re-asked the SAME card instead of resuming past it.
+function saveOnboardingDraftNow() {
+  clearTimeout(onboardingDraftSaveTimer);
+  const draft = {
+    onboardStep, onboardForm, adaptivePhase, adaptiveCards,
+    chapterAnalysis, pathwayOptions, selectedPathwayIndex, pendingPathway, goalInputs,
+  };
+  api("/api/onboarding/draft", { method: "POST", body: { draft } }).catch(() => {});
+}
+
+// Restores everything saveOnboardingDraft() persisted, then decides which
+// screen to land on. onboardForm.radarRaw is only ever set the moment the
+// radar step's Continue is clicked (see the "next" handler in
+// renderOnboarding()) - its presence is what distinguishes "still on the
+// static name/radar steps" from "radar is done, in the adaptive AI phase"
+// without needing a separate resume-stage field. A saved "card"/"bridge"
+// phase can't be resumed in place (the in-flight fetch is gone after a
+// refresh), so that case just re-asks via beginScenarioBridge() instead -
+// "analysis"/"goals" restore directly since their data (chapterAnalysis/
+// pathwayOptions) is already in hand.
+function restoreOnboardingDraft(draft) {
+  resetOnboardState();
+  onboardStep = draft.onboardStep || 0;
+  if (draft.onboardForm) onboardForm = { ...onboardForm, ...draft.onboardForm };
+  adaptiveCards = draft.adaptiveCards || [];
+  chapterAnalysis = draft.chapterAnalysis || null;
+  pathwayOptions = draft.pathwayOptions || [];
+  selectedPathwayIndex = draft.selectedPathwayIndex ?? null;
+  pendingPathway = draft.pendingPathway || null;
+  goalInputs = draft.goalInputs && draft.goalInputs.length ? draft.goalInputs : ["", "", ""];
+
+  if (!onboardForm.radarRaw) {
+    ui = { view: "onboarding" };
+    return;
+  }
+  ui = { view: "adaptive" };
+  if (draft.adaptivePhase === "analysis" || draft.adaptivePhase === "goals") {
+    adaptivePhase = draft.adaptivePhase;
+  } else {
+    beginScenarioBridge();
+  }
+}
+
 // Applies one card's two signals (favorite = +1, least-favorite = -1) to the
 // radar through the EXISTING zero-sum + synergy engine (applySynergyDrag) -
 // per PRD, calibration reuses the manual-drag mechanism rather than a
@@ -746,7 +809,13 @@ async function boot() {
     render();
     return;
   }
-  ui = { view: appState.profile ? "dashboard" : "onboarding" };
+  if (appState.profile) {
+    ui = { view: "dashboard" };
+  } else if (appState.onboardingDraft) {
+    restoreOnboardingDraft(appState.onboardingDraft);
+  } else {
+    ui = { view: "onboarding" };
+  }
   render();
 }
 
@@ -1807,6 +1876,7 @@ function nameSheetHTML() {
 function renderOnboarding() {
   const step = ONBOARD_STEPS[onboardStep];
   const last = onboardStep === ONBOARD_STEPS.length - 1;
+  saveOnboardingDraft();
 
   if (step.type === "namePromise") {
     // "Eleva Onboarding Name" handoff: bespoke shell (.shell-name) mirroring
@@ -1912,6 +1982,7 @@ function renderOnboarding() {
     onboardForm.radarRaw = { ...onboardForm.radar };
     adaptiveCards = [];
     ui = { view: "adaptive" };
+    saveOnboardingDraftNow();
     beginScenarioBridge();
   });
 }
@@ -2015,6 +2086,7 @@ async function submitOnboarding(pathway, pathwayNoun, goals) {
 
 function renderAdaptive() {
   if (adaptivePhase === "bridge") { renderBridge(); return; }
+  saveOnboardingDraft();
 
   if (adaptivePhase === "card") {
     const sel = adaptiveSelection;
@@ -2125,6 +2197,7 @@ function renderAdaptive() {
       // 2/max 6, full unlocked-axis coverage - all enforced server-side) -
       // no fixed-count loop needed here. Sets adaptivePhase="bridge" and
       // renders itself.
+      saveOnboardingDraftNow();
       beginScenarioBridge();
     });
     return;

@@ -287,7 +287,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   --qc-card-mt: clamp(10px, calc(var(--vh, 1dvh) * 2), 16px);
   --qc-instruction-mt: clamp(8px, calc(var(--vh, 1dvh) * 1.5), 12px);
   --qc-instruction-mb: clamp(8px, calc(var(--vh, 1dvh) * 1.5), 12px);
-  --qc-answers-gap: clamp(10px, calc(var(--vh, 1dvh) * 1.8), 14px);
+  --qc-answers-gap: 1px;
   padding: var(--qc-pad-top) 8px var(--qc-pad-bottom);
 }
 .shell-qcard .radar-header-row { flex: none; }
@@ -306,7 +306,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .qcard-star { position: absolute; top: min(14px, calc(14 / 390 * 100vw)); right: min(18px, calc(18 / 390 * 100vw)); filter: drop-shadow(0 0 4px rgba(229, 170, 80, .7)); }
 .qcard-question {
   position: relative; margin: 0; font-family: "Lora", serif; font-weight: 500;
-  font-size: min(22px, calc(22 / 390 * 100vw)); line-height: 1.48; color: #f1ebdd; text-align: justify;
+  font-size: min(21px, calc(21 / 390 * 100vw)); line-height: 1.15; color: #f1ebdd; text-align: justify;
 }
 .qcard-instruction {
   flex: none; margin: var(--qc-instruction-mt) 0 var(--qc-instruction-mb); font-family: "Inter", sans-serif;
@@ -323,7 +323,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .qcard-answer:active { transform: scale(.98); }
 .qcard-answer.positive { background: rgba(111, 211, 154, .07); border-color: rgba(111, 211, 154, .55); box-shadow: 0 0 18px rgba(111, 211, 154, .15); }
 .qcard-answer.negative { background: rgba(217, 122, 122, .07); border-color: rgba(217, 122, 122, .5); box-shadow: 0 0 18px rgba(217, 122, 122, .13); }
-.qcard-answer-text { flex: 1; margin: 0; font-family: "Inter", sans-serif; font-size: min(18px, calc(18 / 390 * 100vw)); line-height: 1.4; color: #f1ebdd; }
+.qcard-answer-text { flex: 1; margin: 0; font-family: "Inter", sans-serif; font-size: min(17px, calc(17 / 390 * 100vw)); line-height: 1; color: #f1ebdd; }
 .qcard-answer-icon { flex: none; }
 
 .eyebrow { color: var(--muted); font-size: 12px; letter-spacing: 1.5px; margin-bottom: 8px; }

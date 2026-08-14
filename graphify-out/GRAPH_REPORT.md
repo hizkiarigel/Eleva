@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-14)
 
 ## Corpus Check
-- 47 files · ~445,802 words
+- 48 files · ~447,619 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 598 nodes · 931 edges · 40 communities (33 shown, 7 thin omitted)
-- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 104 edges (avg confidence: 0.51)
+- 611 nodes · 952 edges · 47 communities (38 shown, 9 thin omitted)
+- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 107 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b38e4d92`
+- Built from commit: `f1339eab`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -26,7 +26,7 @@
 - package.json
 - render
 - onboarding-bridge.e2e.js
-- jobMatch.js
+- livelihood.js
 - practiceTest.js
 - practicetest.e2e.js
 - Job Match Analysis (Task 10b)
@@ -39,7 +39,7 @@
 - livelihood.e2e.js
 - auth.e2e.js
 - DEPLOY_RAILWAY.md — Railway Deployment Guide
-- renderOnboarding
+- renderPolygonSVG
 - Eleva README.md
 - Growth-Gate (12-word deterministic check)
 - Task 5: Adaptive Pathway Onboarding
@@ -54,19 +54,26 @@
 - onboarding-name.e2e.js
 - buildPathwayOptions
 - 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
-- ensureCountdownTicking
+- questSummaryCard
+- renderAdaptive
+- jobMatch.js
+- onboarding-draft-resume.e2e.js
+- auth.js
+- targets.js
+- structured.js
+- safety.js
 
 ## God Nodes (most connected - your core abstractions)
 1. `esc()` - 40 edges
 2. `renderDashboard()` - 37 edges
 3. `hasKey()` - 15 edges
-4. `render()` - 14 edges
-5. `renderAdaptive()` - 12 edges
-6. `renderOnboarding()` - 11 edges
+4. `renderAdaptive()` - 14 edges
+5. `render()` - 14 edges
+6. `renderOnboarding()` - 13 edges
 7. `completedResultCardHTML()` - 11 edges
 8. `callClaude()` - 11 edges
-9. `renderAuth()` - 10 edges
-10. `renderPolygonSVG()` - 10 edges
+9. `api()` - 10 edges
+10. `renderAuth()` - 10 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Growth-Gate (12-word deterministic check)` --semantically_similar_to--> `Discrete Confidence-Score Rubric (0.95/0.85/0.75/0.65/0.55)`  [INFERRED] [semantically similar]
@@ -88,11 +95,11 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (40 total, 7 thin omitted)
+## Communities (47 total, 9 thin omitted)
 
 ### Community 0 - "index.js"
-Cohesion: 0.05
-Nodes (32): AuthError, bcrypt, db, login(), normalizeEmail(), signup(), ai, app (+24 more)
+Cohesion: 0.07
+Nodes (21): ai, app, auth, cookieSession, db, express, jobApplication, jobMatch (+13 more)
 
 ### Community 1 - "app.js"
 Cohesion: 0.04
@@ -127,16 +134,16 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.15
-Nodes (21): api(), beginPathwayBridge(), beginScenarioBridge(), boot(), clearBridgeTimers(), exitBridge(), goalPlaceholder(), helpBtnHTML() (+13 more)
+Cohesion: 0.19
+Nodes (18): api(), authFinish(), beginPathwayBridge(), beginScenarioBridge(), boot(), clearBridgeTimers(), exitBridge(), openNutritionFlow() (+10 more)
 
 ### Community 10 - "onboarding-bridge.e2e.js"
 Cohesion: 0.25
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 11 - "jobMatch.js"
-Cohesion: 0.08
-Nodes (12): ACCEPTED_CV_MIMES, ACCEPTED_IMAGE_MIMES, mammoth, MATCH_STATUSES, cleanTargetMetrics(), num(), apiTests(), assert (+4 more)
+### Community 11 - "livelihood.js"
+Cohesion: 0.18
+Nodes (6): apiTests(), assert, jobApplication, jobMatch, targets, test()
 
 ### Community 12 - "practiceTest.js"
 Cohesion: 0.10
@@ -151,8 +158,8 @@ Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
 ### Community 18 - "esc"
-Cohesion: 0.08
-Nodes (41): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML() (+33 more)
+Cohesion: 0.09
+Nodes (37): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), characterScreenHTML(), completedResultCardHTML(), durasiMenitFromFields() (+29 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -170,9 +177,9 @@ Nodes (3): assert, { chromium }, { spawn }
 Cohesion: 0.40
 Nodes (5): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence)
 
-### Community 24 - "renderOnboarding"
-Cohesion: 0.12
-Nodes (26): attachPolygonHandlers(), axisLabelLayout(), characterScreenHTML(), clearActiveAxisNow(), counterPillHTML(), formatRadarValue(), heptagonPath(), isStepValid() (+18 more)
+### Community 24 - "renderPolygonSVG"
+Cohesion: 0.18
+Nodes (18): attachPolygonHandlers(), axisLabelLayout(), clearActiveAxisNow(), formatRadarValue(), heptagonPath(), lockIconSVG(), polyPoint(), polyRadius() (+10 more)
 
 ### Community 25 - "Eleva README.md"
 Cohesion: 0.16
@@ -203,8 +210,8 @@ Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 34 - "renderAuth"
-Cohesion: 0.28
-Nodes (9): authConsentInfoModalHTML(), authFinish(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash() (+1 more)
+Cohesion: 0.32
+Nodes (8): authConsentInfoModalHTML(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
 
 ### Community 35 - "Adaptive Scenario Cards"
 Cohesion: 0.40
@@ -218,14 +225,34 @@ Nodes (3): assert, { chromium }, { spawn }
 Cohesion: 0.50
 Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
 
-### Community 39 - "ensureCountdownTicking"
-Cohesion: 0.67
-Nodes (3): ensureCountdownTicking(), formatCountdown(), tickCountdowns()
+### Community 39 - "questSummaryCard"
+Cohesion: 0.25
+Nodes (8): ensureCountdownTicking(), formatCountdown(), nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
+
+### Community 40 - "renderAdaptive"
+Cohesion: 0.18
+Nodes (14): counterPillHTML(), goalPlaceholder(), helpBtnHTML(), isStepValid(), layoutAxisInfoIcons(), nameSheetHTML(), renderAdaptive(), renderBridge() (+6 more)
+
+### Community 41 - "jobMatch.js"
+Cohesion: 0.22
+Nodes (4): ACCEPTED_CV_MIMES, ACCEPTED_IMAGE_MIMES, mammoth, MATCH_STATUSES
+
+### Community 42 - "onboarding-draft-resume.e2e.js"
+Cohesion: 0.25
+Nodes (3): assert, { chromium }, { spawn }
+
+### Community 43 - "auth.js"
+Cohesion: 0.38
+Nodes (6): AuthError, bcrypt, db, login(), normalizeEmail(), signup()
+
+### Community 45 - "structured.js"
+Cohesion: 0.50
+Nodes (4): CARDIO_ACTIVITIES, num(), SPEED_CAP_KMH, validateStructuredData()
 
 ## Knowledge Gaps
-- **188 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+183 more)
+- **191 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+186 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **7 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -237,9 +264,9 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `Defense-in-Depth Pattern (don't trust AI self-report, enforce in code)` connect `Adaptive Scenario Cards` to `Eleva README.md`, `Growth-Gate (12-word deterministic check)`?**
   _High betweenness centrality (0.003) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
-  _188 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _191 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `index.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.0507399577167019 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07389162561576355 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
   _Cohesion score 0.04081632653061224 - nodes in this community are weakly interconnected._
 - **Should `claude.js` be split into smaller, more focused modules?**

@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786717838.818848,
-    "ast_hash": "73ecad7337250e13d6866dea07de22d3",
+    "mtime": 1786719469.4348829,
+    "ast_hash": "075ba8c41a89ddb9774326acfc5f5793",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -25,18 +25,18 @@
     "semantic_hash": "20fd1243671a1310360b35ac9f823ada"
   },
   "server/claude.js": {
-    "mtime": 1786538982.1268308,
-    "ast_hash": "0b695b04e4ab8085ab192273f0b9a19b",
+    "mtime": 1786719566.242885,
+    "ast_hash": "44664dfdace1a184be6eafbfc7bf069c",
     "semantic_hash": ""
   },
   "server/db.js": {
-    "mtime": 1786544993.215834,
-    "ast_hash": "f51e21a8b6df9f326100690a9c97fb4f",
+    "mtime": 1786719151.4948761,
+    "ast_hash": "36d740e824b8c51f771bc4317e4df77e",
     "semantic_hash": ""
   },
   "server/index.js": {
-    "mtime": 1786711633.643104,
-    "ast_hash": "1aec65f50965d49a97c424e659d70e77",
+    "mtime": 1786719182.7548769,
+    "ast_hash": "855c45819bd9c06d7d18d6f0fd969e2a",
     "semantic_hash": ""
   },
   "server/jobMatch.js": {
@@ -312,6 +312,11 @@
   "tests/onboarding-bridge.e2e.js": {
     "mtime": 1786715025.0350628,
     "ast_hash": "698210eb66d67bb8d605f00f1f078b8b",
+    "semantic_hash": ""
+  },
+  "tests/onboarding-draft-resume.e2e.js": {
+    "mtime": 1786719956.5868933,
+    "ast_hash": "76d2eb1bb593aed5b543c0978b2b45bc",
     "semantic_hash": ""
   }
 }

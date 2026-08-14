@@ -66,6 +66,14 @@ async function init() {
     -- explicitly wants a separate approve step (see server/metaTargets.js),
     -- this column IS that approval record.
     ALTER TABLE character_state ADD COLUMN IF NOT EXISTS meta_active_targets JSONB DEFAULT '{}'::jsonb;
+    -- Founder-reported bug: refreshing mid-onboarding (name/radar/the up-to-6
+    -- card AI question loop/pathway/goals) always dropped the user back to
+    -- "Siapa namamu?", because nothing about onboarding progress persisted
+    -- anywhere until the very end (character_state doesn't exist until
+    -- POST /api/profile). Lives on users, not character_state, since it must
+    -- be readable/writable before a profile exists at all. Cleared once the
+    -- real profile is created, or on account reset - see resetUser/index.js.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_draft JSONB;
   `);
 
   // Per-goal quest model (founder-reported regression: a goal's quest was
@@ -336,6 +344,18 @@ async function getUserById(id) {
   return rows[0] || null;
 }
 
+// In-progress onboarding snapshot (name/radar/adaptive-card-loop/pathway/
+// goals) - see the onboarding_draft column comment in init() for why this
+// lives on users rather than character_state. draft is a plain JS object
+// (or null to clear); server/index.js is the only caller and owns its shape.
+async function getOnboardingDraft(userId) {
+  const { rows } = await pool.query(`SELECT onboarding_draft FROM users WHERE id = $1`, [userId]);
+  return rows[0]?.onboarding_draft || null;
+}
+async function saveOnboardingDraft(userId, draft) {
+  await pool.query(`UPDATE users SET onboarding_draft = $2 WHERE id = $1`, [userId, draft]);
+}
+
 // --- character state (per user) ---
 
 async function getState(userId) {
@@ -604,6 +624,7 @@ async function activatePathway(userId) {
 async function resetUser(userId) {
   await pool.query(`DELETE FROM character_state WHERE user_id = $1`, [userId]);
   await pool.query(`DELETE FROM days WHERE user_id = $1`, [userId]);
+  await pool.query(`UPDATE users SET onboarding_draft = NULL WHERE id = $1`, [userId]);
 }
 
 // --- days (per user; one row per QUEST INSTANCE, not one row per calendar
@@ -889,7 +910,7 @@ async function getFoodByBarcode(barcode) {
 
 module.exports = {
   DEFAULT_STATS, init,
-  createUser, getUserByEmail, getUserById,
+  createUser, getUserByEmail, getUserById, getOnboardingDraft, saveOnboardingDraft,
   getState, createState, updateState, setGoalTarget, activatePathway, resetUser,
   getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
