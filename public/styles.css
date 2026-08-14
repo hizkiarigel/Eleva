@@ -17,7 +17,12 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+/* Round 11 (founder: real device showed a page-level horizontal scrollbar
+   and cropped text on the radar screen): a hard guarantee that no element
+   anywhere can ever create document-level horizontal scroll, regardless
+   of which child is the actual cause - belt-and-braces on top of fixing
+   the root cause below. */
+html, body { margin: 0; padding: 0; overflow-x: hidden; max-width: 100%; }
 body {
   background: var(--bg);
   color: var(--text);

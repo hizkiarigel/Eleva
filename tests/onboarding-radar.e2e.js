@@ -257,6 +257,24 @@ async function test(name, fn) {
     await page.waitForTimeout(150);
   });
 
+  console.log("E2E: round 11 (founder: real device showed a page-level horizontal scrollbar and cropped heading text) - html/body get a hard overflow-x:hidden guarantee, verified at a wide width sweep");
+  await test("no document-level horizontal scroll at any width from 360px to 430px (the full range of real supported phones), belt-and-braces via html/body overflow-x:hidden", async () => {
+    for (const width of [360, 375, 390, 393, 414, 428, 430]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.waitForTimeout(100);
+      const { docOverflow, htmlOverflowX, bodyOverflowX } = await page.evaluate(() => ({
+        docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+        bodyOverflowX: getComputedStyle(document.body).overflowX,
+      }));
+      assert.strictEqual(docOverflow, 0, `document must not scroll horizontally at width=${width}, got ${docOverflow}px`);
+      assert.strictEqual(htmlOverflowX, "hidden", `html must have overflow-x:hidden as a hard guard, got ${htmlOverflowX}`);
+      assert.strictEqual(bodyOverflowX, "hidden", `body must have overflow-x:hidden as a hard guard, got ${bodyOverflowX}`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(120);
+  });
+
   console.log("E2E: round 10 (founder feedback) - heptagon box actually fills available width (not height-capped), 16px axis-label font, '<- Kembali' arrow, tight symmetric Lanjut padding");
   await test("the SVG box is now driven by available width (not an artificially low height-based cap) at a normal viewport height, axis labels are visibly bigger, Kembali has a back arrow, and Lanjut's padding is small and even on every side", async () => {
     const svgWidth = await page.evaluate(() => document.getElementById("polySvg").getBoundingClientRect().width);
