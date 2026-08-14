@@ -85,6 +85,31 @@ async function test(name, fn) {
   }
   await reachRadar();
 
+  console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, never scrollable");
+  await test("the screen fills the real viewport edge-to-edge and cannot be scrolled, even on a short viewport", async () => {
+    for (const height of [844, 736, 667, 600]) {
+      await page.setViewportSize({ width: 390, height });
+      await page.waitForTimeout(120);
+      const { position, overflow, canScroll } = await page.evaluate(() => {
+        const shell = document.querySelector(".shell-radar");
+        const before = shell.scrollTop;
+        shell.scrollTop = 999;
+        const after = shell.scrollTop;
+        shell.scrollTop = before;
+        return {
+          position: getComputedStyle(shell).position,
+          overflow: shell.scrollHeight - shell.clientHeight,
+          canScroll: after !== before,
+        };
+      });
+      assert.strictEqual(position, "fixed", `.shell-radar must be position:fixed at height=${height}`);
+      assert.strictEqual(overflow, 0, `content must fit with zero overflow at height=${height}, got ${overflow}px`);
+      assert.strictEqual(canScroll, false, `screen must not be scrollable at height=${height}`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(120);
+  });
+
   console.log("E2E: layout + copy (handoff v5, 'Growth Focus Radar')");
   await test("header row, progress bar, trade-off strip, and lock-instructions row all render with the exact handoff copy", async () => {
     assert.ok(await page.locator("text=Ke mana kamu mau").count(), "heading missing");

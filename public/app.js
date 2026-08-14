@@ -1542,7 +1542,7 @@ function renderOnboarding() {
   }
 
   root.innerHTML = `
-    <div class="shell">
+    <div class="shell ${step.type === "radar" ? "shell-radar" : ""}">
       ${step.type === "radar" ? `
       <div class="radar-header-row">
         <div class="eyebrow mono radar-header-eyebrow">ELEVA · ONBOARDING</div>
@@ -1558,7 +1558,7 @@ function renderOnboarding() {
         ${headingHTML}
         <div class="field">${bodyHTML}</div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:28px">
+      <div class="onboard-nav-row">
         <button class="btn-ghost" id="back" style="visibility:${onboardStep > 0 ? "visible" : "hidden"}">Kembali</button>
         <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
       </div>

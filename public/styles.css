@@ -45,6 +45,45 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 
 .shell { max-width: 560px; margin: 0 auto; padding: 48px 24px 80px; position: relative; }
 .centered { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.onboard-nav-row { display: flex; justify-content: space-between; align-items: center; margin-top: 28px; }
+
+/* Growth Focus Radar screen, revision 1 (founder feedback): render at the
+   product's real 9:16 mobile viewport, edge-to-edge like every other full-
+   screen view in this app (auth2-root uses the identical pattern) - not a
+   letterboxed device-frame box. overflow:hidden, not overflow-y:auto - the
+   founder wants this screen to NEVER need scrolling, not just "usually
+   doesn't". Everything that can compress does, via dvh-based clamp()s
+   whose max always equals the already-tuned px value above, so a normal-
+   height viewport (844px+) renders pixel-identical to before - only short
+   viewports (down to ~640px, measured) actually compress. */
+.shell.shell-radar {
+  position: fixed; inset: 0; overflow: hidden; box-sizing: border-box;
+  max-width: 560px; margin: 0 auto; display: flex; flex-direction: column;
+  --rd-pad-top: clamp(14px, 3dvh, 30px);
+  --rd-pad-bottom: clamp(10px, 2dvh, 20px);
+  --rd-xs: clamp(2px, 0.6dvh, 6px);
+  --rd-sm: clamp(4px, 1dvh, 10px);
+  --rd-md: clamp(6px, 1.3dvh, 16px);
+  --rd-lg: clamp(8px, 1.8dvh, 22px);
+  --rd-svg-max: clamp(200px, 38dvh, 325px);
+  --rd-nav-mt: clamp(8px, 1.6dvh, 28px);
+  padding: var(--rd-pad-top) 20px var(--rd-pad-bottom);
+}
+.shell-radar .onboard-nav-row { margin-top: var(--rd-nav-mt); flex: none; }
+.shell-radar .fadeUp { min-height: 0; display: flex; flex-direction: column; }
+/* Scoped descendant overrides (not edits to the base rules) so the
+   Chapter Analysis comparison chart elsewhere, which reuses .poly-svg/
+   .poly-wrap outside .shell-radar, is completely unaffected. */
+.shell-radar .radar-header-row { flex: none; }
+.shell-radar .radar-progress-track { margin-bottom: var(--rd-md); flex: none; }
+.shell-radar .radar-heading { margin: var(--rd-xs) 0 var(--rd-xs); flex: none; }
+.shell-radar .radar-explainer { margin: 0 0 var(--rd-md); flex: none; }
+.shell-radar .radar-tradeoff-strip { margin-bottom: var(--rd-sm); flex: none; }
+.shell-radar .radar-lock-instructions { flex: none; }
+.shell-radar .poly-wrap { margin: var(--rd-lg) auto 0; flex: none; }
+.shell-radar .poly-svg { max-width: var(--rd-svg-max); }
+.shell-radar .radar-counter-slot { margin-top: var(--rd-lg); flex: none; }
+.shell-radar .field { flex: none; }
 
 .eyebrow { color: var(--muted); font-size: 12px; letter-spacing: 1.5px; margin-bottom: 8px; }
 
