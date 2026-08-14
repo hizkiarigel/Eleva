@@ -66,7 +66,30 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    truly unreachable on some device this couldn't be tested against. A
    guaranteed-reachable primary action wins over a hard no-scroll rule. */
 .shell.shell-radar {
-  position: fixed; inset: 0; min-height: calc(var(--vh, 1dvh) * 100); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  /* Round 6 (founder: round 5's flat scale() made things worse - it
+     introduced horizontal scrolling, because position:fixed descendants
+     inside a transformed ancestor (the sheets, the max-lock warning
+     bubble) get re-contained by that ancestor instead of the real
+     viewport. Founder also confirmed the ROUND 4 visual was already
+     correct - only the button clipping itself needed a real fix. Reverted
+     round 5 entirely.
+     Root cause, isolated this round: `position:fixed; inset:0` sizes to
+     iOS Safari's LARGE viewport (as if the toolbar were always collapsed),
+     not the real visible area - so even though the --rd-* clamps below
+     correctly used --vh (the real, small, toolbar-aware height) for
+     padding/spacing, the box itself (and therefore where margin-top:auto
+     pushes Kembali/Lanjut to) was still being measured against the larger,
+     toolbar-visible-unaware height. That's why every previous round's
+     "zero overflow" check passed - there WAS no internal overflow, the
+     button was just being placed inside a phantom region the toolbar was
+     covering. `min-height` couldn't fix this: with top:0/bottom:0 already
+     set, the box stretches to the containing block's full height
+     regardless of min-height. An explicit `height` (not min-height)
+     overrides that stretch per the CSS2 abspos sizing rules, so the box's
+     real rendered height now equals the true, JS-measured --vh height,
+     and margin-top:auto places the button inside the actually-visible
+     area instead of past its edge. */
+  position: fixed; inset: 0; height: calc(var(--vh, 1dvh) * 100); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
   max-width: 560px; margin: 0 auto; display: flex; flex-direction: column;
   /* Round 4 (repeated real-device report): CSS dvh itself has proven
      unreliable on the founder's real Safari - every "Ndvh" below is now
@@ -96,23 +119,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    space, pushing Kembali/Lanjut down to sit flush against the bottom
    padding - falls back to 0 automatically on short viewports where
    there's no leftover space to begin with. */
-/* Round 5 (founder: repeated real-device clipping survived 4 precision
-   fixes; founder's own workaround - manual pinch-zoom-out - always works,
-   and asked for that to be the default). Wrapping every radar-step child
-   in one scaled box sidesteps the whole "predict the real viewport height
-   exactly" problem: instead of computing just-enough room, it always
-   renders ~15% smaller than the design size, which manufactures a fixed
-   safety margin no measurement error can eat into. Unlike the --rd-* vh
-   clamp()s above (spacing-only, by convention never touch font-size),
-   scale() shrinks text/icons too - matching what the founder's own
-   pinch-zoom screenshot actually looked like. transform-origin: top
-   center keeps the header pinned near the top and lets the freed-up
-   room appear at the bottom, exactly where Lanjut was getting cut off. */
-.radar-scale-wrap {
-  display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%;
-  transform: scale(0.85);
-  transform-origin: top center;
-}
 .shell-radar .onboard-nav-row { margin-top: auto; flex: none; }
 .shell-radar .btn-primary { padding: 14px 18px; }
 .shell-radar .fadeUp { min-height: 0; display: flex; flex-direction: column; }

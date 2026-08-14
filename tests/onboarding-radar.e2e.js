@@ -113,43 +113,45 @@ async function test(name, fn) {
     await page.waitForTimeout(150);
   });
 
-  console.log("E2E: round 5 (repeated real-device report survived 4 precision fixes) - flat transform:scale() safety margin, founder's own 'render it zoomed out' proposal");
-  await test("the radar step's content is wrapped in a fixed ~0.85 scale, so Continue sits inside the viewport with room to spare without relying on exact viewport-height math", async () => {
-    const { transform, origin } = await page.evaluate(() => {
-      const wrap = document.querySelector(".radar-scale-wrap");
-      const cs = getComputedStyle(wrap);
-      return { transform: cs.transform, origin: cs.transformOrigin };
-    });
-    assert.notStrictEqual(transform, "none", "radar-scale-wrap must have a transform applied");
-    // matrix(a, b, c, d, tx, ty) with a uniform scale(s) has a === d === s.
-    const m = transform.match(/matrix\(([^,]+),/);
-    assert.ok(m, `expected a matrix() transform, got ${transform}`);
-    const scaleFactor = parseFloat(m[1]);
-    assert.ok(scaleFactor > 0.8 && scaleFactor < 0.9, `scale factor should be ~0.85, got ${scaleFactor}`);
-    const wrapWidth = await page.evaluate(() => document.querySelector(".radar-scale-wrap").offsetWidth);
-    const originX = parseFloat(origin);
-    assert.ok(Math.abs(originX - wrapWidth / 2) < 1, `transform-origin should be horizontally centered within the wrap (width=${wrapWidth}, expected ~${wrapWidth / 2}), got ${origin}`);
+  console.log("E2E: round 6 (founder: round 5's flat scale() caused NEW horizontal scrolling and wasn't needed - round 4's visual was already right, only the clipping itself was real) - height (not min-height), so position:fixed's large-viewport auto-stretch can't out-size the real small-viewport toolbar-aware box");
+  await test("`.shell-radar` has no scale() transform (round 5 fully reverted) and its rendered box height tracks the real small-viewport --vh, not the large/toolbar-collapsed viewport a bare inset:0 stretch would produce", async () => {
+    assert.strictEqual(await page.locator(".radar-scale-wrap").count(), 0, "round 5's scale wrapper must be fully removed");
+    const transform = await page.evaluate(() => getComputedStyle(document.querySelector(".shell-radar")).transform);
+    assert.strictEqual(transform, "none", ".shell-radar itself must carry no transform (was the containing-block bug for fixed-position sheets/warning bubble)");
 
-    // The actual regression this round targets: at a height representative
-    // of a real phone with a visible browser toolbar (not an impossible
-    // edge case, an everyday one), Lanjut must sit inside the viewport
-    // with headroom to spare - fully visible with no scroll required -
-    // because the flat scale manufactures a safety margin no viewport
-    // measurement, dvh quirk, or toolbar-height guess has to get exactly
-    // right.
-    for (const height of [932, 844, 780, 736, 700, 667]) {
-      await page.setViewportSize({ width: 390, height });
-      await page.waitForTimeout(120);
-      const { nextBottom, viewportH, overflow } = await page.evaluate(() => {
-        const rect = document.getElementById("next").getBoundingClientRect();
-        const s = document.querySelector(".shell-radar");
-        return { nextBottom: rect.bottom, viewportH: window.innerHeight, overflow: s.scrollHeight - s.clientHeight };
+    // Simulate a visible Safari toolbar: visualViewport under-reports the
+    // true available height by 120px, but window.innerHeight (the "large"
+    // viewport a bare `inset:0` stretch would use) stays unchanged. Round 4
+    // already proved --vh itself tracks the smaller number; this round's
+    // fix is that `.shell-radar`'s own box now has to shrink to match it
+    // (via explicit `height`, not `min-height`) instead of silently
+    // stretching to the larger, toolbar-ignorant containing-block height.
+    await page.evaluate(() => {
+      Object.defineProperty(window, "visualViewport", {
+        value: { height: window.innerHeight - 120, addEventListener: () => {}, removeEventListener: () => {} },
+        configurable: true,
       });
-      assert.ok(nextBottom <= viewportH, `Lanjut must be fully inside the viewport at height=${height} (bottom=${nextBottom}, viewport=${viewportH})`);
-      assert.strictEqual(overflow, 0, `content must fit with zero overflow at height=${height}, got ${overflow}px`);
-    }
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(120);
+      window.dispatchEvent(new Event("resize"));
+    });
+    await page.waitForTimeout(150);
+    const { shellHeight, innerHeight, nextBottom, overflow } = await page.evaluate(() => {
+      const s = document.querySelector(".shell-radar");
+      return {
+        shellHeight: s.getBoundingClientRect().height,
+        innerHeight: window.innerHeight,
+        nextBottom: document.getElementById("next").getBoundingClientRect().bottom,
+        overflow: s.scrollHeight - s.clientHeight,
+      };
+    });
+    assert.ok(shellHeight < innerHeight - 100, `.shell-radar's box must shrink with the real small viewport, not stretch to the large one (shellHeight=${shellHeight}, innerHeight=${innerHeight})`);
+    assert.ok(nextBottom <= shellHeight + 1, `Lanjut must sit inside .shell-radar's own (correctly shrunk) box (bottom=${nextBottom}, shellHeight=${shellHeight})`);
+    assert.strictEqual(overflow, 0, `content must still fit with zero internal overflow under the simulated undercount, got ${overflow}px`);
+
+    await page.evaluate(() => {
+      delete window.visualViewport;
+      window.dispatchEvent(new Event("resize"));
+    });
+    await page.waitForTimeout(150);
   });
 
   console.log("E2E: revision 1 (founder feedback) - fixed viewport frame, compressed to avoid scrolling, with a scroll safety net");

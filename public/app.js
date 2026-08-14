@@ -1515,7 +1515,6 @@ function renderOnboarding() {
 
   root.innerHTML = `
     <div class="shell ${step.type === "radar" ? "shell-radar" : ""}">
-      <div class="${step.type === "radar" ? "radar-scale-wrap" : ""}">
       ${step.type === "radar" ? `
       <div class="radar-header-row">
         <div class="eyebrow mono radar-header-eyebrow">ELEVA · ONBOARDING</div>
@@ -1536,7 +1535,6 @@ function renderOnboarding() {
         <button class="btn-primary" id="next" ${isStepValid(onboardStep) ? "" : "disabled"}>Lanjut →</button>
       </div>
       ${step.type === "namePromise" ? `<p style="font-size:12px;line-height:1.6;color:var(--muted);text-align:center;margin:14px 0 0">Dengan tap Lanjut, kamu setuju dengan pesan privasi di atas.</p>` : ""}
-      </div>
     </div>`;
 
   const fld = document.getElementById("fld");
