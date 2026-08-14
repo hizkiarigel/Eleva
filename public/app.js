@@ -1102,7 +1102,15 @@ const ONBOARDING_BRIDGES = {
   },
   // Full order (7 stages, registered one at a time as art arrives): 1
   // Journey, 2 Quest, 3 Evidence, 4 Character, 5 Adaptive, 6 META, 7
-  // Pathway. Stages 2-4 and 6-7 not yet registered.
+  // Pathway. Stages 2, 3, 6, 7 not yet registered.
+  character: {
+    order: 4,
+    name: "Character / Acting — The Becoming",
+    image: "04-character", // -> /onboarding/bridges/04-character.webp
+    headline: "Karaktermu dibentuk oleh tindakan.",
+    voiceText: "Kamu jadi versi baru bukan karena niat, tapi karena apa yang kamu lakukan.",
+    nextType: "personalized_question",
+  },
   adaptive: {
     order: 5,
     name: "Adaptive AI — The Guide",
