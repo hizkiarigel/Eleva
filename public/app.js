@@ -166,7 +166,7 @@ function actingMethodCardHTML(pathway) {
 function pathwayHeaderHTML(pathway, subPathwayNoun) {
   const color = PPICK_COLOR[pathway] || "#e5aa50";
   return `
-    <div class="gset-pathway-line fr"><span style="color:${color}">${esc(pathway)}</span>: <span class="ivory">${esc(subPathwayNoun)}</span></div>
+    <div class="gset-pathway-line fr"><span style="color:${color}">${esc(pathway)}:</span> <span class="ivory">${esc(subPathwayNoun)}</span></div>
     ${pathwayDescHTML(pathway, color)}`;
 }
 // Task 9 (founder spec, 10 Agustus): fixed catalog of 15 sub-pathway
@@ -2798,7 +2798,7 @@ function renderAdaptive() {
     root.innerHTML = `
       <div class="shell shell-chapter">
         <div class="radar-header-row">
-          <div class="eyebrow mono radar-header-eyebrow">ELEVA · CHAPTER ANALYSIS</div>
+          <div class="eyebrow mono radar-header-eyebrow">ELEVA · PATHWAY</div>
           ${chapterInfoBtnHTML("pathway")}
         </div>
         ${chapterProgressHTML("pathway")}

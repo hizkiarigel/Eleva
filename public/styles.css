@@ -715,7 +715,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .ivory { color: #f1ebdd; }
 .gset-pathway-line { margin: 15px 0 0; font-family: "Fraunces", serif; font-size: min(21px, calc(21 / 390 * 100vw)); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gset-pathway-line span:first-child { font-weight: 700; }
-.gset-pathway-line span.ivory { font-weight: 600; }
+.gset-pathway-line span.ivory { font-weight: 400; }
 .gset-pathway-desc { margin: 15px 0 0; font-family: "Inter", sans-serif; font-size: 13px; line-height: 1.5; color: #8f8b98; }
 .gset-acting-card { display: flex; gap: 8px; align-items: flex-start; margin-top: 15px; background: rgba(255, 255, 255, .02); border: 1px solid rgba(255, 255, 255, .08); border-radius: 14px; padding: 8px 10px; }
 .gset-acting-icon { flex: none; width: 44px; height: 44px; border-radius: 50%; background: rgba(216, 163, 85, .08); display: flex; align-items: center; justify-content: center; }
