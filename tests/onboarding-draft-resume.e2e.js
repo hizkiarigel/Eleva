@@ -175,9 +175,12 @@ async function signUpAndFillName(page, name) {
     await page.waitForSelector(".ppick-col", { timeout: 15000 });
     await page.locator(".ppick-col").first().click();
     await page.click("#confirmPathway");
-    await page.waitForSelector(".goal-input", { timeout: 10000 });
-    await page.fill('[data-goal="0"]', "Target uji coba");
-    await page.click("#confirmGoals");
+    await page.waitForSelector(".gset-cards", { timeout: 10000 });
+    // fallback-heuristic-passing text (>=20 chars, has a timeframe keyword, has a digit)
+    await page.fill('[data-goal-text="0"]', "Latihan public speaking 2x seminggu selama 3 bulan");
+    await page.click('[data-goal-set="0"]');
+    await page.waitForSelector(".gset-check", { timeout: 10000 });
+    await page.click("#startFirstTrial");
     await page.waitForSelector("[data-tab]", { timeout: 15000 }); // real dashboard
     await page.reload();
     await page.waitForSelector("[data-tab]", { timeout: 15000 });

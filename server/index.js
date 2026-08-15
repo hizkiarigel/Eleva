@@ -263,6 +263,21 @@ app.post("/api/onboarding/chapter-analysis", requireAuth, async (req, res) => {
   }
 });
 
+// Goal Setting redesign - validates a single onboarding goal before it can
+// be "Set" (approved). Thin proxy, same shape as the other onboarding AI
+// routes above.
+app.post("/api/onboarding/validate-goal", requireAuth, async (req, res) => {
+  try {
+    const { text, pathway, pathwayNoun } = req.body;
+    if (typeof text !== "string" || !text.trim()) return res.status(400).json({ error: "Goal kosong." });
+    const result = await ai.generateGoalValidation({ text: text.trim().slice(0, 200), pathway, pathwayNoun });
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal memeriksa goal." });
+  }
+});
+
 // Bug fix: refreshing mid-onboarding always dropped the user back to
 // "Siapa namamu?", because nothing about in-progress onboarding (name/
 // radar/the up-to-6-card AI question loop/pathway/goals) persisted anywhere

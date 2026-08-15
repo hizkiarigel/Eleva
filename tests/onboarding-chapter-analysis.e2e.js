@@ -131,7 +131,7 @@ async function waitForServer(base, log) {
     assert.strictEqual(await page.locator(".step-dots .dot-seg.active").count(), 2, "expected 2 active segments on the pathway screen");
     await page.locator(".ppick-col").first().click();
     await page.click("#confirmPathway");
-    await page.waitForSelector(".goal-manuscript", { timeout: 10000 });
+    await page.waitForSelector(".gset-cards", { timeout: 10000 });
     assert.strictEqual(await page.locator(".step-dots .dot-seg.active").count(), 3, "expected 3 active segments on Goal Capture");
     await context.close();
   });
@@ -163,8 +163,8 @@ async function waitForServer(base, log) {
     await context.close();
   });
 
-  console.log("E2E: Goal Capture's Kembali returns to the pulled-out pathway carousel, not the chapter-analysis summary");
-  await test("backToPathway targets 'pathway' (round 28 fix), not 'analysis' two screens back", async () => {
+  console.log("E2E: Goal Setting's Ganti Pathway returns to the pulled-out pathway screen, not the chapter-analysis summary");
+  await test("gantiPathway targets 'pathway' (round 28 fix, carried into round 33's redesign), not 'analysis' two screens back", async () => {
     const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
     await reachChapterAnalysis(page, "BackNav Tester");
@@ -172,10 +172,10 @@ async function waitForServer(base, log) {
     await page.waitForSelector(".ppick-cards", { timeout: 10000 });
     await page.locator(".ppick-col").first().click();
     await page.click("#confirmPathway");
-    await page.waitForSelector(".goal-manuscript", { timeout: 10000 });
-    await page.click("#backToPathway");
+    await page.waitForSelector(".gset-cards", { timeout: 10000 });
+    await page.click("#gantiPathway"); // Goal 1 not yet approved in this flow, so this discards immediately with no confirm gate
     await page.waitForSelector(".ppick-cards", { timeout: 10000 });
-    assert.strictEqual(await page.locator(".chapter-headline").count(), 0, "Kembali must land on the pathway screen, not back on the chapter-analysis summary");
+    assert.strictEqual(await page.locator(".chapter-headline").count(), 0, "Ganti Pathway must land on the pathway screen, not back on the chapter-analysis summary");
     await context.close();
   });
 
@@ -212,7 +212,7 @@ async function waitForServer(base, log) {
     assert.ok(ctaText.includes(card2Pathway.trim()), "CTA label must reflect the currently selected Pathway");
 
     await page.click("#confirmPathway");
-    await page.waitForSelector(".goal-manuscript", { timeout: 10000 });
+    await page.waitForSelector(".gset-cards", { timeout: 10000 });
     await context.close();
   });
 

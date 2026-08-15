@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786783680.9095209,
-    "ast_hash": "04f70f738c07a31d5c97d9e66b2226a2",
+    "mtime": 1786791855.6090496,
+    "ast_hash": "8d2278e4f1d632cbace4de9bd4db37cf",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -25,8 +25,8 @@
     "semantic_hash": "20fd1243671a1310360b35ac9f823ada"
   },
   "server/claude.js": {
-    "mtime": 1786770830.8989184,
-    "ast_hash": "fe8067c9a273dbae84e94fa248d4de97",
+    "mtime": 1786791750.2810433,
+    "ast_hash": "da96cd4c7004d3974a3aee6fff9c90f3",
     "semantic_hash": ""
   },
   "server/db.js": {
@@ -35,8 +35,8 @@
     "semantic_hash": ""
   },
   "server/index.js": {
-    "mtime": 1786719182.7548769,
-    "ast_hash": "855c45819bd9c06d7d18d6f0fd969e2a",
+    "mtime": 1786791764.8130443,
+    "ast_hash": "592caa3efbb873346708da5f06a91e98",
     "semantic_hash": ""
   },
   "server/jobMatch.js": {
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786781306.325287,
-    "ast_hash": "b576f42bc9b442258ae63fea20a9c24b",
+    "mtime": 1786785790.5136461,
+    "ast_hash": "36b7ab96d5533dfb97c868e82270cf71",
     "semantic_hash": ""
   },
   "README.md": {
@@ -315,8 +315,8 @@
     "semantic_hash": ""
   },
   "tests/onboarding-draft-resume.e2e.js": {
-    "mtime": 1786783797.8495278,
-    "ast_hash": "1be884641ddc3bfa6316a373dda1e867",
+    "mtime": 1786792073.3490627,
+    "ast_hash": "8dd8a9e651eb492ec03db65bb9688f56",
     "semantic_hash": ""
   },
   "scripts/generate-onboarding-audio.js": {
@@ -335,8 +335,13 @@
     "semantic_hash": ""
   },
   "tests/onboarding-chapter-analysis.e2e.js": {
-    "mtime": 1786784057.5095432,
-    "ast_hash": "0b909d1291ee8f7b70bda2c4bfc3c9a2",
+    "mtime": 1786792060.7530618,
+    "ast_hash": "77fb99d8fb62849b7d6ce08f1180c2bf",
+    "semantic_hash": ""
+  },
+  "tests/onboarding-goal-setting.e2e.js": {
+    "mtime": 1786792143.0770667,
+    "ast_hash": "f937f6e3a5d12fa866768be861873d10",
     "semantic_hash": ""
   }
 }

@@ -108,6 +108,67 @@ function pathwaySigilSVG(color, size) {
     <circle cx="24" cy="24" r="2" fill="#1a1409" />
   </svg>`;
 }
+// Goal Setting screen (round 33 handoff): which literal sub-clause of each
+// PATHWAY_DESC string to highlight in the Pathway's color - reuses the
+// existing description text verbatim (don't fork a 3rd Pathway-description
+// table alongside PATHWAY_DESC/PATHWAY_META.line), just marks which clause
+// is the "highlight" the design calls for.
+const PATHWAY_DESC_HIGHLIGHT = {
+  Architect: "langkah demi langkah terlihat",
+  Warden: "fondasi yang bisa diandalkan",
+  Weaver: "memfasilitasi koneksi",
+  Pilgrim: "gaya eksploratif, bukan tersesat",
+  Specialist: "domain spesifik yang tidak masuk kategori umum",
+};
+function pathwayDescHTML(pathway, color) {
+  const desc = PATHWAY_DESC[pathway] || "";
+  const hl = PATHWAY_DESC_HIGHLIGHT[pathway];
+  if (!hl || !desc.includes(hl)) return `<p class="gset-pathway-desc">${esc(desc)}</p>`;
+  const [before, after] = desc.split(hl);
+  return `<p class="gset-pathway-desc">${esc(before)}<span style="color:${color}">${esc(hl)}</span>${esc(after)}</p>`;
+}
+// "Acting Method" card (Goal Setting screen) - a phrase+description pair per
+// Pathway describing its behavioral through-line. Distinct from the existing
+// daily "Acting Method" quest-framing concept (server/claude.js MENTOR_SYSTEM
+// line 6, surfaced at ~line 3320 as "TODAY'S ACTING METHOD" on quest cards) -
+// that one is AI-chosen fresh per day; this is fixed identity copy per
+// Pathway, same "static per-Pathway content table" pattern as
+// PATHWAY_REASONS above. Named PATHWAY_ACTING_PHRASE (not ACTING_METHOD) to
+// avoid colliding with that unrelated concept in code, even though the UI
+// label is the same "ACTING METHOD" text per the design handoff.
+// Warden/Weaver/Pilgrim verbatim from the design handoff's own PATHWAYS
+// object (keyed "waiver" there - confirmed Weaver, "Anchor of Belonging"
+// description matches exactly). Architect/Specialist are original copy
+// (handoff only covered 3 of 5 Pathways), matching tone/structure
+// (imperative English phrase + "Sebagai {Pathway}, kamu dilatih untuk..."),
+// informed by PATHWAY_DESC - same gap-filling precedent as PATHWAY_REASONS'
+// own Architect/Specialist entries (round 32).
+const PATHWAY_ACTING_PHRASE = {
+  Warden: { phrase: "Hold the line when it matters.", description: "Sebagai Warden, kamu dilatih untuk menjaga ritme, disiplin, dan konsistensi meski di bawah tekanan." },
+  Weaver: { phrase: "Connect what is disconnected.", description: "Sebagai Weaver, kamu dilatih untuk melihat hubungan, membangun jembatan, dan menguatkan jaringan." },
+  Pilgrim: { phrase: "Move toward what is unknown.", description: "Sebagai Pilgrim, kamu dilatih untuk menjelajah, mengambil langkah baru, dan mengubah discovery menjadi arah nyata." },
+  Architect: { phrase: "Build the structure before you move.", description: "Sebagai Architect, kamu dilatih untuk menyusun langkah secara metodis dan membangun fondasi yang kokoh sebelum bergerak." },
+  Specialist: { phrase: "Go deep before you go wide.", description: "Sebagai Specialist, kamu dilatih untuk menyelami satu bidang secara mendalam sebelum melebarkan cakupan." },
+};
+function actingMethodCardHTML(pathway) {
+  const color = PPICK_COLOR[pathway] || "#e5aa50";
+  const ap = PATHWAY_ACTING_PHRASE[pathway] || { phrase: "", description: "" };
+  return `
+    <div class="gset-acting-card">
+      <div class="gset-acting-icon">${pathwaySigilSVG(color, 44)}</div>
+      <div class="gset-acting-text">
+        <div class="gset-acting-label mono">ACTING METHOD</div>
+        <div class="gset-acting-phrase" style="color:${color}">${esc(ap.phrase)}</div>
+        <p class="gset-acting-desc">${esc(ap.description)}</p>
+      </div>
+    </div>`;
+}
+function pathwayHeaderHTML(pathway, subPathwayNoun) {
+  const color = PPICK_COLOR[pathway] || "#e5aa50";
+  return `
+    <div class="gset-pathway-line fr"><span style="color:${color}">${esc(pathway)}</span>: <span class="ivory">${esc(subPathwayNoun)}</span></div>
+    ${pathwayDescHTML(pathway, color)}`;
+}
 // Task 9 (founder spec, 10 Agustus): fixed catalog of 15 sub-pathway
 // archetypes - MUST stay byte-for-byte identical to the copy in
 // server/claude.js (no shared module system between client/server here).
@@ -166,6 +227,70 @@ function goalPlaceholder(pendingPathway) {
   return `mis. ${label}, target konkret 14 hari ke depan`;
 }
 
+// Goal Setting screen (round 33 handoff) - per-card render helpers. Card
+// border/accent color reflects STATE (orange until approved, green once
+// approved), never required/optional - Goal 2/3 are orange by default same
+// as Goal 1.
+function goalCardBorderColor(card) { return card.status === "approved" ? "rgba(95,191,143,.5)" : "rgba(216,163,85,.5)"; }
+function goalCardAccentColor(card) { return card.status === "approved" ? "#5fbf8f" : "#e5aa50"; }
+function goalCardHeadHTML(card, i) {
+  const numerals = ["01", "02", "03"];
+  const accent = goalCardAccentColor(card);
+  const collapsedText = card.text.trim();
+  return `
+    <div class="gset-card-head" data-goal-head="${i}" style="cursor:${card.required ? "default" : "pointer"}">
+      <span class="gset-card-numeral mono" style="color:${accent};border-color:${accent}">${numerals[i]}</span>
+      <span class="gset-card-title">${card.required ? "GOAL UTAMA" : i === 1 ? "GOAL KEDUA" : "GOAL KETIGA"}</span>
+      ${!card.required && !card.expanded && collapsedText ? `<span class="gset-card-preview">${esc(collapsedText)}</span>` : ""}
+      <span class="gset-card-tag mono" style="color:${accent}">${card.required ? "WAJIB" : "OPSIONAL"}</span>
+      ${!card.required ? `<span class="gset-chevron">${card.expanded ? "︿" : "﹀"}</span>` : ""}
+    </div>`;
+}
+function goalCardFeedbackHTML(card, i) {
+  return `
+    <div class="gset-feedback-box">
+      <p class="gset-feedback-text">${esc(card.feedback)}</p>
+      <div class="gset-reco-label mono">ELEVA MENYARANKAN</div>
+      ${card.recommendations.map((text, ri) => `
+        <div class="gset-reco-row">
+          <span class="gset-reco-letter">${ri === 0 ? "A." : "B."}</span>
+          <span class="gset-reco-text">${esc(text)}</span>
+          <button class="gset-reco-pick" data-goal-pick="${i}" data-reco-idx="${ri}">Pilih</button>
+        </div>`).join("")}
+      <span class="gset-own-change" data-goal-own="${i}">Ubah sendiri</span>
+    </div>`;
+}
+function goalCardEditingBodyHTML(card, i) {
+  return `
+    <div class="gset-input-box">
+      <textarea class="gset-textarea" data-goal-text="${i}" maxlength="200" placeholder="Tulis goal ${i === 0 ? "utamamu" : i === 1 ? "keduamu" : "ketigamu"}...">${esc(card.text)}</textarea>
+      ${card.text ? `<span class="gset-clear-btn" data-goal-clear="${i}">✕</span>` : ""}
+      <div class="gset-input-foot">
+        <span class="gset-char-count mono">${card.text.length}/200</span>
+        <button class="gset-set-btn" data-goal-set="${i}" ${(!card.text.trim() || card.status === "validating") ? "disabled" : ""}>${card.status === "validating" ? "Memeriksa…" : "✦ Set Goal"}</button>
+      </div>
+    </div>
+    ${card.status === "needs_improvement" ? goalCardFeedbackHTML(card, i) : ""}`;
+}
+function goalCardApprovedHTML(card, i) {
+  return `
+    <div class="gset-approved-box">
+      <p class="gset-approved-text">${esc(card.text)}</p>
+      <div class="gset-approved-foot">
+        <span class="gset-check">✓</span>
+        <span class="gset-edit-link" data-goal-edit="${i}">Edit</span>
+      </div>
+    </div>`;
+}
+function goalCardHTML(card, i) {
+  const showBody = card.required || card.expanded;
+  return `
+    <div class="gset-card" style="border-color:${goalCardBorderColor(card)}">
+      ${goalCardHeadHTML(card, i)}
+      ${showBody ? (card.status === "approved" ? goalCardApprovedHTML(card, i) : goalCardEditingBodyHTML(card, i)) : ""}
+    </div>`;
+}
+
 // Task 8: contextual help - one small "?" top-right on the four listed
 // onboarding screens + the daily dashboard. Copy is STATIC per screen
 // (written once, plain language, no unexplained RPG jargon) - deliberately
@@ -177,7 +302,7 @@ const HELP_TEXT = {
   card: "Beberapa skenario singkat. Pilih yang paling & paling nggak kamu banget — dari situ Eleva mulai ngerti pola kamu. Jawab jujur aja, nggak ada jawaban salah.",
   analysis: "Ini pola yang Eleva lihat dari radar dan pilihan-pilihanmu selama onboarding — sebelum kamu pilih pathway di langkah berikutnya.",
   pathway: "3 gaya yang mungkin cocok buat kamu, berdasarkan yang barusan kamu isi. Pilih salah satu, atau tulis sendiri kalau ngerasa nggak ada yang pas — bisa diganti nanti.",
-  goals: "Tulis 1-3 hal yang mau kamu capai selama 14 hari ke depan — boleh dari area mana pun (badan, belajar, kerjaan, relasi). Tugas harianmu nanti diarahkan ke sini, gantian tiap harinya.",
+  goals: "Goal utama wajib, dua lainnya opsional. Tulis, lalu tap Set Goal — Eleva bakal cek apakah goal-mu cukup jelas dan terukur. Kalau belum, kamu dapat saran perbaikan; kalau sudah pas, goal-nya disetujui dan siap jadi fondasi First Trial-mu.",
   dashboard: "Quest hari ini dari Eleva, disesuaikan sama fokusmu. Kerjakan, lalu tap Mulai — aktivitas fisik dicatat sebagai record singkat (pilih jenisnya: cardio atau gym), sisanya lewat refleksi teks.",
   meta: "Latihan mandiri, kapan aja — nggak perlu nunggu Eleva kasih quest-nya. Sesi di sini tetap dihitung sebagai bukti pertumbuhan, tapi nggak menggerakkan Milestone goal manapun.",
 };
@@ -659,12 +784,24 @@ let adaptiveSelection = { mostPreferred: null, leastPreferred: null }; // in-pro
 let chapterAnalysis = null; // {insight, pathway, subPathway, pathwayBlurb, secondaryTrait, significantShifts, lockTension, rawPathwayTop2}
 let pathwayOptions = []; // 3 swipeable candidate cards, computed once when chapterAnalysis loads - see buildPathwayOptions
 let selectedPathwayIndex = null;
-let overrideMode = false;
-let overrideText = "";
 // v13 goal capture - deliberately NOT an onboarding card: it's the bridge
-// into First Trial, shown right after the Pathway is confirmed (either a
-// carousel card or the manual override), before the first daily quest.
-let goalInputs = ["", "", ""]; // 1-3 free-text goals, min 1 required
+// into First Trial, shown right after the Pathway is confirmed.
+// Goal Setting redesign (round 33) - replaces the old goalInputs plain
+// string array. One card per position; position 1 is fixed required/
+// always-expanded, 2-3 optional/collapsible. Mirrors the design handoff's
+// own data model ({id, position, text, required, status,
+// validation_feedback, recommendations, approved_at, expanded}), camelCased
+// to match this file's convention.
+function freshGoalCard(position) {
+  return {
+    id: position, position, text: "", required: position === 1,
+    status: "empty", // empty | draft | validating | needs_improvement | approved
+    feedback: "", recommendations: [], approvedAt: null,
+    expanded: position === 1,
+  };
+}
+let goalCards = [freshGoalCard(1), freshGoalCard(2), freshGoalCard(3)];
+let gantiConfirmOpen = false; // discard-confirm gate when leaving Goal Setting with an approved Goal 1
 let pendingPathway = null; // {pathway, pathwayNoun} held while the goals screen is up
 let onboardError = "";
 
@@ -706,9 +843,8 @@ function resetOnboardState() {
   chapterAnalysis = null;
   pathwayOptions = [];
   selectedPathwayIndex = null;
-  overrideMode = false;
-  overrideText = "";
-  goalInputs = ["", "", ""];
+  goalCards = [freshGoalCard(1), freshGoalCard(2), freshGoalCard(3)];
+  gantiConfirmOpen = false;
   pendingPathway = null;
   onboardError = "";
   openAxisInfo = null;
@@ -748,7 +884,7 @@ function saveOnboardingDraftNow() {
   clearTimeout(onboardingDraftSaveTimer);
   const draft = {
     onboardStep, onboardForm, adaptivePhase, adaptiveCards, adaptiveScenario, adaptiveSelection,
-    chapterAnalysis, pathwayOptions, selectedPathwayIndex, pendingPathway, goalInputs,
+    chapterAnalysis, pathwayOptions, selectedPathwayIndex, pendingPathway, goalCards,
   };
   api("/api/onboarding/draft", { method: "POST", body: { draft } }).catch(() => {});
 }
@@ -781,7 +917,13 @@ function restoreOnboardingDraft(draft) {
   pathwayOptions = draft.pathwayOptions || [];
   selectedPathwayIndex = draft.selectedPathwayIndex ?? null;
   pendingPathway = draft.pendingPathway || null;
-  goalInputs = draft.goalInputs && draft.goalInputs.length ? draft.goalInputs : ["", "", ""];
+  // Restore defensively - patch onto a fresh shape rather than trusting the
+  // stored blob blindly (same precedent as the chapterAnalysis shape-guard
+  // below). A pre-redesign draft's old goalInputs shape fails the
+  // Array.isArray check and falls through to fresh cards automatically.
+  goalCards = Array.isArray(draft.goalCards) && draft.goalCards.length === 3
+    ? draft.goalCards.map((c, i) => ({ ...freshGoalCard(i + 1), ...c }))
+    : [freshGoalCard(1), freshGoalCard(2), freshGoalCard(3)];
 
   if (!onboardForm.radarRaw) {
     ui = { view: "onboarding" };
@@ -2720,81 +2862,142 @@ function renderAdaptive() {
   }
 
   if (adaptivePhase === "goals") {
-    const filled = goalInputs.map((g) => g.trim()).filter(Boolean);
     const pw = pendingPathway?.pathway || "";
-    // "The Warden" style heading per the mockup - the "The" prefix only fits
-    // the 5 canonical names; a free-text override shows the user's own words.
-    const heading = PATHWAY_NAMES.includes(pw) ? `The ${pw}` : pw;
-    const numerals = ["i.", "ii.", "iii."];
+    const noun = pendingPathway?.pathwayNoun || "";
+    const goal1Approved = goalCards[0].status === "approved";
     root.innerHTML = `
       <div class="shell">
         ${helpBtnHTML("goals")}${helpSheetHTML("goals")}
         ${chapterProgressHTML("goals")}
-        <div class="eyebrow mono">PATHWAY TERPILIH</div>
-        <h1 class="fr" style="font-size:26px;font-weight:600;color:var(--accent);margin:10px 0 4px">${esc(heading)}</h1>
-        <div class="ornament-divider"><div class="line l"></div><div class="diamond"></div><div class="line r"></div></div>
-        <p style="font-size:12.5px;line-height:1.65;color:var(--muted);margin:0 0 26px">${esc(pw)} adalah gaya kerjamu (HOW). Tiga niat di bawah ini adalah tujuan konkretmu (WHAT) untuk 14 hari pertama.</p>
-        <div class="goal-manuscript">
-          ${[0, 1, 2].map((i) => `
-          <div class="goal-entry">
-            <div class="goal-numeral mono${i === 2 && !goalInputs[2].trim() ? " dim" : ""}" id="goalNum${i}">${numerals[i]}</div>
-            <input type="text" class="goal-input" data-goal="${i}" maxlength="200" value="${esc(goalInputs[i])}" placeholder="${i === 2 ? "Opsional" : esc(goalPlaceholder(pendingPathway))}" />
-          </div>`).join("")}
+        ${pathwayHeaderHTML(pw, noun)}
+        ${actingMethodCardHTML(pw)}
+        <div class="gset-intro-row"><span>✨</span><span class="gset-intro-label">TENTUKAN GOAL-MU</span></div>
+        <p class="gset-intro-copy">Tulis goal yang ingin kamu capai selama 1 tahun ke depan. Eleva akan memeriksa dan memastikan goal-mu jelas, terukur, realistis, dan bisa dicapai manusia normal dalam maksimal 1 tahun.</p>
+        <div class="gset-cards">${goalCards.map((c, i) => goalCardHTML(c, i)).join("")}</div>
+        <span class="gset-ganti-link" id="gantiPathway">← Ganti Pathway</span>
+        <button class="btn-primary full gset-cta" id="startFirstTrial" ${goal1Approved ? "" : "disabled"}>⚑ Mulai First Trial (14 hari)</button>
+      </div>
+      ${gantiConfirmOpen ? `
+      <div class="help-overlay" id="gantiConfirmOverlay">
+        <div class="help-sheet fadeUp">
+          <p>Goal utamamu sudah disetujui. Ganti Pathway akan menghapus goal ini dan mulai ulang. Lanjut?</p>
+          <div style="display:flex;gap:10px">
+            <button class="btn-ghost" id="gantiConfirmCancel" style="flex:1">Batal</button>
+            <button class="btn-primary" id="gantiConfirmOk" style="flex:1">Ya, ganti Pathway</button>
+          </div>
         </div>
-        <button class="btn-primary full" id="confirmGoals" style="margin-top:26px" ${filled.length ? "" : "disabled"}>Mulai First Trial (14 hari)</button>
-        <div style="text-align:center;margin-top:14px">
-          <button class="btn-ghost" id="backToPathway">← Balik pilih Pathway</button>
-          ${!overrideMode ? `<button class="btn-ghost" id="openOverride" style="display:block;margin:4px auto 0">Bukan salah satu dari kartu tadi? Tulis pathway-mu sendiri</button>` : ""}
-        </div>
-        ${overrideMode ? `
-        <div class="field" style="margin-top:14px">
-          <label>Pathway yang mau kamu latih</label>
-          <input type="text" id="overrideInput" value="${esc(overrideText)}" placeholder="Tulis sendiri, mis. Sales, Public Speaking..." autofocus />
-        </div>
-        <div style="display:flex;gap:10px">
-          <button class="btn-ghost" id="cancelOverride" style="flex:1">Batal</button>
-          <button class="btn-primary" id="confirmOverride" style="flex:2" ${overrideText.trim().length > 1 ? "" : "disabled"}>Pakai ini</button>
-        </div>` : ""}
-      </div>`;
-    document.querySelectorAll("input[data-goal]").forEach((inp) => {
-      inp.addEventListener("input", (e) => {
-        goalInputs[Number(inp.dataset.goal)] = e.target.value;
-        const any = goalInputs.some((g) => g.trim());
-        document.getElementById("confirmGoals").disabled = !any;
-        // The optional third numeral brightens the moment it has content -
-        // direct DOM write, no re-render (typing must never lose focus).
-        if (inp.dataset.goal === "2") document.getElementById("goalNum2")?.classList.toggle("dim", !goalInputs[2].trim());
-      });
-    });
-    document.getElementById("backToPathway")?.addEventListener("click", () => {
-      pendingPathway = null;
-      overrideMode = false;
-      adaptivePhase = "pathway"; // round 28: returns to the pulled-out carousel screen, not two steps back to the summary
-      renderAdaptive();
-    });
-    // Free-text pathway override, relocated here from the carousel screen
-    // (founder decision after the design handoff removed its old entry
-    // point). End state is identical to the old flow: pendingPathway
-    // becomes the typed text verbatim, never coerced into the 15-archetype
-    // catalog - the heading/recap/placeholders just re-render around it.
-    document.getElementById("openOverride")?.addEventListener("click", () => { overrideMode = true; overrideText = ""; renderAdaptive(); });
-    document.getElementById("cancelOverride")?.addEventListener("click", () => { overrideMode = false; renderAdaptive(); });
-    document.getElementById("overrideInput")?.addEventListener("input", (e) => {
-      overrideText = e.target.value;
-      document.getElementById("confirmOverride").disabled = overrideText.trim().length <= 1;
-    });
-    document.getElementById("confirmOverride")?.addEventListener("click", () => {
-      const v = overrideText.trim();
-      pendingPathway = { pathway: v, pathwayNoun: v };
-      overrideMode = false;
-      renderAdaptive();
-    });
-    document.getElementById("confirmGoals")?.addEventListener("click", () => {
-      const goals = goalInputs.map((g) => g.trim()).filter(Boolean).slice(0, 3);
-      if (!goals.length || !pendingPathway) return;
-      submitOnboarding(pendingPathway.pathway, pendingPathway.pathwayNoun, goals);
-    });
+      </div>` : ""}`;
+    wireGoalSettingHandlers();
   }
+}
+
+// Goal Setting screen (round 33 handoff) - event wiring, discard-and-back,
+// and the AI validation call. Split out from renderAdaptive() itself since
+// it's a substantial, self-contained chunk (mirrors how other adaptive
+// sub-screens keep their own local helpers nearby rather than inline).
+function wireGoalSettingHandlers() {
+  document.querySelectorAll("[data-goal-head]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const i = Number(el.dataset.goalHead);
+      if (goalCards[i].required) return;
+      goalCards[i].expanded = !goalCards[i].expanded;
+      renderAdaptive();
+    });
+  });
+  document.querySelectorAll("[data-goal-text]").forEach((ta) => {
+    ta.addEventListener("input", (e) => {
+      const i = Number(ta.dataset.goalText);
+      const card = goalCards[i];
+      const hadText = !!card.text;
+      card.text = e.target.value;
+      card.status = card.text.trim() ? "draft" : "empty";
+      if (!!card.text !== hadText) { renderAdaptive(); return; } // clear button appears/disappears - needs a real render
+      const box = ta.closest(".gset-input-box");
+      box.querySelector(".gset-char-count").textContent = `${card.text.length}/200`;
+      box.querySelector("[data-goal-set]").disabled = !card.text.trim();
+      saveOnboardingDraft();
+    });
+  });
+  document.querySelectorAll("[data-goal-clear]").forEach((btn) => btn.addEventListener("click", () => {
+    const i = Number(btn.dataset.goalClear);
+    goalCards[i].text = "";
+    goalCards[i].status = "empty";
+    saveOnboardingDraft();
+    renderAdaptive();
+  }));
+  document.querySelectorAll("[data-goal-set]").forEach((btn) => btn.addEventListener("click", () => submitGoalForValidation(Number(btn.dataset.goalSet))));
+  document.querySelectorAll("[data-goal-edit]").forEach((btn) => btn.addEventListener("click", () => {
+    const i = Number(btn.dataset.goalEdit);
+    goalCards[i].status = "draft"; // keeps text, invalidates approval
+    goalCards[i].approvedAt = null;
+    saveOnboardingDraftNow();
+    renderAdaptive();
+  }));
+  document.querySelectorAll("[data-goal-pick]").forEach((btn) => btn.addEventListener("click", () => {
+    const i = Number(btn.dataset.goalPick);
+    const ri = Number(btn.dataset.recoIdx);
+    const card = goalCards[i];
+    card.text = card.recommendations[ri];
+    card.status = "approved";
+    card.approvedAt = new Date().toISOString();
+    card.feedback = "";
+    card.recommendations = [];
+    saveOnboardingDraftNow();
+    renderAdaptive();
+  }));
+  document.querySelectorAll("[data-goal-own]").forEach((btn) => btn.addEventListener("click", () => {
+    const i = Number(btn.dataset.goalOwn);
+    goalCards[i].status = "draft";
+    goalCards[i].feedback = "";
+    goalCards[i].recommendations = [];
+    saveOnboardingDraft();
+    renderAdaptive();
+  }));
+  document.getElementById("gantiPathway")?.addEventListener("click", () => {
+    if (goalCards[0].status === "approved") { gantiConfirmOpen = true; renderAdaptive(); return; }
+    discardAndBackToPathway();
+  });
+  document.getElementById("gantiConfirmCancel")?.addEventListener("click", () => { gantiConfirmOpen = false; renderAdaptive(); });
+  document.getElementById("gantiConfirmOk")?.addEventListener("click", discardAndBackToPathway);
+  document.getElementById("startFirstTrial")?.addEventListener("click", () => {
+    if (goalCards[0].status !== "approved") return;
+    const goals = goalCards.filter((c) => c.status === "approved").map((c) => c.text.trim()).filter(Boolean);
+    submitOnboarding(pendingPathway.pathway, pendingPathway.pathwayNoun, goals);
+  });
+}
+function discardAndBackToPathway() {
+  pendingPathway = null;
+  goalCards = [freshGoalCard(1), freshGoalCard(2), freshGoalCard(3)];
+  gantiConfirmOpen = false;
+  adaptivePhase = "pathway"; // returns to the pulled-out carousel screen, not two screens back
+  saveOnboardingDraftNow();
+  renderAdaptive();
+}
+async function submitGoalForValidation(i) {
+  const card = goalCards[i];
+  if (!card.text.trim()) return;
+  card.status = "validating";
+  renderAdaptive();
+  try {
+    const result = await api("/api/onboarding/validate-goal", {
+      method: "POST",
+      body: { text: card.text.trim(), pathway: pendingPathway?.pathway, pathwayNoun: pendingPathway?.pathwayNoun },
+    });
+    if (result.approved) {
+      card.status = "approved";
+      card.approvedAt = new Date().toISOString();
+      card.feedback = "";
+      card.recommendations = [];
+    } else {
+      card.status = "needs_improvement";
+      card.feedback = result.feedback || "";
+      card.recommendations = Array.isArray(result.recommendations) ? result.recommendations.slice(0, 2) : [];
+    }
+  } catch (e) {
+    card.status = "draft"; // don't strand the user on "Memeriksa..." forever - let them retry
+  }
+  saveOnboardingDraftNow();
+  renderAdaptive();
 }
 
 // Compact one-line summary of a day's structured completion data - shown on

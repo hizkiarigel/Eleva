@@ -704,19 +704,58 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .ppick-reason-bullet { flex: none; font-size: 9px; margin-top: 1px; }
 .ppick-reason-text { font-family: "Inter", sans-serif; font-size: 12.5px; line-height: 1.4; color: #f1ebdd; }
 
-/* Goal Capture as numbered manuscript entries (design handoff Screen 3). */
-.ornament-divider { display: flex; align-items: center; gap: 10px; margin: 10px 0 16px; }
-.ornament-divider .line { flex: 1; height: 1px; }
-.ornament-divider .line.l { background: linear-gradient(90deg, var(--accent), transparent); }
-.ornament-divider .line.r { background: linear-gradient(90deg, transparent, var(--accent)); }
-.ornament-divider .diamond { width: 5px; height: 5px; transform: rotate(45deg); background: var(--accent); flex: none; }
-.goal-manuscript { border-top: 1px solid var(--hair); }
-.goal-entry { display: flex; gap: 12px; align-items: flex-start; padding: 16px 0; border-bottom: 1px solid var(--hair); }
-.goal-numeral { font-size: 12px; color: var(--accent); flex: none; padding-top: 2px; }
-.goal-numeral.dim { color: var(--muted-dim); }
-.goal-input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 14px; padding: 0; }
-.goal-input::placeholder { color: var(--muted); font-style: italic; }
-.goal-input:focus { outline: none; }
+/* Goal Setting screen (round 33 handoff) - card-based goal validation.
+   Screen root stays a plain .shell (not the fixed-viewport .shell-chapter
+   used by its two flow-siblings) - this handoff explicitly says "vertically
+   scrollable", unlike those two where fixed-viewport was our own judgment
+   call. Card border/accent reflects STATE (orange until approved, green
+   once approved, set inline per-card since it's dynamic) - not required vs
+   optional. */
+.ivory { color: #f1ebdd; }
+.gset-pathway-line { margin: 14px 0 0; font-family: "Fraunces", serif; font-size: min(21px, calc(21 / 390 * 100vw)); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gset-pathway-line span:first-child { font-weight: 700; }
+.gset-pathway-line span.ivory { font-weight: 600; }
+.gset-pathway-desc { margin: 8px 0 0; font-family: "Inter", sans-serif; font-size: 13px; line-height: 1.5; color: #8f8b98; }
+.gset-acting-card { display: flex; gap: 12px; align-items: flex-start; margin-top: 16px; background: rgba(255, 255, 255, .02); border: 1px solid rgba(255, 255, 255, .08); border-radius: 14px; padding: 14px; }
+.gset-acting-icon { flex: none; width: 44px; height: 44px; border-radius: 50%; background: rgba(216, 163, 85, .08); display: flex; align-items: center; justify-content: center; }
+.gset-acting-text { flex: 1; min-width: 0; }
+.gset-acting-label { font-family: "Inter", sans-serif; font-size: 10.5px; font-weight: 600; letter-spacing: .14em; color: #e5aa50; text-transform: uppercase; }
+.gset-acting-phrase { margin-top: 4px; font-family: "Inter", sans-serif; font-weight: 600; font-size: 15.5px; }
+.gset-acting-desc { margin-top: 4px; font-family: "Inter", sans-serif; font-size: 12px; line-height: 1.4; color: #8f8b98; }
+.gset-intro-row { display: flex; align-items: center; gap: 6px; margin-top: 18px; }
+.gset-intro-row span:first-child { font-size: 13px; }
+.gset-intro-label { font-family: "Inter", sans-serif; font-size: 12.5px; font-weight: 600; letter-spacing: .1em; color: #f1ebdd; }
+.gset-intro-copy { margin: 6px 0 0; font-family: "Inter", sans-serif; font-size: 12.5px; line-height: 1.45; color: #8f8b98; }
+.gset-card { border: 1px solid; border-radius: 14px; padding: 12px 14px; margin-top: 10px; box-sizing: border-box; transition: border-color .3s ease; }
+.gset-card-head { display: flex; align-items: center; gap: 8px; }
+.gset-card-numeral { flex: none; font-family: "Inter", sans-serif; font-weight: 700; font-size: 12px; border: 1px solid; border-radius: 6px; padding: 1px 6px; }
+.gset-card-title { flex: none; font-family: "Inter", sans-serif; font-weight: 600; font-size: 12.5px; letter-spacing: .04em; color: #f1ebdd; }
+.gset-card-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "Inter", sans-serif; font-size: 12px; color: #8f8b98; }
+.gset-card-tag { flex: none; font-family: "Inter", sans-serif; font-weight: 600; font-size: 10px; letter-spacing: .08em; }
+.gset-chevron { flex: none; font-size: 11px; color: #8f8b98; cursor: pointer; }
+.gset-input-box { position: relative; margin-top: 8px; background: rgba(255, 255, 255, .02); border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; padding: 10px 12px; }
+.gset-textarea { width: 100%; min-height: 40px; resize: none; background: transparent; border: none; outline: none; color: #f1ebdd; font-family: "Inter", sans-serif; font-size: 13.5px; line-height: 1.4; box-sizing: border-box; padding: 0; padding-right: 20px; }
+.gset-clear-btn { position: absolute; top: 8px; right: 10px; width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, .08); color: #8f8b98; font-size: 9px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.gset-input-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.gset-char-count { font-family: "Inter", sans-serif; font-size: 10.5px; color: #8f8b98; }
+.gset-set-btn { font-family: "Inter", sans-serif; font-weight: 600; font-size: 12.5px; color: #1a1409; background: linear-gradient(180deg, #f0c274, #e5aa50); border: none; border-radius: 10px; padding: 7px 14px; cursor: pointer; }
+.gset-set-btn:disabled { background: rgba(229, 170, 80, .3); cursor: default; }
+.gset-feedback-box { margin-top: 8px; background: rgba(216, 163, 85, .06); border: 1px solid rgba(216, 163, 85, .3); border-radius: 10px; padding: 10px 12px; }
+.gset-feedback-text { margin: 0; font-family: "Inter", sans-serif; font-size: 12px; line-height: 1.4; color: #f1ebdd; }
+.gset-reco-label { margin-top: 8px; font-family: "Inter", sans-serif; font-size: 9.5px; font-weight: 600; letter-spacing: .1em; color: #e5aa50; }
+.gset-reco-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; }
+.gset-reco-letter { flex: none; font-family: "Inter", sans-serif; font-weight: 600; font-size: 11px; color: #e5aa50; }
+.gset-reco-text { flex: 1; font-family: "Inter", sans-serif; font-size: 12px; line-height: 1.4; color: #f1ebdd; }
+.gset-reco-pick { flex: none; font-family: "Inter", sans-serif; font-size: 11px; font-weight: 600; color: #1a1409; background: #e5aa50; border: none; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.gset-own-change { display: inline-block; margin-top: 9px; font-family: "Inter", sans-serif; font-size: 11.5px; font-weight: 600; color: #8f8b98; text-decoration: underline; cursor: pointer; }
+.gset-approved-box { margin-top: 8px; }
+.gset-approved-text { margin: 0; font-family: "Inter", sans-serif; font-size: 13.5px; line-height: 1.4; color: #f1ebdd; }
+.gset-approved-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.gset-check { font-size: 13px; color: #5fbf8f; }
+.gset-edit-link { font-family: "Inter", sans-serif; font-size: 11.5px; font-weight: 600; color: #8f8b98; cursor: pointer; }
+.gset-ganti-link { display: block; text-align: center; margin: 16px 0 10px; font-family: "Inter", sans-serif; font-size: 13px; color: #8f8b98; cursor: pointer; }
+.gset-cta { background: linear-gradient(180deg, #f0c274, #e5aa50); border-radius: 16px; min-height: 54px; box-shadow: 0 8px 24px rgba(229, 170, 80, .28); }
+.gset-cta:disabled { background: rgba(229, 170, 80, .3); box-shadow: none; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { padding: 9px 16px; border-radius: 20px; border: 1px solid var(--hair); background: var(--surface); color: var(--text); font-size: 13.5px; }

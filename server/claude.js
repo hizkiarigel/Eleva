@@ -564,6 +564,47 @@ async function generateJobMatchAnalysis(ctx) {
   }
 }
 
+// Goal Setting redesign - validates a single onboarding goal. "approved"/
+// "feedback"/"recommendations" are ALL hard fields (any malformed field
+// discards the whole response and falls back) - unlike generateChapterAnalysis's
+// soft-patched insightRows/pattern (purely informational display text, a
+// generic fallback phrase is harmless there), a fabricated/malformed
+// recommendation here would put words in the user's own goal text they never
+// chose to accept - a correctness/trust problem, not a cosmetic one, so this
+// hard-fails to the deterministic fallback instead of trying to patch it.
+function fallbackGoalValidation(text) {
+  // Deterministic keyless/error fallback - the SAME heuristic as the design
+  // handoff's own mockValidate(), reused as a real, honest fallback (not a
+  // fake always-pass) per the same "keyless mode still does something real"
+  // principle as fallbackChapterAnalysis/fallbackJobMatchAnalysis above.
+  const t = (text || "").trim();
+  const hasLength = t.length >= 20;
+  const hasTimeframe = /(hari|minggu|bulan|tahun)/i.test(t);
+  const hasNumber = /\d/.test(t);
+  if (hasLength && hasTimeframe && hasNumber) return { approved: true };
+  const feedback = "Mode tanpa API key: goal ini masih terlalu umum - coba tambahkan target yang bisa diukur dan jangka waktu yang jelas.";
+  const rec1 = `${t}${hasTimeframe ? "" : ", dalam 8 bulan"}${hasNumber ? "" : ", dengan target yang bisa diukur"}.`;
+  const rec2 = `${t}${hasTimeframe ? "" : ", dalam 6 bulan"}${hasNumber ? "" : ", dengan indikator keberhasilan yang jelas"}.`;
+  return { approved: false, feedback, recommendations: [rec1, rec2] };
+}
+async function generateGoalValidation(ctx) {
+  if (!hasKey()) return fallbackGoalValidation(ctx.text);
+  try {
+    const user = `Konteks: pengguna sedang menulis satu goal pribadi untuk 14 hari pertama First Trial di Eleva, dengan gaya Pathway "${ctx.pathway || ""}"${ctx.pathwayNoun ? ` (${ctx.pathwayNoun})` : ""}. Goal yang mereka tulis: "${ctx.text}"\n\nTugas: nilai goal ini lalu balas JSON dengan bentuk PERSIS SALAH SATU dari:\n{"approved": true}\natau\n{"approved": false, "feedback": string, "recommendations": [string, string]}\n\nDimensi penilaian (goal harus memenuhi SEMUA untuk approved:true): jelas dan spesifik, punya hasil yang bisa diverifikasi, bisa diukur, realistis dicapai orang biasa dalam <=1 tahun, bukan sekadar aktivitas/tugas tanpa hasil (mis. "olahraga" gagal, "olahraga 3x seminggu selama 2 bulan" lolos), punya jangka waktu (atau bisa dinormalisasi jadi satu tanpa mengubah maksud), tidak terlalu bergantung pada faktor eksternal di luar kendali pengguna (mis. "diterima kerja di Google" gagal, "melamar ke 10 posisi data analyst dalam sebulan" lolos).\n\nAturan WAJIB kalau approved:false:\n- "feedback": SATU kalimat jujur kenapa goal ini belum lolos, bahasa natural, bukan checklist.\n- "recommendations": TEPAT 2 versi tulis-ulang goal ini yang WAJIB mempertahankan maksud/niat asli pengguna - JANGAN mengarang angka/target/parameter yang tidak diisyaratkan pengguna sama sekali (boleh menambahkan jangka waktu wajar dan cara mengukur yang masuk akal kalau memang belum ada, tapi jangan mengubah SUBSTANSI goal mereka).\n- JANGAN pernah menulis feedback/recommendation yang terdengar seperti jaminan pasti tercapai - ini evaluasi kejelasan tujuan, bukan janji hasil.\n\nBahasa Indonesia natural, nada mentor hangat tapi jujur.`;
+    const result = await callClaude(user);
+    if (typeof result?.approved !== "boolean") throw new Error("bad shape: approved");
+    if (result.approved) return { approved: true };
+    if (typeof result.feedback !== "string" || !result.feedback.trim()) throw new Error("bad shape: feedback");
+    if (!Array.isArray(result.recommendations) || result.recommendations.length !== 2 || !result.recommendations.every((r) => typeof r === "string" && r.trim())) {
+      throw new Error("bad shape: recommendations");
+    }
+    return { approved: false, feedback: result.feedback, recommendations: result.recommendations };
+  } catch (e) {
+    console.error("generateGoalValidation failed, using fallback:", e.message);
+    return fallbackGoalValidation(ctx.text);
+  }
+}
+
 // SOMA Nutrition Part B (photo-optional entry, per user decision alongside
 // search-based per the brief): a SECONDARY, faster way to arrive at the
 // SAME food_entries evidence shape search does - the AI only ever produces
@@ -1030,5 +1071,5 @@ module.exports = {
   PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
   normalizeEvidenceSchema, generateSideQuest,
   normalizeCompletionType, fallbackReflection, looksRecoveryThemed, analyzeNutritionPhoto,
-  fallbackInsightRows, fallbackPattern,
+  fallbackInsightRows, fallbackPattern, generateGoalValidation, fallbackGoalValidation,
 };
