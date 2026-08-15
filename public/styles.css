@@ -713,20 +713,20 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    once approved, set inline per-card since it's dynamic) - not required vs
    optional. */
 .ivory { color: #f1ebdd; }
-.gset-pathway-line { margin: 15px 0 0; font-family: "Fraunces", serif; font-size: min(21px, calc(21 / 390 * 100vw)); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gset-pathway-line { margin: 0; font-family: "Fraunces", serif; font-size: 18px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gset-pathway-line span:first-child { font-weight: 700; }
 .gset-pathway-line span.ivory { font-weight: 400; }
-.gset-pathway-desc { margin: 15px 0 0; font-family: "Inter", sans-serif; font-size: 13px; line-height: 1.5; color: #8f8b98; }
+.gset-pathway-desc { margin: 5px 0 0; font-family: "Inter", sans-serif; font-size: 13px; line-height: 1.5; color: #8f8b98; }
 .gset-acting-card { display: flex; gap: 8px; align-items: flex-start; margin-top: 15px; background: rgba(255, 255, 255, .02); border: 1px solid rgba(255, 255, 255, .08); border-radius: 14px; padding: 8px 10px; }
 .gset-acting-icon { flex: none; width: 44px; height: 44px; border-radius: 50%; background: rgba(216, 163, 85, .08); display: flex; align-items: center; justify-content: center; }
 .gset-acting-text { flex: 1; min-width: 0; }
 .gset-acting-label { font-family: "Inter", sans-serif; font-size: 10.5px; font-weight: 600; letter-spacing: .14em; color: #e5aa50; text-transform: uppercase; }
-.gset-acting-phrase { margin-top: 4px; font-family: "Inter", sans-serif; font-weight: 600; font-size: 15.5px; }
-.gset-acting-desc { margin-top: 4px; font-family: "Inter", sans-serif; font-size: 8px; line-height: 1.4; color: #8f8b98; }
+.gset-acting-phrase { margin-top: 5px; font-family: "Inter", sans-serif; font-weight: 600; font-size: 15.5px; }
+.gset-acting-desc { margin-top: 10px; font-family: "Inter", sans-serif; font-size: 8px; line-height: 1.4; color: #8f8b98; }
 .gset-intro-row { display: flex; align-items: center; gap: 6px; margin-top: 15px; }
 .gset-intro-row span:first-child { font-size: 13px; }
 .gset-intro-label { font-family: "Inter", sans-serif; font-size: 12.5px; font-weight: 600; letter-spacing: .1em; color: #f1ebdd; }
-.gset-intro-copy { margin: 6px 0 0; font-family: "Inter", sans-serif; font-size: 12.5px; line-height: 1.45; color: #8f8b98; }
+.gset-intro-copy { margin: 5px 0 0; font-family: "Inter", sans-serif; font-size: 12.5px; line-height: 1.4; color: #8f8b98; }
 .gset-card { border: 1px solid; border-radius: 14px; padding: 12px 14px; margin-top: 10px; box-sizing: border-box; transition: border-color .3s ease; }
 .gset-card-head { display: flex; align-items: center; gap: 8px; }
 .gset-card-numeral { flex: none; font-family: "Inter", sans-serif; font-weight: 700; font-size: 12px; border: 1px solid; border-radius: 6px; padding: 1px 6px; }
