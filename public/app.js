@@ -1823,7 +1823,15 @@ function renderPolygonSVG() {
 // .poly-ring/.poly-axis/.poly-label (styles.css's own comment on those three
 // says they're shared chrome with the interactive radar - reusing them here
 // with different colors/ring-count would silently reskin that screen too).
-const CH_VB = 380, CH_VBH = 292, CH_CX = 190, CH_CY = 150, CH_MAXR = 100, CH_LABELR = 124;
+// round 30: CH_MAXR/CH_LABELR/CH_VBH/CH_CY rescaled so the heptagon fills
+// the SAME FRACTION of this viewBox's width as the interactive radar's
+// heptagon fills of ITS viewBox (POLY_MAXR/POLY_VIEW_SIZE=144/420=68.6%) -
+// matching just the outer SVG's rendered width (round 29's fix) was not
+// enough, since the two viewBoxes have different aspect ratios. CH_LABELR
+// keeps a 8-unit gap past CH_MAXR (founder ask: cut the old 24-unit gap to
+// 1/3). CH_VBH/CH_CY grew to keep the now-larger heptagon's axis labels
+// (esp. the 2-line "Emotional Stability") from clipping top/bottom.
+const CH_VB = 380, CH_VBH = 304, CH_CX = 190, CH_CY = 152, CH_MAXR = 130.3, CH_LABELR = 135.3;
 const CH_RING_FRACS = [0.2, 0.4, 0.6, 0.8, 1.0];
 function chapterRadius(value) {
   const v = Math.max(0, Math.min(10, Number(value) || 0));
@@ -1853,13 +1861,16 @@ function renderRadarComparisonSVG(radarRaw, radarCalibrated) {
 
   const beforePts = POLY_ORDER.map((k, i) => chapterPoint(i, radarRaw[k]));
   const afterPts = POLY_ORDER.map((k, i) => chapterPoint(i, radarCalibrated[k]));
-  const beforeDots = beforePts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" class="chapter-radar-before-dot" />`).join("");
-  // round 29: numeric value labels on the "Setelah Kalibrasi" (after) dots
-  // only, per founder ask - mirrors renderPolygonSVG()'s own poly-value
-  // pattern (text centered on the dot, y+3 to vertically center the glyph).
+  // round 30: dot radii rescaled to match .poly-dot(r=13.5)/.poly-value(9.5px)
+  // in real onscreen pixels, using the same CH_VB/POLY_VIEW_SIZE=380/420
+  // scale factor as the geometry rescale above. beforeDots wasn't directly
+  // asked about, but rescaled to preserve its original 2.6:3 ratio to
+  // afterDots (10.6:12.2) - leaving it at 2.6 next to a 12.2-radius
+  // afterDot would look broken, not proportionate.
+  const beforeDots = beforePts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="10.6" class="chapter-radar-before-dot" />`).join("");
   const afterDots = afterPts.map(([x, y], i) => {
     const k = POLY_ORDER[i];
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="chapter-radar-after-dot" />
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12.2" class="chapter-radar-after-dot" />
       <text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="chapter-radar-after-value" text-anchor="middle">${formatRadarValue(radarCalibrated[k])}</text>`;
   }).join("");
 
@@ -2567,8 +2578,10 @@ function renderAdaptive() {
           <div class="chapter-section-label fr">Pola yang terlihat</div>
           <div class="chapter-trait-card">
             <div class="chapter-trait-icon">${icons.compass}</div>
-            <div class="chapter-trait-title fr">${esc(chapterAnalysis?.pattern?.title || "")}</div>
-            <p class="chapter-trait-desc">${esc(chapterAnalysis?.pattern?.description || "")}</p>
+            <div class="chapter-trait-text">
+              <div class="chapter-trait-title fr">${esc(chapterAnalysis?.pattern?.title || "")}</div>
+              <p class="chapter-trait-desc">${esc(chapterAnalysis?.pattern?.description || "")}</p>
+            </div>
           </div>
           <p class="chapter-disclaimer">Ini label sementara - ini pola yang Eleva lihat dari pilihanmu.</p>
         </div>

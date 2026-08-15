@@ -483,7 +483,15 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 .shell-chapter .radar-header-row { flex: none; }
 .shell-chapter .step-dots { margin-top: 6px; margin-bottom: 14px; flex: none; }
-.shell-chapter .fadeUp { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+/* round 30: touch-action:pan-y (not overflow-x:hidden - that clips the
+   .chapter-radar-wrap's intentional -12px bleed, confirmed via a visible
+   regression cutting off the "Livelihood" label during testing) stops
+   horizontal drag/rubber-band on touch devices without affecting visual
+   rendering at all - .chapter-radar-wrap's bleed makes content here wider
+   than the box, which without this can register as horizontally
+   pannable via touch on mobile, producing a rubber-band drag feel while
+   scrolling vertically. touch-action only governs gesture handling. */
+.shell-chapter .fadeUp { flex: 1 1 auto; min-height: 0; overflow-y: auto; touch-action: pan-y; display: flex; flex-direction: column; }
 .shell-chapter .chapter-cta { flex: none; margin-top: 14px; }
 
 .chapter-info-btn {
@@ -515,7 +523,11 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    formulas) actually produce matching rendered sizes, not just matching
    caps on different-sized containers. */
 .chapter-radar-wrap { margin: 8px -12px 4px; }
-.chapter-radar-svg { display: block; width: 100%; max-width: var(--ch-radar-max); height: auto; margin: 0 auto; touch-action: auto; }
+/* round 30: overflow:visible safety net - CH_LABELR's growth pushes the
+   "Livelihood" label (largest |dx| vertex, no wrap) closer to the
+   viewBox's right edge; SVG roots clip to their viewBox by default, this
+   prevents a hard clip if it's tighter than the geometry math estimated. */
+.chapter-radar-svg { display: block; width: 100%; max-width: var(--ch-radar-max); height: auto; margin: 0 auto; touch-action: auto; overflow: visible; }
 .chapter-radar-ring { fill: none; stroke: rgba(216, 163, 85, .16); stroke-width: 1; }
 .chapter-radar-ring.outer { stroke: rgba(216, 163, 85, .55); }
 .chapter-radar-axis { stroke: rgba(216, 163, 85, .22); stroke-width: 1; }
@@ -528,8 +540,13 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
    ask), navy-on-gold matching the interactive radar's own locked-node
    convention (.poly-value.locked{fill:#1a1409}), since the dot fill here
    is similarly light. */
-.chapter-radar-after-value { fill: #1a1409; font-family: "IBM Plex Mono", monospace; font-weight: 700; font-size: 8px; pointer-events: none; }
-.chapter-radar-label { fill: #e7e2d6; font-family: "Inter", sans-serif; font-weight: 500; font-size: 12px; }
+.chapter-radar-after-value { fill: #1a1409; font-family: "IBM Plex Mono", monospace; font-weight: 700; font-size: 8.6px; pointer-events: none; }
+/* round 30: 12->10.5px - overflow:visible turned out not to reliably
+   prevent clipping in practice (confirmed via real screenshot, not just
+   getBBox() math, after CH_LABELR grew this round) - trimming label width
+   directly is the robust fix, paired with pulling CH_LABELR in a bit
+   further below. */
+.chapter-radar-label { fill: #e7e2d6; font-family: "Inter", sans-serif; font-weight: 500; font-size: 10.5px; }
 .chapter-legend { display: flex; justify-content: center; gap: 16px; margin-top: 6px; }
 .chapter-legend-item { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #95919e; font-family: "Inter", sans-serif; }
 .chapter-legend-line { display: inline-block; width: 16px; height: 0; border-top: 2px solid #e5aa50; }
@@ -553,13 +570,18 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .chapter-insight-icon svg { width: 18px; height: 18px; }
 .chapter-insight-text { font-family: "Inter", sans-serif; font-size: 13px; line-height: 1.5; color: #f1ebdd; margin: 0; }
 
+/* round 30: icon-left/text-right row, vertically centered (founder ask -
+   was previously a plain block stack, icon above text). Matches the
+   sibling .chapter-insight-row pattern already on this screen. */
 .chapter-trait-card {
-  position: relative; background: linear-gradient(135deg, rgba(216, 163, 85, .12), rgba(216, 163, 85, .03));
+  position: relative; display: flex; align-items: center; gap: 14px;
+  background: linear-gradient(135deg, rgba(216, 163, 85, .12), rgba(216, 163, 85, .03));
   border: 1px solid rgba(216, 163, 85, .5); border-radius: 16px; padding: 9px 15px;
   box-shadow: 0 0 24px rgba(216, 163, 85, .1) inset;
 }
-.chapter-trait-icon { width: 52px; height: 52px; margin: 0 0 8px; filter: drop-shadow(0 0 8px rgba(229, 170, 80, .4)); }
-.chapter-trait-title { font-weight: 600; font-size: 19px; color: #e5aa50; margin: 0 0 4px; }
+.chapter-trait-icon { width: 52px; height: 52px; flex: none; margin: 0; filter: drop-shadow(0 0 8px rgba(229, 170, 80, .4)); }
+.chapter-trait-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.chapter-trait-title { font-weight: 600; font-size: 19px; color: #e5aa50; margin: 0; }
 .chapter-trait-desc { font-family: "Inter", sans-serif; font-size: 13px; line-height: 1.5; color: #f1ebdd; margin: 0; }
 
 .chapter-cta {
