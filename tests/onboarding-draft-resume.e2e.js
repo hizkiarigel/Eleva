@@ -172,8 +172,9 @@ async function signUpAndFillName(page, name) {
     }
     await page.waitForSelector(".chapter-headline", { timeout: 15000 });
     await page.click("#toPathway");
-    await page.waitForSelector(".tarot-card", { timeout: 15000 });
-    await page.locator(".tarot-card").first().click();
+    await page.waitForSelector(".ppick-col", { timeout: 15000 });
+    await page.locator(".ppick-col").first().click();
+    await page.click("#confirmPathway");
     await page.waitForSelector(".goal-input", { timeout: 10000 });
     await page.fill('[data-goal="0"]', "Target uji coba");
     await page.click("#confirmGoals");
@@ -184,8 +185,8 @@ async function signUpAndFillName(page, name) {
     await context.close();
   });
 
-  console.log("E2E: refreshing on the pathway carousel screen (round 28) resumes directly there, no bridge replay, no chapter-analysis re-fetch");
-  await test("adaptivePhase 'pathway' is in restoreOnboardingDraft()'s allowed-resume list, so a mid-flow refresh after tapping through the Chapter Analysis summary lands back on the carousel, not a fresh scenario-bridge fetch", async () => {
+  console.log("E2E: refreshing on the pathway screen (round 28) resumes directly there, no bridge replay, no chapter-analysis re-fetch");
+  await test("adaptivePhase 'pathway' is in restoreOnboardingDraft()'s allowed-resume list, so a mid-flow refresh after tapping through the Chapter Analysis summary lands back on the pathway screen, not a fresh scenario-bridge fetch", async () => {
     const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
     await signUpAndFillName(page, "Pathway Resume");
@@ -202,12 +203,41 @@ async function signUpAndFillName(page, name) {
     }
     await page.waitForSelector(".chapter-headline", { timeout: 15000 });
     await page.click("#toPathway");
-    await page.waitForSelector(".tarot-carousel", { timeout: 10000 });
+    await page.waitForSelector(".ppick-cards", { timeout: 10000 });
     await page.waitForTimeout(700); // let the debounced draft save land
     await page.reload();
-    await page.waitForSelector(".tarot-carousel", { timeout: 15000 });
+    await page.waitForSelector(".ppick-cards", { timeout: 15000 });
     assert.strictEqual(await page.locator(".bridge-root").count(), 0, "an already-reached pathway screen must restore directly, never through the bridge animation");
-    assert.strictEqual(await page.locator(".chapter-headline").count(), 0, "must resume straight to the carousel, not back to the chapter-analysis summary");
+    assert.strictEqual(await page.locator(".chapter-headline").count(), 0, "must resume straight to the pathway screen, not back to the chapter-analysis summary");
+    await context.close();
+  });
+
+  console.log("E2E: refreshing after selecting (but not confirming) a pathway card restores that same selection (round 32 - tap now selects, not confirms)");
+  await test("a mid-screen card tap persists via the debounced draft save, so reloading before hitting the CTA still shows the tapped card as DIPILIH, not the default card 1", async () => {
+    const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await signUpAndFillName(page, "Pathway Selection Resume");
+    await page.click("#next");
+    await page.waitForSelector(".poly-svg", { timeout: 10000 });
+    await page.click('[data-lock-hit="body"]');
+    await page.click("#next");
+    for (let i = 0; i < 2; i++) {
+      await page.waitForSelector(".qcard-card", { timeout: 15000 });
+      const opts = await page.locator(".qcard-answer").all();
+      await opts[0].click();
+      await opts[1].click();
+      await page.click("#confirmCard");
+    }
+    await page.waitForSelector(".chapter-headline", { timeout: 15000 });
+    await page.click("#toPathway");
+    await page.waitForSelector(".ppick-cards", { timeout: 10000 });
+    await page.locator(".ppick-col").nth(1).click(); // select card 2, do NOT tap the CTA
+    await page.waitForTimeout(700); // let the debounced draft save land
+    await page.reload();
+    await page.waitForSelector(".ppick-cards", { timeout: 15000 });
+    assert.strictEqual(await page.locator(".bridge-root").count(), 0, "restoring a mid-selection pathway screen must never replay the bridge");
+    assert.strictEqual(await page.locator(".ppick-col").nth(1).locator(".ppick-dipilih").count(), 1, "the previously-tapped card (card 2) must still show DIPILIH after reload");
+    assert.strictEqual(await page.locator(".ppick-col").nth(0).locator(".ppick-dipilih").count(), 0, "card 1 (the default) must not have reasserted itself over the user's actual tap");
     await context.close();
   });
 

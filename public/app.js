@@ -50,16 +50,64 @@ const PATHWAY_DESC = {
   Specialist: "Menyelam dalam ke satu domain spesifik yang tidak masuk kategori umum.",
 };
 const PATHWAY_NAMES = Object.keys(PATHWAY_DESC);
-// Design handoff Screen 2: short style phrase for the wildcard tarot card's
-// "why" line ("Arah alternatif kalau kamu ingin ...") - static template
-// copy, the Weaver phrasing is verbatim from the design mockup.
-const PATHWAY_ALT_PHRASE = {
-  Architect: "membangun sesuatu langkah demi langkah",
-  Warden: "menjaga konsistensi & fondasi yang stabil",
-  Weaver: "membangun koneksi & kolaborasi",
-  Pilgrim: "menjelajah dulu sebelum berkomitmen",
-  Specialist: "menyelam dalam di satu bidang",
+// "Pilih Pathway" screen (round 32 handoff): per-Pathway color identity for
+// this screen's card glow/DIPILIH tag/reasoning panel. Warden/Weaver/Pilgrim
+// use the handoff's own exact new hex (screen-scoped, matching this app's
+// established fidelity precedent for design handoffs). Specialist/Architect
+// hex are NOT in the handoff (only described as "gold"/"sapphire") - these
+// two literal values are copied from PATHWAY_META's existing glow (used on
+// the dashboard elsewhere) so those 2 pathways' color identity stays
+// consistent app-wide, not just on this one screen.
+const PPICK_COLOR = {
+  Warden: "#e0656a", Weaver: "#5fbf8f", Pilgrim: "#a78bd6",
+  Specialist: "#d4a72c", Architect: "#3b6fd6",
 };
+// Fixed 3-reason copy per Pathway for the reasoning panel below the cards -
+// static/hardcoded, NOT AI-generated (per founder instruction: use the
+// handoff's own exact copy, don't genericize). Warden/Weaver/Pilgrim are
+// verbatim from the design handoff (originally under "Warden"/"Waiver"/
+// "Pilgrim" - Waiver == Weaver, confirmed with founder). Architect/
+// Specialist are original copy (design handoff only covered 3 of 5
+// Pathways) drafted to match that tone/length, informed by this codebase's
+// own PATHWAY_DESC blurbs for those two.
+const PATHWAY_REASONS = {
+  Warden: [
+    "Kamu cenderung kuat saat menjaga ritme dan konsistensi.",
+    "Kamu cocok dengan quest yang bertumbuh lewat disiplin bertahap.",
+    "Saat ada tekanan, kamu lebih nyaman bergerak daripada diam.",
+  ],
+  Weaver: [
+    "Kamu berkembang lewat keterhubungan dan rasa saling percaya.",
+    "Kamu lebih kuat saat punya tempat berpijak yang stabil.",
+    "Hubungan di sekitarmu ikut memengaruhi caramu bertumbuh.",
+  ],
+  Pilgrim: [
+    "Kamu banyak menunjukkan kebutuhan menemukan arah dan pengalaman baru.",
+    "Kamu berkembang lebih natural lewat eksplorasi daripada pola yang kaku.",
+    "Kamu cenderung mengubah discovery menjadi langkah nyata.",
+  ],
+  Architect: [
+    "Kamu cenderung kuat saat menyusun langkah secara metodis dan terlihat.",
+    "Kamu cocok dengan quest yang bertumbuh lewat struktur, bukan improvisasi.",
+    "Kamu lebih nyaman bergerak begitu ada rencana yang jelas di depan.",
+  ],
+  Specialist: [
+    "Kamu cenderung kuat saat bisa menyelam dalam ke satu fokus spesifik.",
+    "Kamu cocok dengan quest yang bertumbuh lewat penguasaan, bukan cakupan luas.",
+    "Kamu lebih puas menuntaskan satu hal sampai dalam daripada banyak hal sekilas.",
+  ],
+};
+// Reasoning panel's circular sigil icon - mirrors the design handoff's own
+// sigil(color,size) inline SVG verbatim, colored to match whichever card is
+// currently selected.
+function pathwaySigilSVG(color, size) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="none">
+    <circle cx="24" cy="24" r="20" stroke="${color}" stroke-width="1.3" opacity=".6" />
+    <circle cx="24" cy="24" r="13" stroke="${color}" stroke-width="1" opacity=".4" />
+    <path d="M24 8l3.2 12.8L40 24l-12.8 3.2L24 40l-3.2-12.8L8 24l12.8-3.2L24 8z" fill="${color}" opacity=".85" />
+    <circle cx="24" cy="24" r="2" fill="#1a1409" />
+  </svg>`;
+}
 // Task 9 (founder spec, 10 Agustus): fixed catalog of 15 sub-pathway
 // archetypes - MUST stay byte-for-byte identical to the copy in
 // server/claude.js (no shared module system between client/server here).
@@ -2591,29 +2639,20 @@ function renderAdaptive() {
     return;
   }
 
-  // Pathway carousel, pulled out into its own screen (round 28) - was
-  // previously appended directly below the analysis content above. Tap =
-  // confirm (design handoff): no separate CTA under the carousel - tapping
-  // a card IS the confirmation, straight into Goal Capture. This also
-  // sidesteps the old bug where confirming re-rendered this same carousel
-  // in place and reset its scroll position (most visible when picking the
-  // rightmost/wildcard card) - the screen changes entirely now instead. The
-  // free-text override entry moved to the Goal Capture screen (founder
-  // decision, 10 Agustus - the handoff flagged "confirm with product" and
-  // the answer was relocate, not cut).
+  // "Pilih Pathway" screen (round 32 handoff): static 3-card row, tap
+  // SELECTS a card (glow/DIPILIH tag + reasoning panel update) but does NOT
+  // navigate - a separate CTA pinned to the bottom confirms and advances to
+  // Goal Capture. Replaces the round-28 tarot carousel, where tapping a
+  // card immediately confirmed it. Rank labels ("REKOMENDASI UTAMA" for
+  // card 1, "ALTERNATIF" for cards 2-3) are fixed to card position and
+  // never change with selection - only the glow/tag/reasoning panel react
+  // to which card is currently selected. The free-text override entry
+  // stays on the Goal Capture screen (founder decision, 10 Agustus,
+  // unchanged by this redesign).
   if (adaptivePhase === "pathway") {
-    // Design handoff Screen 2: tarot-card footers carry a short templated
-    // "why this fits" line instead of the pathway's display name - built
-    // purely from data already on the client (radar top-axes / a static
-    // per-pathway phrase), no new scoring, per the handoff's hard
-    // "copy/template work only" constraint.
-    const top2 = (radar) => Object.entries(radar || {}).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => statLabel(k));
-    const whyLine = (opt) => {
-      if (opt.source === "calibrated") return `Cocok karena radarmu condong ke ${top2(onboardForm.radar).join(" & ")}.`;
-      if (opt.source === "raw") return `Sebelum kalibrasi, kamu condong ke ${top2(onboardForm.radarRaw || onboardForm.radar).join(" & ")}.`;
-      return `Arah alternatif kalau kamu ingin ${PATHWAY_ALT_PHRASE[opt.pathway] || "mencoba gaya yang beda"}.`;
-    };
-    const numerals = ["I", "II", "III"];
+    const activeIdx = selectedPathwayIndex ?? 0; // default: card 1, matches the handoff's "default selected on load" - read at render time so an untapped screen doesn't pollute the saved draft with a selection the user never made
+    const activeOpt = pathwayOptions[activeIdx];
+    const activeColor = PPICK_COLOR[activeOpt.pathway] || PPICK_COLOR.Pilgrim;
     root.innerHTML = `
       <div class="shell shell-chapter">
         <div class="radar-header-row">
@@ -2623,35 +2662,59 @@ function renderAdaptive() {
         ${chapterProgressHTML("pathway")}
         ${helpSheetHTML("pathway")}
         <div class="fadeUp">
-          <div class="eyebrow mono" style="margin-top:4px;color:var(--accent)">PILIH PATHWAY</div>
-          <p style="font-size:11.5px;line-height:1.65;color:var(--muted);margin:0 0 16px">Pathway adalah <span style="color:var(--accent);font-weight:600">cara</span> kamu ngerjain quest sehari-hari — bukan tujuannya. Tujuannya (<span style="color:var(--text);font-weight:600">goal kamu sendiri</span>) dipilih di step berikutnya. Tap salah satu kartu buat lanjut.</p>
-          <div class="tarot-carousel">
+          <div class="ppick-headline fr">Tiga jalan yang paling cocok mulai terlihat.</div>
+          <p class="ppick-subcopy">Pathway adalah caramu menjalani quest — bukan tujuanmu. Tap satu kartu untuk lihat kenapa Eleva merekomendasikannya.</p>
+          <div class="ppick-cards">
             ${pathwayOptions.map((opt, i) => {
-              const primary = opt.source === "calibrated";
+              const isSel = i === activeIdx;
+              const isMain = i === 0;
+              const color = PPICK_COLOR[opt.pathway] || PPICK_COLOR.Pilgrim;
               return `
-              <div class="tarot-card ${primary ? "primary" : ""}" data-idx="${i}">
-                <div class="tarot-art">
-                  <div class="tarot-numeral mono">${numerals[i] || ""}</div>
-                  ${primary ? `<div class="tarot-stars"></div>` : ""}
+              <div class="ppick-col" data-idx="${i}">
+                <div class="ppick-rank-row">
+                  <span class="ppick-rank-label" style="color:${isMain ? "#e5aa50" : "#8a93b8"}">${isMain ? "REKOMENDASI UTAMA" : "ALTERNATIF"}</span>
+                  <span class="ppick-rank-arrow" style="color:${isMain ? "#e5aa50" : "#8a93b8"}">▾</span>
                 </div>
-                <div class="tarot-footer">
-                  <div class="tarot-label mono">${opt.source === "calibrated" ? "REKOMENDASI UTAMA" : opt.source === "raw" ? "DARI RADAR AWAL" : "COBA ARAH LAIN"}</div>
-                  <div class="tarot-why">${esc(whyLine(opt))}</div>
+                <div class="ppick-card" style="${isSel ? `border-color:${color};box-shadow:0 0 16px ${color}66, 0 0 0 1px ${color}33 inset;` : ""}">
+                  ${isSel ? `<span class="ppick-dipilih" style="background:${color}">DIPILIH</span>` : ""}
+                  <div class="ppick-art" style="background:radial-gradient(circle at 30% 30%, ${color}33, transparent 60%), radial-gradient(circle at 70% 75%, ${color}1a, transparent 55%), #0a0a0d">
+                    <div class="ppick-art-name">${esc(opt.pathway)}</div>
+                    <div class="ppick-art-noun">${esc(opt.pathwayNoun)}</div>
+                  </div>
                 </div>
               </div>`;
             }).join("")}
           </div>
+          <div class="ppick-reason" style="border-color:${activeColor}55">
+            <div class="ppick-reason-header">
+              <span class="ppick-reason-icon">${pathwaySigilSVG(activeColor, 30)}</span>
+              <div>
+                <div class="ppick-reason-pathway" style="color:${activeColor}">${esc(activeOpt.pathway.toUpperCase())}: ${esc(activeOpt.pathwayNoun)}</div>
+                <div class="ppick-reason-title fr">Kenapa Eleva merekomendasikan ini</div>
+              </div>
+            </div>
+            ${(PATHWAY_REASONS[activeOpt.pathway] || []).map((r) => `
+              <div class="ppick-reason-row">
+                <span class="ppick-reason-bullet" style="color:${activeColor}">◆</span>
+                <span class="ppick-reason-text">${esc(r)}</span>
+              </div>`).join("")}
+          </div>
         </div>
+        <button class="chapter-cta" id="confirmPathway">Lanjut dengan ${esc(activeOpt.pathway)} →</button>
       </div>`;
-    document.querySelectorAll(".tarot-card").forEach((card) => {
-      card.addEventListener("click", () => {
-        const idx = Number(card.dataset.idx);
-        const chosen = pathwayOptions[idx];
-        selectedPathwayIndex = idx;
-        pendingPathway = { pathway: chosen.pathway, pathwayNoun: chosen.pathwayNoun };
-        adaptivePhase = "goals";
+    document.querySelectorAll(".ppick-col").forEach((col) => {
+      col.addEventListener("click", () => {
+        selectedPathwayIndex = Number(col.dataset.idx);
+        saveOnboardingDraft();
         renderAdaptive();
       });
+    });
+    document.getElementById("confirmPathway").addEventListener("click", () => {
+      const chosen = pathwayOptions[selectedPathwayIndex ?? 0];
+      pendingPathway = { pathway: chosen.pathway, pathwayNoun: chosen.pathwayNoun };
+      adaptivePhase = "goals";
+      saveOnboardingDraftNow();
+      renderAdaptive();
     });
     return;
   }

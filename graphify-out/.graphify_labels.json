@@ -39,10 +39,9 @@
   "37": "buildPathwayOptions",
   "38": "renderAuth",
   "39": "questSummaryCard",
-  "40": "Adaptive Scenario Cards",
+  "40": "3-Card Pathway Recommendation Carousel",
   "41": "onboarding-bridge-audio.e2e.js",
   "42": "onboarding-draft-resume.e2e.js",
   "43": "startBridgeAudio",
-  "44": "generate-onboarding-audio.js",
-  "45": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)"
+  "44": "generate-onboarding-audio.js"
 }

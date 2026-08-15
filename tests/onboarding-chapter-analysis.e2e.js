@@ -127,9 +127,10 @@ async function waitForServer(base, log) {
 
     assert.strictEqual(await page.locator(".step-dots .dot-seg.active").count(), 1, "expected 1 active segment on the chapter-analysis summary");
     await page.click("#toPathway");
-    await page.waitForSelector(".tarot-carousel", { timeout: 10000 });
-    assert.strictEqual(await page.locator(".step-dots .dot-seg.active").count(), 2, "expected 2 active segments on the pathway carousel");
-    await page.locator(".tarot-card").first().click();
+    await page.waitForSelector(".ppick-cards", { timeout: 10000 });
+    assert.strictEqual(await page.locator(".step-dots .dot-seg.active").count(), 2, "expected 2 active segments on the pathway screen");
+    await page.locator(".ppick-col").first().click();
+    await page.click("#confirmPathway");
     await page.waitForSelector(".goal-manuscript", { timeout: 10000 });
     assert.strictEqual(await page.locator(".step-dots .dot-seg.active").count(), 3, "expected 3 active segments on Goal Capture");
     await context.close();
@@ -144,7 +145,7 @@ async function waitForServer(base, log) {
     await reachChapterAnalysis(page, "NoRefetch Tester");
     assert.strictEqual(chapterAnalysisCalls, 1, "expected exactly 1 chapter-analysis fetch to reach the summary screen");
     await page.click("#toPathway");
-    await page.waitForSelector(".tarot-carousel", { timeout: 10000 });
+    await page.waitForSelector(".ppick-cards", { timeout: 10000 });
     assert.strictEqual(chapterAnalysisCalls, 1, "tapping the CTA must not trigger a second chapter-analysis fetch");
     await context.close();
   });
@@ -168,12 +169,50 @@ async function waitForServer(base, log) {
     const page = await context.newPage();
     await reachChapterAnalysis(page, "BackNav Tester");
     await page.click("#toPathway");
-    await page.waitForSelector(".tarot-carousel", { timeout: 10000 });
-    await page.locator(".tarot-card").first().click();
+    await page.waitForSelector(".ppick-cards", { timeout: 10000 });
+    await page.locator(".ppick-col").first().click();
+    await page.click("#confirmPathway");
     await page.waitForSelector(".goal-manuscript", { timeout: 10000 });
     await page.click("#backToPathway");
-    await page.waitForSelector(".tarot-carousel", { timeout: 10000 });
-    assert.strictEqual(await page.locator(".chapter-headline").count(), 0, "Kembali must land on the pathway carousel, not back on the chapter-analysis summary");
+    await page.waitForSelector(".ppick-cards", { timeout: 10000 });
+    assert.strictEqual(await page.locator(".chapter-headline").count(), 0, "Kembali must land on the pathway screen, not back on the chapter-analysis summary");
+    await context.close();
+  });
+
+  console.log("E2E: Pilih Pathway - tap selects a card (no navigation), rank labels stay fixed, reasoning panel + CTA update, CTA confirms (round 32 redesign)");
+  await test("tapping card 2 selects it (DIPILIH + reasoning panel react) without leaving the screen; its rank label stays 'ALTERNATIF'; the CTA confirms whichever card is selected", async () => {
+    const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await reachChapterAnalysis(page, "Select Tester");
+    await page.click("#toPathway");
+    await page.waitForSelector(".ppick-cards", { timeout: 10000 });
+
+    assert.strictEqual(await page.locator(".ppick-dipilih").count(), 1, "card 1 selected by default on load");
+    assert.strictEqual((await page.locator(".ppick-col").nth(0).locator(".ppick-dipilih").count()), 1, "default selection is card 1");
+    const rankLabelsBefore = await page.locator(".ppick-rank-label").allTextContents();
+
+    const card2Pathway = await page.locator(".ppick-col").nth(1).locator(".ppick-art-name").textContent();
+    await page.locator(".ppick-col").nth(1).click();
+
+    assert.strictEqual(await page.locator(".ppick-cards").count(), 1, "tapping a card must not navigate away from the pathway screen");
+    assert.strictEqual(await page.locator(".ppick-dipilih").count(), 1, "still exactly 1 card selected after tapping a different one");
+    assert.strictEqual(await page.locator(".ppick-col").nth(1).locator(".ppick-dipilih").count(), 1, "card 2 now shows DIPILIH");
+    assert.strictEqual(await page.locator(".ppick-col").nth(0).locator(".ppick-dipilih").count(), 0, "card 1 loses DIPILIH once card 2 is tapped");
+    const rankLabelsAfter = await page.locator(".ppick-rank-label").allTextContents();
+    assert.deepStrictEqual(rankLabelsAfter, rankLabelsBefore, "rank labels are fixed to card position and must not change with selection");
+    assert.strictEqual(rankLabelsAfter[1].trim(), "ALTERNATIF", "card 2 stays ALTERNATIF even while selected");
+
+    const reasonPathway = (await page.locator(".ppick-reason-pathway").textContent()).trim();
+    assert.ok(reasonPathway.toLowerCase().includes(card2Pathway.trim().toLowerCase()), "reasoning panel must reflect the newly selected (card 2) Pathway, not card 1");
+    const reasonRows = await page.locator(".ppick-reason-text").allTextContents();
+    assert.strictEqual(reasonRows.length, 3, "expected exactly 3 reasoning bullets");
+    assert.ok(reasonRows.every((t) => t.trim().length > 0), "every reasoning bullet must have non-empty text");
+
+    const ctaText = (await page.locator("#confirmPathway").textContent()).trim();
+    assert.ok(ctaText.includes(card2Pathway.trim()), "CTA label must reflect the currently selected Pathway");
+
+    await page.click("#confirmPathway");
+    await page.waitForSelector(".goal-manuscript", { timeout: 10000 });
     await context.close();
   });
 

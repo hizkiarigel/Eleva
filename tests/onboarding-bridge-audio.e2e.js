@@ -369,8 +369,8 @@ async function reachFirstBridge(page, name) {
     assert.strictEqual(plays.length, 1, `expected exactly 1 play for the Pathway clip, got ${plays.length}`);
     assert.strictEqual(await page.locator(".qcard-card").count(), 0, "must be on the chapter-analysis summary, not another question card");
     await page.click("#toPathway");
-    await page.waitForSelector(".tarot-carousel", { timeout: 15000 });
-    assert.ok((await page.locator("text=PILIH PATHWAY").count()) > 0, "expected the pathway-selection screen after tapping through the summary");
+    await page.waitForSelector(".ppick-cards", { timeout: 15000 });
+    assert.ok((await page.locator("text=Tiga jalan yang paling cocok mulai terlihat.").count()) > 0, "expected the pathway-selection screen after tapping through the summary");
     await context.close();
   });
 

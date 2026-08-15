@@ -148,13 +148,13 @@ async function waitForServer(base, log) {
     assert.strictEqual(await page.locator(".qcard-card").count(), 0, "must not show a 3rd scenario card - confident:true should hand off to the pathway bridge instead");
 
     // chapter analysis summary (round 28: pulled out into its own screen,
-    // ahead of the pathway carousel) - reach it, then tap through to the
-    // carousel.
+    // ahead of the pathway screen) - reach it, then tap through to the
+    // pathway screen.
     await page.waitForSelector(".chapter-headline", { timeout: 10000 });
     assert.ok((await page.locator("text=Ada pola yang mulai kelihatan.").count()) > 0, "expected the Chapter Analysis summary screen after the Pathway bridge");
     await page.click("#toPathway");
-    await page.waitForSelector(".tarot-carousel", { timeout: 10000 });
-    assert.ok((await page.locator("text=PILIH PATHWAY").count()) > 0, "expected the pathway-selection screen after tapping through the summary");
+    await page.waitForSelector(".ppick-cards", { timeout: 10000 });
+    assert.ok((await page.locator("text=Tiga jalan yang paling cocok mulai terlihat.").count()) > 0, "expected the pathway-selection screen after tapping through the summary");
   });
 
   console.log("E2E: hitting the 6-card cap goes straight to the Pathway bridge - no 'meta' flash first (round 24 bug fix)");
@@ -227,7 +227,7 @@ async function waitForServer(base, log) {
     assert.strictEqual(src, "/onboarding/bridges/07-pathway.webp", `expected straight to the Pathway stage after card 6, got ${src}`);
     await capPage.waitForSelector(".chapter-headline", { timeout: 10000 });
     await capPage.click("#toPathway");
-    await capPage.waitForSelector(".tarot-carousel", { timeout: 10000 });
+    await capPage.waitForSelector(".ppick-cards", { timeout: 10000 });
     assert.strictEqual(scenarioCardCalls, 6, "must not fetch a 7th scenario card - the client already knows it would be confident");
     await capContext.close();
   });

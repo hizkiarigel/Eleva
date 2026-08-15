@@ -675,32 +675,34 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .pathway-card .desc { font-size: 13.5px; line-height: 1.55; margin: 0 0 8px; }
 .pathway-card .why { font-size: 12.5px; color: var(--muted); font-style: italic; margin: 0; }
 
-/* Tarot-styled pathway cards (design handoff Screen 2, onboarding only).
-   Tap = confirm; primary/recommended card is larger with a gold border and
-   inset glow, secondaries stay flat and dimmed so the hierarchy reads
-   before anything is tapped. Illustration zones are CSS-gradient
-   placeholders - real tarot/celestial art should replace them before wide
-   release (acceptable for the pilot). */
-.tarot-carousel { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 10px; -webkit-overflow-scrolling: touch; }
-.tarot-card { flex: none; width: 130px; aspect-ratio: 2.27/4.75; display: flex; flex-direction: column;
-  border-radius: 4px; background: #161320; border: 1px solid rgba(255, 255, 255, .1); opacity: .8; cursor: pointer; }
-.tarot-card.primary { width: 150px; opacity: 1; background: linear-gradient(180deg, #1e1b28, #131019);
-  border: 2px solid var(--accent); box-shadow: 0 0 0 4px rgba(216, 163, 85, .12) inset; }
-.tarot-art { flex: 1; border-radius: 2px 2px 0 0; position: relative;
-  background: radial-gradient(circle at 40% 40%, rgba(255, 255, 255, .08), transparent 60%), #100e17; }
-.tarot-card.primary .tarot-art {
-  background: radial-gradient(circle at 30% 30%, rgba(216, 163, 85, .35), transparent 60%),
-    radial-gradient(circle at 70% 70%, rgba(148, 100, 200, .25), transparent 55%), #100e17; }
-.tarot-numeral { position: absolute; top: 8px; left: 8px; font-size: 9px; color: var(--muted-dim); }
-.tarot-card.primary .tarot-numeral { font-size: 10px; color: var(--accent); }
-.tarot-stars { position: absolute; top: 38%; left: 50%; width: 3px; height: 3px; background: var(--text); border-radius: 50%;
-  box-shadow: 20px 10px 0 rgba(236, 231, 220, .7), -16px 22px 0 rgba(236, 231, 220, .5), 8px -18px 0 rgba(236, 231, 220, .4); }
-.tarot-footer { flex: none; padding: 10px 9px 12px; }
-.tarot-card.primary .tarot-footer { padding: 12px 10px 14px; }
-.tarot-label { font-size: 8.5px; letter-spacing: 1px; color: var(--muted-dim); margin-bottom: 4px; }
-.tarot-card.primary .tarot-label { font-size: 9px; color: var(--accent); }
-.tarot-why { font-size: 10px; line-height: 1.4; color: var(--muted); font-style: italic; }
-.tarot-card.primary .tarot-why { font-size: 11px; line-height: 1.45; color: #ccc7bc; }
+/* "Pilih Pathway" screen (round 32 handoff) - static 3-card row, tap
+   selects (glow/DIPILIH tag + reasoning panel react), a separate CTA
+   confirms. Replaces the round-28 .tarot-* tap-to-confirm carousel above.
+   NOT the same class family as .pathway-card/.pathway-carousel above (an
+   unrelated, still-live screen: the "Target Berikutnya" Focus-2 picker).
+   Card artwork is a CSS-gradient placeholder tinted to the Pathway's own
+   color - real tarot-style art (wordmark/sigil/name baked in) replaces it
+   before wide release, same as the carousel this replaces. */
+.ppick-headline { flex: none; text-align: center; font-family: "Fraunces", serif; font-weight: 500; font-size: min(25px, calc(25 / 390 * 100vw)); line-height: 1.15; color: #f1ebdd; margin: 6px 0 8px; }
+.ppick-subcopy { flex: none; text-align: center; font-family: "Inter", sans-serif; font-size: min(12px, calc(12 / 390 * 100vw)); line-height: 1.4; color: #95919e; margin: 0 auto 16px; max-width: 300px; }
+.ppick-cards { display: flex; gap: 10px; }
+.ppick-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; cursor: pointer; }
+.ppick-rank-row { display: flex; align-items: center; gap: 3px; margin-bottom: 4px; }
+.ppick-rank-label { font-family: "Inter", sans-serif; font-size: min(7.5px, calc(7.5 / 390 * 100vw)); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; text-align: center; white-space: nowrap; }
+.ppick-rank-arrow { font-size: min(9px, calc(9 / 390 * 100vw)); line-height: 1; }
+.ppick-card { position: relative; width: 100%; aspect-ratio: 11/19; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .15); background: #0a0a0d; overflow: hidden; box-sizing: border-box; transition: all .25s ease; }
+.ppick-dipilih { position: absolute; top: 6px; right: 6px; z-index: 3; color: #1a1409; font-family: "Inter", sans-serif; font-weight: 700; font-size: 7.5px; letter-spacing: .08em; padding: 2px 5px; border-radius: 4px; }
+.ppick-art { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 8px; text-align: center; }
+.ppick-art-name { font-family: "Inter", sans-serif; font-weight: 600; font-size: 10px; letter-spacing: .06em; color: #f1ebdd; text-transform: uppercase; }
+.ppick-art-noun { font-family: "Inter", sans-serif; font-size: 8.5px; color: #95919e; }
+.ppick-reason { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; background: rgba(255, 255, 255, .03); border: 1px solid; border-radius: 14px; padding: 14px 16px; }
+.ppick-reason-header { display: flex; align-items: center; gap: 10px; }
+.ppick-reason-icon { flex: none; width: 30px; height: 30px; }
+.ppick-reason-pathway { font-family: "Inter", sans-serif; font-weight: 600; font-size: 11.5px; letter-spacing: .04em; margin-bottom: 2px; }
+.ppick-reason-title { font-family: "Fraunces", serif; font-weight: 500; font-size: 15px; color: #e5aa50; line-height: 1.2; }
+.ppick-reason-row { display: flex; align-items: flex-start; gap: 8px; }
+.ppick-reason-bullet { flex: none; font-size: 9px; margin-top: 1px; }
+.ppick-reason-text { font-family: "Inter", sans-serif; font-size: 12.5px; line-height: 1.4; color: #f1ebdd; }
 
 /* Goal Capture as numbered manuscript entries (design handoff Screen 3). */
 .ornament-divider { display: flex; align-items: center; gap: 10px; margin: 10px 0 16px; }

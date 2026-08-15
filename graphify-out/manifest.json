@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786779665.1451895,
-    "ast_hash": "519c89fab63788bb5ff636a28e38a989",
+    "mtime": 1786783680.9095209,
+    "ast_hash": "04f70f738c07a31d5c97d9e66b2226a2",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786778743.3331347,
-    "ast_hash": "08657ae75b9f12a7984d951145c7b964",
+    "mtime": 1786781306.325287,
+    "ast_hash": "b576f42bc9b442258ae63fea20a9c24b",
     "semantic_hash": ""
   },
   "README.md": {
@@ -310,13 +310,13 @@
     "semantic_hash": ""
   },
   "tests/onboarding-bridge.e2e.js": {
-    "mtime": 1786771362.3669498,
-    "ast_hash": "caf29304e7b4f3b4999dbd80e308e02d",
+    "mtime": 1786783816.2975287,
+    "ast_hash": "821ff78904e13af367c71c4f1b5b7756",
     "semantic_hash": ""
   },
   "tests/onboarding-draft-resume.e2e.js": {
-    "mtime": 1786771379.7149508,
-    "ast_hash": "19a312fb1e618808c64d96ec1fee8f09",
+    "mtime": 1786783797.8495278,
+    "ast_hash": "1be884641ddc3bfa6316a373dda1e867",
     "semantic_hash": ""
   },
   "scripts/generate-onboarding-audio.js": {
@@ -325,8 +325,8 @@
     "semantic_hash": ""
   },
   "tests/onboarding-bridge-audio.e2e.js": {
-    "mtime": 1786772172.830998,
-    "ast_hash": "27e8f35ff893a63cfc128427def378b7",
+    "mtime": 1786783827.5895295,
+    "ast_hash": "de1caeee666f69f6c755dc94340d6264",
     "semantic_hash": ""
   },
   "tests/fixtures/bridge-voice.wav": {
@@ -335,8 +335,8 @@
     "semantic_hash": ""
   },
   "tests/onboarding-chapter-analysis.e2e.js": {
-    "mtime": 1786771724.9949715,
-    "ast_hash": "9a68c4283201cd7049cd29ea5f23b277",
+    "mtime": 1786784057.5095432,
+    "ast_hash": "0b909d1291ee8f7b70bda2c4bfc3c9a2",
     "semantic_hash": ""
   }
 }
