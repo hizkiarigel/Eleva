@@ -483,15 +483,16 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 .shell-chapter .radar-header-row { flex: none; }
 .shell-chapter .step-dots { margin-top: 6px; margin-bottom: 14px; flex: none; }
-/* round 30: touch-action:pan-y (not overflow-x:hidden - that clips the
-   .chapter-radar-wrap's intentional -12px bleed, confirmed via a visible
-   regression cutting off the "Livelihood" label during testing) stops
-   horizontal drag/rubber-band on touch devices without affecting visual
-   rendering at all - .chapter-radar-wrap's bleed makes content here wider
-   than the box, which without this can register as horizontally
-   pannable via touch on mobile, producing a rubber-band drag feel while
-   scrolling vertically. touch-action only governs gesture handling. */
-.shell-chapter .fadeUp { flex: 1 1 auto; min-height: 0; overflow-y: auto; touch-action: pan-y; display: flex; flex-direction: column; }
+/* round 31: overflow-x:hidden structurally blocks horizontal drag/rubber-
+   band on touch devices - round 30's touch-action:pan-y only hinted at
+   gesture intent and didn't actually prevent it (confirmed insufficient
+   on a real device). .chapter-radar-wrap's -12px bleed makes content here
+   wider than this box, which without overflow-x:hidden registers as
+   horizontally pannable via touch. This reintroduces round 30's earlier
+   "Livelihood" label clip risk, mitigated by pulling CH_LABELR down to
+   131 (public/app.js) - re-verified with 15px+ clearance on every axis
+   label's right edge, not just Livelihood's. */
+.shell-chapter .fadeUp { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 .shell-chapter .chapter-cta { flex: none; margin-top: 14px; }
 
 .chapter-info-btn {

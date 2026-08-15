@@ -1831,7 +1831,7 @@ function renderPolygonSVG() {
 // keeps a 8-unit gap past CH_MAXR (founder ask: cut the old 24-unit gap to
 // 1/3). CH_VBH/CH_CY grew to keep the now-larger heptagon's axis labels
 // (esp. the 2-line "Emotional Stability") from clipping top/bottom.
-const CH_VB = 380, CH_VBH = 304, CH_CX = 190, CH_CY = 152, CH_MAXR = 130.3, CH_LABELR = 135.3;
+const CH_VB = 380, CH_VBH = 304, CH_CX = 190, CH_CY = 152, CH_MAXR = 130.3, CH_LABELR = 131;
 const CH_RING_FRACS = [0.2, 0.4, 0.6, 0.8, 1.0];
 function chapterRadius(value) {
   const v = Math.max(0, Math.min(10, Number(value) || 0));
@@ -1867,7 +1867,7 @@ function renderRadarComparisonSVG(radarRaw, radarCalibrated) {
   // asked about, but rescaled to preserve its original 2.6:3 ratio to
   // afterDots (10.6:12.2) - leaving it at 2.6 next to a 12.2-radius
   // afterDot would look broken, not proportionate.
-  const beforeDots = beforePts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="10.6" class="chapter-radar-before-dot" />`).join("");
+  const beforeDots = beforePts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.1" class="chapter-radar-before-dot" />`).join("");
   const afterDots = afterPts.map(([x, y], i) => {
     const k = POLY_ORDER[i];
     return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12.2" class="chapter-radar-after-dot" />
