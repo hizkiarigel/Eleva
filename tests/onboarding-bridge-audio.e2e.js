@@ -360,11 +360,17 @@ async function reachFirstBridge(page, name) {
       await opts[1].click();
       await page.click("#confirmCard");
     }
-    await page.waitForSelector(".tarot-carousel", { timeout: 15000 });
+    // round 28: the Pathway bridge now hands off to the new Chapter Analysis
+    // summary screen first (audio plays here, on its own screen), then the
+    // carousel is one tap further via the CTA - was previously the very
+    // next screen after the bridge.
+    await page.waitForSelector(".chapter-headline", { timeout: 15000 });
     const plays = (await audioLog(page)).filter((e) => e.type === "play" && e.src.endsWith("07-pathway.mp3"));
     assert.strictEqual(plays.length, 1, `expected exactly 1 play for the Pathway clip, got ${plays.length}`);
-    assert.strictEqual(await page.locator(".qcard-card").count(), 0, "must be on pathway selection, not another question card");
-    assert.ok((await page.locator("text=PILIH PATHWAY").count()) > 0, "expected the pathway-selection screen");
+    assert.strictEqual(await page.locator(".qcard-card").count(), 0, "must be on the chapter-analysis summary, not another question card");
+    await page.click("#toPathway");
+    await page.waitForSelector(".tarot-carousel", { timeout: 15000 });
+    assert.ok((await page.locator("text=PILIH PATHWAY").count()) > 0, "expected the pathway-selection screen after tapping through the summary");
     await context.close();
   });
 

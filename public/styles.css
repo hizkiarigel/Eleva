@@ -418,9 +418,10 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 
 /* Radar chart - instrument/bezel styling (Growth Focus Radar handoff, v5).
    Hierarchy: dashed dim guide rings < solid gold outer heptagon < the
-   user's data polygon. .poly-ring/.poly-axis/.poly-label are also reused
-   by the read-only Chapter Analysis comparison chart below (that screen is
-   out of scope for this handoff, but shares this base chrome by design). */
+   user's data polygon. Scoped to the INTERACTIVE radar only - the read-only
+   Chapter Analysis comparison chart (round 28 redesign) has its own
+   .chapter-radar-* classes below with different colors/ring-count/dot
+   markers per its own design handoff, deliberately NOT sharing these. */
 .poly-wrap { display: flex; justify-content: center; margin: 16px auto 0; padding: 0; }
 .poly-svg { width: 100%; max-width: 325px; height: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
 .poly-ring { fill: none; stroke: rgba(216, 163, 85, .6); stroke-width: 1; stroke-dasharray: 3 4; }
@@ -460,11 +461,88 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .lock-btn.locked .lock-icon-svg rect, .lock-btn.locked .lock-icon-svg path { stroke: #e8b768; }
 .lock-btn-hit { fill: transparent; pointer-events: all; cursor: pointer; }
 
-.poly-compare { touch-action: auto; }
-.poly-shape-raw { fill: none; stroke: rgba(148, 143, 156, .55); stroke-width: 1.5; stroke-dasharray: 3 3; }
-.poly-shape-calibrated { fill: rgba(216, 163, 85, .14); stroke: var(--accent); stroke-width: 2; }
-.poly-compare-legend { display: flex; justify-content: center; gap: 16px; margin-top: 4px; }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--muted); }
+/* Chapter Analysis summary + pulled-out pathway-carousel screens (design
+   handoff, round 28) - same fixed/no-scroll viewport convention as
+   .shell-radar/.shell-qcard (NOT the handoff's own 475px k-scaling
+   formula - founder has consistently rejected that in past rounds).
+   Colors below are the handoff's own exact literal hex values (NOT
+   var(--accent)/var(--muted)/etc, which are used app-wide and shouldn't
+   shift) - same "new scoped literal-hex class prefix" precedent as
+   .auth2-* (Login v2) and the onboarding bridge screens. */
+.shell.shell-chapter {
+  position: fixed; inset: 10px; height: calc(var(--vh, 1dvh) * 100 - 20px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  max-width: 540px; margin: 0 auto; display: flex; flex-direction: column;
+  background: radial-gradient(120% 80% at 50% 0%, #17161d 0%, #0d0d12 55%, #08080c 100%);
+  --ch-pad-top: clamp(14px, calc(var(--vh, 1dvh) * 3), 30px);
+  --ch-pad-bottom: clamp(10px, calc(var(--vh, 1dvh) * 2), 20px);
+  padding: var(--ch-pad-top) 20px var(--ch-pad-bottom);
+}
+.shell-chapter .radar-header-row { flex: none; }
+.shell-chapter .step-dots { margin-top: 6px; margin-bottom: 14px; flex: none; }
+.shell-chapter .fadeUp { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.shell-chapter .chapter-cta { flex: none; margin-top: 14px; }
+
+.chapter-info-btn {
+  width: 26px; height: 26px; flex: none; border-radius: 50%;
+  border: 1px solid rgba(216, 163, 85, .45); background: rgba(216, 163, 85, .08);
+  color: #f1ebdd; font-style: italic; font-size: 13px; line-height: 1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+
+.chapter-headline { font-weight: 500; font-size: 27px; line-height: 1.1; color: #e5aa50; text-align: center; margin: 14px 0 8px; }
+.chapter-subcopy { font-family: "Inter", sans-serif; font-size: 12.5px; line-height: 1.5; color: #95919e; text-align: center; max-width: 300px; margin: 0 auto 16px; }
+.chapter-section-label { font-weight: 500; font-size: 16px; color: #e5aa50; margin: 18px 0 8px; }
+.chapter-disclaimer { font-family: "Inter", sans-serif; font-size: 11.5px; line-height: 1.5; color: #95919e; text-align: center; max-width: 340px; margin: 14px auto 4px; }
+
+.chapter-radar-wrap { width: 82%; margin: 8px auto 4px; }
+.chapter-radar-svg { width: 100%; height: auto; touch-action: auto; }
+.chapter-radar-ring { fill: none; stroke: rgba(216, 163, 85, .16); stroke-width: 1; }
+.chapter-radar-ring.outer { stroke: rgba(216, 163, 85, .55); }
+.chapter-radar-axis { stroke: rgba(216, 163, 85, .22); stroke-width: 1; }
+.chapter-radar-scale-num { fill: rgba(170, 166, 178, .55); font-family: "Inter", sans-serif; font-size: 8.5px; text-anchor: start; }
+.chapter-radar-before { fill: none; stroke: rgba(170, 166, 178, .7); stroke-width: 1.4; stroke-dasharray: 3 4; }
+.chapter-radar-before-dot { fill: #aaa6b2; }
+.chapter-radar-after { fill: rgba(216, 163, 85, .14); stroke: #e5aa50; stroke-width: 2.25; filter: drop-shadow(0 0 6px rgba(229, 170, 80, .5)); }
+.chapter-radar-after-dot { fill: #f0c274; stroke: #e5aa50; stroke-width: 1; }
+.chapter-radar-label { fill: #e7e2d6; font-family: "Inter", sans-serif; font-weight: 500; font-size: 12px; }
+.chapter-legend { display: flex; justify-content: center; gap: 16px; margin-top: 6px; }
+.chapter-legend-item { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #95919e; font-family: "Inter", sans-serif; }
+.chapter-legend-line { display: inline-block; width: 16px; height: 0; border-top: 2px solid #e5aa50; }
+.chapter-legend-line.dashed { border-top: 1.4px dashed #aaa6b2; }
+
+.chapter-shift-line { font-family: "Inter", sans-serif; font-size: 14px; text-align: center; color: #f1ebdd; margin: 10px 0; }
+.chapter-shift-arrow, .chapter-shift-sep { color: #95919e; }
+.chapter-shift-to.positive { font-weight: 700; color: #e5aa50; }
+.chapter-shift-to.negative { font-weight: 700; color: #e0656a; }
+.chapter-lock-tension { font-family: "Inter", sans-serif; font-size: 11.5px; line-height: 1.6; color: #e5aa50; text-align: center; margin: 0 0 12px; }
+
+.chapter-insight-rows { display: flex; flex-direction: column; gap: 8px; }
+.chapter-insight-row {
+  display: flex; align-items: center; gap: 12px; background: rgba(255, 255, 255, .02);
+  border: 1px solid rgba(255, 255, 255, .07); border-radius: 12px; padding: 6px 12px;
+}
+.chapter-insight-icon {
+  width: 34px; height: 34px; flex: none; border-radius: 50%; border: 1px solid rgba(216, 163, 85, .45);
+  display: flex; align-items: center; justify-content: center;
+}
+.chapter-insight-icon svg { width: 18px; height: 18px; }
+.chapter-insight-text { font-family: "Inter", sans-serif; font-size: 13px; line-height: 1.5; color: #f1ebdd; margin: 0; }
+
+.chapter-trait-card {
+  position: relative; background: linear-gradient(135deg, rgba(216, 163, 85, .12), rgba(216, 163, 85, .03));
+  border: 1px solid rgba(216, 163, 85, .5); border-radius: 16px; padding: 9px 15px;
+  box-shadow: 0 0 24px rgba(216, 163, 85, .1) inset;
+}
+.chapter-trait-icon { width: 52px; height: 52px; margin: 0 0 8px; filter: drop-shadow(0 0 8px rgba(229, 170, 80, .4)); }
+.chapter-trait-title { font-weight: 600; font-size: 19px; color: #e5aa50; margin: 0 0 4px; }
+.chapter-trait-desc { font-family: "Inter", sans-serif; font-size: 13px; line-height: 1.5; color: #f1ebdd; margin: 0; }
+
+.chapter-cta {
+  display: block; width: 100%; height: 54px; border: none; border-radius: 16px;
+  background: linear-gradient(180deg, #f0c274, #e5aa50); color: #1a1409;
+  font-family: "Inter", sans-serif; font-weight: 600; font-size: 18px;
+  box-shadow: 0 8px 24px rgba(229, 170, 80, .28); cursor: pointer;
+}
 
 /* --- Growth Focus Radar screen chrome (handoff v5) - everything around
    the chart itself: header, progress, copy, trade-off strip,
@@ -537,10 +615,6 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
   width: 100%; min-height: 48px; border-radius: 24px; border: none; background: #d8a355; color: #1a1409;
   font-family: "Fraunces", serif; font-weight: 600; font-size: 14.5px; letter-spacing: .06em; cursor: pointer;
 }
-.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.legend-dot.raw { background: transparent; border: 1px solid var(--muted); }
-.legend-dot.calibrated { background: var(--accent); }
-
 /* Pathway carousel (shared visual pattern, still used by the Target
    Berikutnya picker after a physical quest) - unchanged by the tarot
    redesign below, which is scoped to onboarding only. */

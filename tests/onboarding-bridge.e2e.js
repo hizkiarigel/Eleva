@@ -147,9 +147,14 @@ async function waitForServer(base, log) {
     );
     assert.strictEqual(await page.locator(".qcard-card").count(), 0, "must not show a 3rd scenario card - confident:true should hand off to the pathway bridge instead");
 
-    // pathway selection (chapter analysis result)
+    // chapter analysis summary (round 28: pulled out into its own screen,
+    // ahead of the pathway carousel) - reach it, then tap through to the
+    // carousel.
+    await page.waitForSelector(".chapter-headline", { timeout: 10000 });
+    assert.ok((await page.locator("text=Ada pola yang mulai kelihatan.").count()) > 0, "expected the Chapter Analysis summary screen after the Pathway bridge");
+    await page.click("#toPathway");
     await page.waitForSelector(".tarot-carousel", { timeout: 10000 });
-    assert.ok((await page.locator("text=PILIH PATHWAY").count()) > 0, "expected the pathway-selection screen after the Pathway bridge");
+    assert.ok((await page.locator("text=PILIH PATHWAY").count()) > 0, "expected the pathway-selection screen after tapping through the summary");
   });
 
   console.log("E2E: hitting the 6-card cap goes straight to the Pathway bridge - no 'meta' flash first (round 24 bug fix)");
@@ -181,6 +186,8 @@ async function waitForServer(base, log) {
         body: JSON.stringify({
           insight: "Insight uji.", pathway: "Architect", subPathway: "Architect", pathwayBlurb: "Blurb uji.",
           secondaryTrait: null, significantShifts: [], lockTension: [], rawPathwayTop2: [],
+          insightRows: ["Baris insight uji 1.", "Baris insight uji 2."],
+          pattern: { title: "Pola uji", description: "Deskripsi pola uji." },
         }),
       });
     });
@@ -218,6 +225,8 @@ async function waitForServer(base, log) {
     await capPage.waitForSelector(".bridge-root", { timeout: 10000 });
     const src = await capPage.locator(".bridge-img").getAttribute("src");
     assert.strictEqual(src, "/onboarding/bridges/07-pathway.webp", `expected straight to the Pathway stage after card 6, got ${src}`);
+    await capPage.waitForSelector(".chapter-headline", { timeout: 10000 });
+    await capPage.click("#toPathway");
     await capPage.waitForSelector(".tarot-carousel", { timeout: 10000 });
     assert.strictEqual(scenarioCardCalls, 6, "must not fetch a 7th scenario card - the client already knows it would be confident");
     await capContext.close();

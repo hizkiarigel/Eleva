@@ -127,7 +127,8 @@ function goalPlaceholder(pendingPathway) {
 const HELP_TEXT = {
   radar: "Ini cara Eleva kenalan sama fokus hidupmu sekarang. Tarik titik-titiknya sesuai porsi yang kamu rasa — nggak ada jawaban benar/salah. Kalau ada sisi yang kamu yakin banget dan nggak mau ikut bergeser, tap titiknya untuk mengunci (maksimal 3).",
   card: "Beberapa skenario singkat. Pilih yang paling & paling nggak kamu banget — dari situ Eleva mulai ngerti pola kamu. Jawab jujur aja, nggak ada jawaban salah.",
-  analysis: "3 gaya yang mungkin cocok buat kamu, berdasarkan yang barusan kamu isi. Pilih salah satu, atau tulis sendiri kalau ngerasa nggak ada yang pas — bisa diganti nanti.",
+  analysis: "Ini pola yang Eleva lihat dari radar dan pilihan-pilihanmu selama onboarding — sebelum kamu pilih pathway di langkah berikutnya.",
+  pathway: "3 gaya yang mungkin cocok buat kamu, berdasarkan yang barusan kamu isi. Pilih salah satu, atau tulis sendiri kalau ngerasa nggak ada yang pas — bisa diganti nanti.",
   goals: "Tulis 1-3 hal yang mau kamu capai selama 14 hari ke depan — boleh dari area mana pun (badan, belajar, kerjaan, relasi). Tugas harianmu nanti diarahkan ke sini, gantian tiap harinya.",
   dashboard: "Quest hari ini dari Eleva, disesuaikan sama fokusmu. Kerjakan, lalu tap Mulai — aktivitas fisik dicatat sebagai record singkat (pilih jenisnya: cardio atau gym), sisanya lewat refleksi teks.",
   meta: "Latihan mandiri, kapan aja — nggak perlu nunggu Eleva kasih quest-nya. Sesi di sini tetap dihitung sebagai bukti pertumbuhan, tapi nggak menggerakkan Milestone goal manapun.",
@@ -154,6 +155,14 @@ function axisDefinitionsHTML() {
 let helpOpen = null; // screen key whose help sheet is showing, or null
 function helpBtnHTML(key) {
   return `<button class="help-btn" data-help="${key}" aria-label="Bantuan layar ini">?</button>`;
+}
+// Design handoff's header info button: 26x26 circle, italic serif "i" (NOT
+// the app's usual "?"), gold-tinted ring - opens the SAME helpSheetHTML(key)
+// bottom sheet as every other screen's "?" (shared helpOpen state + the one
+// delegated [data-help] listener below), just a different trigger visual
+// for these two design-fidelity screens.
+function chapterInfoBtnHTML(key) {
+  return `<button class="chapter-info-btn fr" data-help="${key}" aria-label="Bantuan layar ini">i</button>`;
 }
 function helpSheetHTML(key) {
   if (helpOpen !== key) return "";
@@ -595,7 +604,7 @@ function authReducedMotion() {
 // Chapter Analysis). v6: cards are one scenario + 4 options (one per
 // unlocked axis); each choice also calibrates the radar via the SAME
 // redistribution engine as manual dragging - see applyCalibrationCard. ---
-let adaptivePhase = "card"; // "bridge" | "card" | "analysis" | "goals"
+let adaptivePhase = "card"; // "bridge" | "card" | "analysis" | "pathway" | "goals"
 let adaptiveCards = []; // [{scenario, options:[{axis,text}], mostPreferred, leastPreferred}, ...] - length also serves as the card counter
 let adaptiveScenario = null; // {scenario, options} for the card currently on screen
 let adaptiveSelection = { mostPreferred: null, leastPreferred: null }; // in-progress picks for the current card
@@ -731,7 +740,7 @@ function restoreOnboardingDraft(draft) {
     return;
   }
   ui = { view: "adaptive" };
-  if (draft.adaptivePhase === "analysis" || draft.adaptivePhase === "goals") {
+  if (["analysis", "pathway", "goals"].includes(draft.adaptivePhase)) {
     adaptivePhase = draft.adaptivePhase;
   } else if (draft.adaptivePhase === "card" && draft.adaptiveScenario) {
     adaptivePhase = "card";
@@ -1791,42 +1800,74 @@ function renderPolygonSVG() {
   return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg" id="polySvg">${rings}${outerHeptagon}${axisLines}${scaleNums}<path d="${pathD}" class="poly-shape" id="polyShape" />${centerDot}${labels}${lockBtns}${handles}</svg>`;
 }
 
-// Read-only before/after comparison for Chapter Analysis (v7, WAJIB tampil):
-// two outlines overlaid on one chart (raw = dashed/muted, calibrated =
-// solid/accent) sharing the same rings/axis-label chrome as the interactive
-// radar, so the user sees the SHAPE change directly rather than reading text
-// that just says "it changed." No handles, no drag - purely a picture.
+// Read-only before/after comparison for the Chapter Analysis summary screen
+// (v7 PRD requirement, re-skinned round 28 to the design handoff's exact
+// geometry/colors). Two outlines overlaid on one chart (raw = dashed/muted,
+// calibrated = solid/gold-glow) - no handles, no drag, purely a picture.
+// Deliberately its OWN local geometry constants below, NOT
+// POLY_CENTER/POLY_MAXR/etc - those are the INTERACTIVE radar's tuned pixel
+// budget for lock-button/handle hit targets and must not move; this chart
+// has no touch targets at all. Emits its own .chapter-radar-* classes, NOT
+// .poly-ring/.poly-axis/.poly-label (styles.css's own comment on those three
+// says they're shared chrome with the interactive radar - reusing them here
+// with different colors/ring-count would silently reskin that screen too).
+const CH_VB = 380, CH_VBH = 292, CH_CX = 190, CH_CY = 150, CH_MAXR = 100, CH_LABELR = 124;
+const CH_RING_FRACS = [0.2, 0.4, 0.6, 0.8, 1.0];
+function chapterRadius(value) {
+  const v = Math.max(0, Math.min(10, Number(value) || 0));
+  return (v / 10) * CH_MAXR;
+}
+function chapterPoint(index, value) {
+  const angle = ((-90 + index * POLY_STEP_DEG) * Math.PI) / 180; // POLY_STEP_DEG is a pure 360/7 constant, safe to share
+  const r = chapterRadius(value);
+  return [CH_CX + r * Math.cos(angle), CH_CY + r * Math.sin(angle)];
+}
 function renderRadarComparisonSVG(radarRaw, radarCalibrated) {
-  const pathFor = (radar) => {
-    const points = POLY_ORDER.map((k, i) => polyPoint(i, radar[k]));
-    return points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
-  };
-  const rings = [0.33, 0.66, 1].map((f) => {
-    const pts = POLY_ORDER.map((k, i) => polyPoint(i, POLY_MIN + f * (POLY_MAX - POLY_MIN)));
-    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
-    return `<path d="${d}" class="poly-ring" />`;
+  const pathFrom = (pts) => pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + "Z";
+
+  const rings = CH_RING_FRACS.map((f) => {
+    const pts = POLY_ORDER.map((_, i) => chapterPoint(i, f * 10));
+    return `<path d="${pathFrom(pts)}" class="chapter-radar-ring${f === 1 ? " outer" : ""}" />`;
   }).join("");
-  const axisLines = POLY_ORDER.map((k, i) => {
-    const [x, y] = polyPoint(i, POLY_MAX);
-    return `<line x1="${POLY_CENTER}" y1="${POLY_CENTER}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="poly-axis" />`;
+  const spokes = POLY_ORDER.map((_, i) => {
+    const [x, y] = chapterPoint(i, 10);
+    return `<line x1="${CH_CX}" y1="${CH_CY}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="chapter-radar-axis" />`;
   }).join("");
+  // Scale marks 0/2/4/6/8/10 along the top (Body, index 0) spoke only.
+  const scaleNums = [0, 2, 4, 6, 8, 10].map((v) => {
+    const y = CH_CY - chapterRadius(v);
+    return `<text x="${CH_CX + 4}" y="${(y + 2.5).toFixed(1)}" class="chapter-radar-scale-num">${v}</text>`;
+  }).join("");
+
+  const beforePts = POLY_ORDER.map((k, i) => chapterPoint(i, radarRaw[k]));
+  const afterPts = POLY_ORDER.map((k, i) => chapterPoint(i, radarCalibrated[k]));
+  const beforeDots = beforePts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" class="chapter-radar-before-dot" />`).join("");
+  const afterDots = afterPts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="chapter-radar-after-dot" />`).join("");
+
+  // Axis labels at CH_LABELR - same "is this axis on the left/right/center"
+  // anchor-flip idea axisLabelLayout() (line ~1697) already uses for the
+  // interactive radar, here directly from the point's own x-offset sign.
+  // Emotional Stability gets the same 2-line wrap axisLabelLayout() does.
   const labels = POLY_ORDER.map((k, i) => {
     const angle = ((-90 + i * POLY_STEP_DEG) * Math.PI) / 180;
     const dx = Math.cos(angle), dy = Math.sin(angle);
-    const x = POLY_CENTER + (POLY_MAXR + 12) * dx;
-    const y = POLY_CENTER + (POLY_MAXR + 12) * dy + (dy > 0.35 ? 9 : dy < -0.35 ? -2 : 3.5);
-    const anchor = dx > 0.35 ? "start" : dx < -0.35 ? "end" : "middle";
-    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="poly-label" text-anchor="${anchor}">${esc(statLabel(k))}</text>`;
+    const x = CH_CX + CH_LABELR * dx, y = CH_CY + CH_LABELR * dy;
+    const anchor = dx > 0.2 ? "start" : dx < -0.2 ? "end" : "middle";
+    const label = statLabel(k);
+    const lines = label.includes(" ") ? label.split(" ") : [label];
+    const tspans = lines.map((line, li) => `<tspan x="${x.toFixed(1)}" dy="${li === 0 ? 0 : 11}">${esc(line)}</tspan>`).join("");
+    return `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" class="chapter-radar-label" text-anchor="${anchor}">${tspans}</text>`;
   }).join("");
-  return `<svg viewBox="${POLY_VIEW_MIN} ${POLY_VIEW_MIN} ${POLY_VIEW_SIZE} ${POLY_VIEW_SIZE}" class="poly-svg poly-compare" id="polyCompareSvg">
-    ${rings}${axisLines}
-    <path d="${pathFor(radarRaw)}" class="poly-shape-raw" id="polyShapeRaw" />
-    <path d="${pathFor(radarCalibrated)}" class="poly-shape-calibrated" id="polyShapeCalibrated" />
+
+  return `<svg viewBox="0 0 ${CH_VB} ${CH_VBH}" class="chapter-radar-svg" id="polyCompareSvg">
+    ${rings}${spokes}${scaleNums}
+    <path d="${pathFrom(beforePts)}" class="chapter-radar-before" id="polyShapeRaw" />${beforeDots}
+    <path d="${pathFrom(afterPts)}" class="chapter-radar-after" id="polyShapeCalibrated" />${afterDots}
     ${labels}
   </svg>
-  <div class="poly-compare-legend">
-    <span class="legend-item"><span class="legend-dot raw"></span>Radar awal</span>
-    <span class="legend-item"><span class="legend-dot calibrated"></span>Terkalibrasi</span>
+  <div class="chapter-legend">
+    <span class="chapter-legend-item"><span class="chapter-legend-line solid"></span>Setelah Kalibrasi</span>
+    <span class="chapter-legend-item"><span class="chapter-legend-line dashed"></span>Sebelum Kalibrasi</span>
   </div>`;
 }
 
@@ -2280,6 +2321,19 @@ function buildPathwayOptions(analysis) {
   return [option1, option2, option3];
 }
 
+// 3-segment progress bar for the post-adaptive-cards trio of screens
+// (chapter-analysis summary -> pathway carousel -> goal capture) -
+// deliberately its OWN array, not ONBOARD_STEPS (that's the earlier
+// name/radar pair, a different, earlier part of the flow with its own
+// 2-segment step-dots). Reuses the same bare .step-dots/.dot-seg classes,
+// which are already just "N boxes, i<=index active" with no assumption
+// baked in about which screens they belong to.
+const CHAPTER_FLOW_PHASES = ["analysis", "pathway", "goals"];
+function chapterProgressHTML(phase) {
+  const idx = CHAPTER_FLOW_PHASES.indexOf(phase);
+  return `<div class="step-dots">${CHAPTER_FLOW_PHASES.map((_, i) => `<div class="dot-seg ${i <= idx ? "active" : ""}"></div>`).join("")}</div>`;
+}
+
 // Pure fetch, no state/render side effects - orchestrated by
 // beginPathwayBridge() (see the bridge state machine near
 // ONBOARDING_BRIDGES), which shows the "pathway" bridge stage while this
@@ -2448,8 +2502,74 @@ function renderAdaptive() {
     return;
   }
 
+  // Chapter Analysis summary (round 28 design handoff redesign): before/
+  // after radar + change-summary line + lock-tension note + 2 insightRows +
+  // highlighted pattern card + CTA. Pulled apart from the old combined
+  // analysis+carousel screen (see the "pathway" phase right below) - this
+  // screen's own CTA just flips adaptivePhase, no new fetch. insight/
+  // secondaryTrait are still sent at submit time (submitOnboarding) but no
+  // longer displayed here, replaced visually by insightRows/pattern.
   if (adaptivePhase === "analysis") {
     const flaggedLock = chapterAnalysis?.lockTension || [];
+    const shifts = chapterAnalysis?.significantShifts || [];
+    const shiftLine = shifts.map((s) => {
+      const positive = s.to > s.from;
+      return `${esc(statLabel(s.axis))} ${s.from} <span class="chapter-shift-arrow">→</span> <span class="chapter-shift-to ${positive ? "positive" : "negative"}">${s.to}</span>`;
+    }).join(' <span class="chapter-shift-sep">|</span> ');
+    const icons = {
+      spark: `<svg viewBox="0 0 24 24" fill="none"><path d="M13 2L5 13h5l-1 9 8-11h-5l1-9z" stroke="#e5aa50" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+      target: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="#e5aa50" stroke-width="1.5"/><circle cx="12" cy="12" r="3.4" stroke="#e5aa50" stroke-width="1.5"/><circle cx="12" cy="12" r="0.6" fill="#e5aa50"/></svg>`,
+      compass: `<svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="20" stroke="#e5aa50" stroke-width="1.5"/><circle cx="24" cy="24" r="14.5" stroke="rgba(229,170,80,.4)" stroke-width="1"/><path d="M24 6l3 5-3 2-3-2 3-5zM24 42l3-5-3-2-3 2 3 5zM6 24l5-3 2 3-2 3-5-3zM42 24l-5-3-2 3 2 3 5-3z" fill="#e5aa50" opacity=".35"/><path d="M24 12l3.5 8.5L36 24l-8.5 3.5L24 36l-3.5-8.5L12 24l8.5-3.5L24 12z" fill="#f0c274"/><circle cx="24" cy="24" r="2.2" fill="#1a1409"/></svg>`,
+    };
+    const rows = chapterAnalysis?.insightRows || [];
+    root.innerHTML = `
+      <div class="shell shell-chapter">
+        <div class="radar-header-row">
+          <div class="eyebrow mono radar-header-eyebrow">ELEVA · CHAPTER ANALYSIS</div>
+          ${chapterInfoBtnHTML("analysis")}
+        </div>
+        ${chapterProgressHTML("analysis")}
+        ${helpSheetHTML("analysis")}
+        <div class="fadeUp">
+          <h1 class="fr chapter-headline">Ada pola yang mulai kelihatan.</h1>
+          <p class="chapter-subcopy">Dari jawabanmu, Eleva melihat beberapa hal yang menonjol.</p>
+          <div class="chapter-radar-wrap">${renderRadarComparisonSVG(onboardForm.radarRaw || onboardForm.radar, onboardForm.radar)}</div>
+          ${shifts.length ? `<p class="chapter-shift-line">${shiftLine}</p>` : ""}
+          ${flaggedLock.length ? `
+          <p class="chapter-lock-tension">Ketegangan kunci: pilihan-pilihanmu di kartu beberapa kali condong berlawanan dari sumbu yang kamu kunci (${flaggedLock.map((a) => esc(statLabel(a))).join(", ")}) — angkanya tetap seperti kamu kunci, tapi layak dipikir ulang kalau mau.</p>` : ""}
+          <div class="chapter-section-label fr">Yang Eleva lihat</div>
+          <div class="chapter-insight-rows">
+            ${rows.map((r, i) => `
+            <div class="chapter-insight-row">
+              <div class="chapter-insight-icon">${i === 0 ? icons.spark : icons.target}</div>
+              <p class="chapter-insight-text">${esc(r)}</p>
+            </div>`).join("")}
+          </div>
+          <div class="chapter-section-label fr">Pola yang terlihat</div>
+          <div class="chapter-trait-card">
+            <div class="chapter-trait-icon">${icons.compass}</div>
+            <div class="chapter-trait-title fr">${esc(chapterAnalysis?.pattern?.title || "")}</div>
+            <p class="chapter-trait-desc">${esc(chapterAnalysis?.pattern?.description || "")}</p>
+          </div>
+          <p class="chapter-disclaimer">Ini label sementara - ini pola yang Eleva lihat dari pilihanmu.</p>
+        </div>
+        <button class="chapter-cta" id="toPathway">Lihat Pathway-ku →</button>
+      </div>`;
+    document.getElementById("toPathway")?.addEventListener("click", () => { adaptivePhase = "pathway"; renderAdaptive(); });
+    return;
+  }
+
+  // Pathway carousel, pulled out into its own screen (round 28) - was
+  // previously appended directly below the analysis content above. Tap =
+  // confirm (design handoff): no separate CTA under the carousel - tapping
+  // a card IS the confirmation, straight into Goal Capture. This also
+  // sidesteps the old bug where confirming re-rendered this same carousel
+  // in place and reset its scroll position (most visible when picking the
+  // rightmost/wildcard card) - the screen changes entirely now instead. The
+  // free-text override entry moved to the Goal Capture screen (founder
+  // decision, 10 Agustus - the handoff flagged "confirm with product" and
+  // the answer was relocate, not cut).
+  if (adaptivePhase === "pathway") {
     // Design handoff Screen 2: tarot-card footers carry a short templated
     // "why this fits" line instead of the pathway's display name - built
     // purely from data already on the client (radar top-axes / a static
@@ -2463,50 +2583,34 @@ function renderAdaptive() {
     };
     const numerals = ["I", "II", "III"];
     root.innerHTML = `
-      <div class="shell">
-        ${helpBtnHTML("analysis")}${helpSheetHTML("analysis")}
-        <div class="eyebrow mono">ELEVA · CHAPTER ANALYSIS</div>
-        <div style="height:20px"></div>
-        <p class="fr" style="font-size:17px;line-height:1.7;margin:0 0 20px">${esc(chapterAnalysis?.insight || "")}</p>
-        <div class="poly-wrap" style="flex-direction:column;align-items:center;margin-bottom:14px">
-          ${renderRadarComparisonSVG(onboardForm.radarRaw || onboardForm.radar, onboardForm.radar)}
+      <div class="shell shell-chapter">
+        <div class="radar-header-row">
+          <div class="eyebrow mono radar-header-eyebrow">ELEVA · CHAPTER ANALYSIS</div>
+          ${chapterInfoBtnHTML("pathway")}
         </div>
-        ${chapterAnalysis?.significantShifts?.length ? `
-        <p class="mono" style="font-size:11.5px;color:var(--muted);margin:0 0 12px;line-height:1.6">
-          Kalibrasi radar: ${chapterAnalysis.significantShifts.map((s) => `${esc(statLabel(s.axis))} ${s.from}→${s.to}`).join(", ")} — bergeser dari radar awalmu berdasarkan pilihan-pilihanmu barusan.
-        </p>` : ""}
-        ${flaggedLock.length ? `
-        <p class="mono" style="font-size:11.5px;color:var(--accent);margin:0 0 20px;line-height:1.6">
-          Ketegangan kunci: pilihan-pilihanmu di kartu beberapa kali condong berlawanan dari sumbu yang kamu kunci (${flaggedLock.map((a) => esc(statLabel(a))).join(", ")}) — angkanya tetap seperti kamu kunci, tapi layak dipikir ulang kalau mau, lihat insight di atas.
-        </p>` : ""}
-        ${chapterAnalysis?.secondaryTrait ? `<p class="why" style="margin:0 0 16px">Trait tambahan yang kelihatan: ${esc(chapterAnalysis.secondaryTrait)}</p>` : ""}
-        <div class="eyebrow mono" style="margin-top:4px;color:var(--accent)">PILIH PATHWAY</div>
-        <p style="font-size:11.5px;line-height:1.65;color:var(--muted);margin:0 0 16px">Pathway adalah <span style="color:var(--accent);font-weight:600">cara</span> kamu ngerjain quest sehari-hari — bukan tujuannya. Tujuannya (<span style="color:var(--text);font-weight:600">goal kamu sendiri</span>) dipilih di step berikutnya. Tap salah satu kartu buat lanjut.</p>
-        <div class="tarot-carousel">
-          ${pathwayOptions.map((opt, i) => {
-            const primary = opt.source === "calibrated";
-            return `
-            <div class="tarot-card ${primary ? "primary" : ""}" data-idx="${i}">
-              <div class="tarot-art">
-                <div class="tarot-numeral mono">${numerals[i] || ""}</div>
-                ${primary ? `<div class="tarot-stars"></div>` : ""}
-              </div>
-              <div class="tarot-footer">
-                <div class="tarot-label mono">${opt.source === "calibrated" ? "REKOMENDASI UTAMA" : opt.source === "raw" ? "DARI RADAR AWAL" : "COBA ARAH LAIN"}</div>
-                <div class="tarot-why">${esc(whyLine(opt))}</div>
-              </div>
-            </div>`;
-          }).join("")}
+        ${chapterProgressHTML("pathway")}
+        ${helpSheetHTML("pathway")}
+        <div class="fadeUp">
+          <div class="eyebrow mono" style="margin-top:4px;color:var(--accent)">PILIH PATHWAY</div>
+          <p style="font-size:11.5px;line-height:1.65;color:var(--muted);margin:0 0 16px">Pathway adalah <span style="color:var(--accent);font-weight:600">cara</span> kamu ngerjain quest sehari-hari — bukan tujuannya. Tujuannya (<span style="color:var(--text);font-weight:600">goal kamu sendiri</span>) dipilih di step berikutnya. Tap salah satu kartu buat lanjut.</p>
+          <div class="tarot-carousel">
+            ${pathwayOptions.map((opt, i) => {
+              const primary = opt.source === "calibrated";
+              return `
+              <div class="tarot-card ${primary ? "primary" : ""}" data-idx="${i}">
+                <div class="tarot-art">
+                  <div class="tarot-numeral mono">${numerals[i] || ""}</div>
+                  ${primary ? `<div class="tarot-stars"></div>` : ""}
+                </div>
+                <div class="tarot-footer">
+                  <div class="tarot-label mono">${opt.source === "calibrated" ? "REKOMENDASI UTAMA" : opt.source === "raw" ? "DARI RADAR AWAL" : "COBA ARAH LAIN"}</div>
+                  <div class="tarot-why">${esc(whyLine(opt))}</div>
+                </div>
+              </div>`;
+            }).join("")}
+          </div>
         </div>
       </div>`;
-    // Tap = confirm (design handoff): no separate CTA under the carousel
-    // anymore - tapping a card IS the confirmation, straight into Goal
-    // Capture. This also sidesteps the old bug where confirming re-rendered
-    // this same carousel in place and reset its scroll position (most
-    // visible when picking the rightmost/wildcard card) - the screen changes
-    // entirely now instead. The free-text override entry moved to the Goal
-    // Capture screen (founder decision, 10 Agustus - the handoff flagged
-    // "confirm with product" and the answer was relocate, not cut).
     document.querySelectorAll(".tarot-card").forEach((card) => {
       card.addEventListener("click", () => {
         const idx = Number(card.dataset.idx);
@@ -2530,6 +2634,7 @@ function renderAdaptive() {
     root.innerHTML = `
       <div class="shell">
         ${helpBtnHTML("goals")}${helpSheetHTML("goals")}
+        ${chapterProgressHTML("goals")}
         <div class="eyebrow mono">PATHWAY TERPILIH</div>
         <h1 class="fr" style="font-size:26px;font-weight:600;color:var(--accent);margin:10px 0 4px">${esc(heading)}</h1>
         <div class="ornament-divider"><div class="line l"></div><div class="diamond"></div><div class="line r"></div></div>
@@ -2569,7 +2674,7 @@ function renderAdaptive() {
     document.getElementById("backToPathway")?.addEventListener("click", () => {
       pendingPathway = null;
       overrideMode = false;
-      adaptivePhase = "analysis";
+      adaptivePhase = "pathway"; // round 28: returns to the pulled-out carousel screen, not two steps back to the summary
       renderAdaptive();
     });
     // Free-text pathway override, relocated here from the carousel screen
