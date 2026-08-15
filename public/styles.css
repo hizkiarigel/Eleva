@@ -850,6 +850,60 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .tab-item .tab-icon { font-size: 16px; }
 .tab-item.active { color: var(--accent); }
 
+/* Eleva Home redesign (design handoff, 15 Agustus): compact quest hub -
+   fixed-viewport frame adapting .shell-chapter's proven position:fixed +
+   --vh pattern (onboarding) to the persistent header/tab-bar shell.
+   Screen-scoped literal hex tokens matching the handoff's exact values
+   (same convention as .ppick- and .gset- for other exact-fidelity handoffs),
+   not the app's global --accent/--surface2 tokens. The spec's "9:16 frame"
+   is treated as a width+padding convention (max-width only), not a literal
+   CSS aspect-ratio:9/16 lock - a hard lock would letterbox/distort on real
+   device aspect-ratio variance none of this app's other screens force. */
+:root {
+  --qh-bg: #0d0d12; --qh-card: #15151d; --qh-border: rgba(255, 255, 255, .08);
+  --qh-gold: #e8a33d; --qh-gold-dim: #6b5326; --qh-orange: #e8a33d;
+  --qh-ivory: #edeae3; --qh-secondary: #c9c6ce; --qh-muted: #8b8a99; --qh-red: #c9564f;
+}
+.app-shell.qhub-shell {
+  position: fixed; inset: 10px; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: min(390px, 88vw);
+  height: calc(var(--vh, 1dvh) * 100 - 20px);
+  display: flex; flex-direction: column; box-sizing: border-box;
+  background: var(--qh-bg); border-radius: 0; padding: 16px 16px 0; margin: 0;
+}
+.qhub-shell .qhub-header { flex: none; }
+.qhub-shell .screen-body.qhub-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 16px; }
+.qhub-shell .tab-bar { position: static; flex: none; max-width: none; margin: 12px -16px 0; }
+
+.qhub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.qhub-wordmark { color: var(--qh-ivory); font-size: 15px; letter-spacing: .1em; }
+.qhub-icon-btn, .qhub-header .help-btn {
+  border-color: var(--qh-gold-dim); color: var(--qh-gold); background: transparent;
+}
+
+.qhub-heading { color: var(--qh-gold); font-size: 13px; margin: 0 0 14px; }
+
+.qhub-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.qhub-card { flex: 1 1 0; min-width: 0; background: var(--qh-card); border: 1px solid var(--qh-border); border-radius: 10px; padding: 12px 10px; text-align: left; }
+.qhub-card.selected { border-color: var(--qh-gold); box-shadow: 0 0 0 1px var(--qh-gold), 0 0 14px rgba(232, 163, 61, .35); }
+.qhub-icon { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--qh-gold-dim); display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+.qhub-title { color: var(--qh-ivory); font-size: 13px; line-height: 1.25; margin-bottom: 4px; }
+.qhub-summary { color: var(--qh-secondary); font-size: 11px; line-height: 1.35; margin-bottom: 6px; }
+.qhub-time { font-size: 11px; }
+
+.qhub-detail { background: var(--qh-card); border: 1px solid var(--qh-border); border-radius: 12px; padding: 18px; }
+.qhub-eyebrow { color: var(--qh-muted); font-size: 10.5px; letter-spacing: 1px; margin-bottom: 8px; }
+.qhub-target { color: var(--qh-secondary); font-size: 13px; margin-bottom: 10px; }
+.qhub-target-value { color: var(--qh-gold); font-weight: 600; }
+.qhub-detail-title { color: var(--qh-ivory); margin: 0 0 8px; }
+.qhub-detail-desc { color: var(--qh-secondary); font-size: 14px; line-height: 1.55; margin: 0 0 14px; }
+.qhub-dod-label { color: var(--qh-muted); font-size: 10.5px; letter-spacing: 1px; margin-bottom: 6px; }
+.qhub-dod-list { margin: 0 0 16px; padding-left: 18px; color: var(--qh-secondary); font-size: 13px; line-height: 1.6; }
+.qhub-detail-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.qhub-duration { color: var(--qh-muted); font-size: 12px; }
+.qhub-why-toggle { background: none; border: none; color: var(--qh-gold); font-size: 12.5px; padding: 0; }
+.qhub-why { color: var(--qh-secondary); font-size: 13px; font-style: italic; margin: 10px 0 0; }
+
 .chapter-header.compact { margin-bottom: 20px; }
 .chapter-header.compact .bab { color: var(--muted); font-size: 10.5px; letter-spacing: 1.5px; margin-bottom: 8px; }
 .chapter-header.compact .rule { width: 36px; height: 2px; background: var(--accent); margin-bottom: 10px; }

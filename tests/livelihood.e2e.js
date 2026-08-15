@@ -136,9 +136,9 @@ async function test(name, fn) {
     await page.click("#dismissCompleted");
   });
 
-  await test("quest-context Milestone line renders on the Livelihood quest card (same format as Body)", async () => {
+  await test("Livelihood quest still renders in the quest hub after the Home redesign (Milestone line is no longer shown on Home - dropped per the quest-hub design handoff, round 39)", async () => {
     await openDashboard();
-    assert.ok(await page.locator("text=→ Milestone: 10 Qualified Applications").count(), "Milestone line missing from questSummaryCard");
+    assert.ok(await page.locator("[data-qhub-idx]").count() >= 1, "expected at least one quest hub card to render");
   });
 
   console.log("E2E: Submit Application - structured form, Milestone increments");
@@ -146,6 +146,13 @@ async function test(name, fn) {
     await seedQualifiedAnalysis();
     const submitQuest = await insertQuest("job-application-submit", "Siapkan & Submit Application");
     await openDashboard();
+    // Select the quest hub card by its title text rather than position - the
+    // GET /api/state needy-slot auto-refill (server/index.js) may have
+    // already generated a filler quest for this same goalIndex between the
+    // previous test's dashboard load and this one, so submitQuest is not
+    // guaranteed to land at card index 0 anymore now that only the selected
+    // card's detail panel exposes [data-reflect-id].
+    await page.click('.qhub-card:has-text("Siapkan & Submit Application")');
     await page.click(`[data-reflect-id="${submitQuest}"]`);
     await page.waitForSelector("#jaSubmit", { timeout: 20000 });
     await page.fill('[data-jaf="companyName"]', "Acme Corp");

@@ -728,6 +728,20 @@ let activeScreen = "home"; // "home" | "kisahmu" | "character" | "settings"
 // Per-Primary-Quest-card progressive disclosure ("Kenapa Eleva kasih quest
 // ini →") - keyed by quest id, independent per card per spec.
 let reasonOpenIds = new Set();
+// Eleva Home redesign (design handoff, 15 Agustus): which of the up-to-3
+// compact quest cards is selected - null defaults to index 0 at render
+// time (same "?? 0" idiom as selectedPathwayIndex in Pilih Pathway) rather
+// than writing a default into the var itself, so an unopened session isn't
+// treated as if the user actually tapped card 1.
+let selectedQuestIndex = null;
+// Ephemeral, client-side-only CTA label state per quest id - resets on
+// reload/refetch, since no started/completed status is persisted server-
+// side (a quest is only ever "open" or "gone" once it has a reflection).
+// This matches that even the design handoff's own interactive prototype
+// only mocks this state client-side. "started" is a label only - the
+// actual in-progress UI is still driven by the existing reflectOpen/
+// reflectTarget vars (or one of the 4 special-flow vars) unchanged.
+let questCtaState = new Map(); // id -> "started" | "completed"
 let sideQuestsOpen = false;
 let kondisiOpen = false;
 let kondisiError = "";
@@ -3534,53 +3548,6 @@ function formatCountdown(ms) {
   const s = totalSec % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
-// Task 7d.1: formal hierarchy - Primary Quest (the goal itself, stated once
-// at goal capture, never changes day to day) and Milestone (the persistent
-// current_target from Task 7b, changes only when reached) are shown as a
-// small persistent context header ABOVE the card. What used to be labeled
-// "PRIMARY QUEST" on the card itself is renamed "TODAY'S TRIAL" - this is
-// the thing that's allowed to change topic completely day to day (mis. from
-// running to recovery) WITHOUT that reading as Eleva "forgetting" the
-// user's actual goal, because the goal/milestone context line above it
-// hasn't moved. Side Quest is explicitly NOT part of this hierarchy (not
-// goal-tied), so it never gets the context header.
-function questSummaryCard(q, goalLabel, milestone) {
-  if (!q) return `<div class="quest-card"><div class="dot pending"></div>${spinnerHTML("AI sedang menyusun quest...")}</div>`;
-  const label = q.isSideQuest ? "SIDE QUEST" : q.quest.mode === "acting" ? "TODAY'S ACTING METHOD" : "TODAY'S TRIAL";
-  const remaining = q.createdAt ? new Date(q.createdAt).getTime() + 24 * 60 * 60 * 1000 - Date.now() : null;
-  const expired = remaining != null && remaining <= 0;
-  // "Kenapa Eleva kasih quest ini →" progressive disclosure - independent
-  // per card (reasonOpenIds keyed by quest id), replaces the old always-
-  // visible `why` paragraph so the card leads with the instruction, not the
-  // reasoning behind it.
-  const reasonOpen = reasonOpenIds.has(q.id);
-  const contextHeader = (goalLabel && !q.isSideQuest) ? `
-    <div class="quest-context mono">
-      <span class="quest-context-primary">◆ Primary Quest: ${esc(goalLabel)}</span>
-      ${milestone ? `<span class="quest-context-milestone">→ Milestone: ${esc(milestone)}</span>` : ""}
-    </div>` : "";
-  // SOMA Nutrition Part B item 7: a nutrition-log quest never has a single
-  // "Selesai" moment the button triggers (it resolves on its own once both
-  // booleans go true, or lazily at day-end) - the button always reads
-  // "Lanjut Catat", tapping it always means "go add another meal", never
-  // "mark done" (brief: "no completion CTA while unmet"), and a live
-  // progress line shows real state from the persisted quest.progressive.
-  const isNutrition = q.quest?.completionType === "nutrition-log" && !q.isSideQuest;
-  const nutritionProgress = isNutrition && q.quest.progressive ? nutritionProgressLabel(q.quest.progressive) : null;
-  return `
-    <div class="quest-card">
-      ${contextHeader}
-      <div class="dot pending"></div>
-      <div class="qlabel mono">${label}${q.quest.statFocus ? ` · ${esc(statLabel(q.quest.statFocus))}` : ""}</div>
-      <h2 class="fr">${esc(q.quest.title)}</h2>
-      <p class="desc">${esc(q.quest.description)}</p>
-      ${nutritionProgress ? `<p class="mono" style="font-size:12.5px;color:var(--accent);margin:8px 0 0">${esc(nutritionProgress)}</p>` : ""}
-      ${remaining != null && !isNutrition ? `<p class="countdown mono${expired ? " urgent" : ""}" data-quest-countdown="${q.id}" data-created="${esc(q.createdAt)}">${expired ? "⏳ Waktu buat mulai quest ini udah lewat 24 jam." : `⏳ ${formatCountdown(remaining)}`}</p>` : ""}
-      <button class="btn-primary" data-reflect-id="${q.id}" ${expired && !isNutrition ? "disabled" : ""}>${isNutrition ? "Lanjut Catat" : expired ? "Waktu habis" : "Mulai"}</button>
-      <button class="reason-toggle" data-reason-toggle="${q.id}">${reasonOpen ? "Sembunyikan alasan" : "Kenapa Eleva kasih quest ini →"}</button>
-      ${reasonOpen ? `<p class="why fadeUp">${esc(q.quest.why)}</p>` : ""}
-    </div>`;
-}
 // Single ticker shared across every visible countdown - writes straight to
 // the DOM every second, deliberately NOT through renderDashboard() (same
 // reasoning as the pace/word-count live displays: a full re-render would
@@ -3603,11 +3570,167 @@ function tickCountdowns() {
       el.classList.toggle("urgent", remaining < 60 * 60 * 1000);
     }
   });
+  // Compact quest-hub cards (Eleva Home redesign) - same live-tick idea,
+  // different 4-tier label/color rule (questUrgency), extended onto the
+  // same shared ticker rather than a second setInterval.
+  document.querySelectorAll("[data-qh-countdown]").forEach((el) => {
+    const created = new Date(el.dataset.created).getTime();
+    const remaining = created + 24 * 60 * 60 * 1000 - now;
+    const { label, colorVar } = questUrgency(remaining);
+    el.textContent = label;
+    el.style.color = colorVar;
+  });
 }
 function ensureCountdownTicking() {
   tickCountdowns();
   if (countdownTimer) return;
   countdownTimer = setInterval(tickCountdowns, 1000);
+}
+
+// Eleva Home redesign (design handoff, 15 Agustus): 4-tier time-urgency
+// rule for the compact quest hub's per-card remaining-time chip - distinct
+// from formatCountdown's single HH:MM:SS/1h-threshold shape above (that one
+// stays exactly as-is, still used wherever it's still called). Reuses the
+// exact same createdAt+24h deadline math as questSummaryCard (line ~3550) -
+// no new deadline source, this is purely a different label/color mapping
+// of the same remaining-ms value.
+function questUrgency(remainingMs) {
+  if (remainingMs == null) return { label: "", colorVar: "var(--qh-muted)" };
+  if (remainingMs <= 0) return { label: "Waktu habis", colorVar: "var(--qh-red)" };
+  const hours = remainingMs / 3600000;
+  if (hours > 4) return { label: `${Math.floor(hours)} jam`, colorVar: "var(--qh-muted)" };
+  if (hours >= 1) return { label: `${Math.floor(hours)} jam`, colorVar: "var(--qh-orange)" };
+  const mins = Math.max(1, Math.ceil(remainingMs / 60000));
+  return { label: `${mins} menit`, colorVar: "var(--qh-red)" };
+}
+
+// Quest-category icons for the compact quest hub - covers every real
+// completionType/structuredKind combination this app actually generates
+// (not just the design handoff's own 3 mocked icons: headphones/utensils/
+// heart), so no real quest type silently falls back to the generic default.
+// Same switch-keyed size/color signature as realmIconSVG (line ~3946) -
+// circle-outline treatment is applied by the caller's wrapping .qhub-icon,
+// not baked into the SVG itself, same separation realmIconSVG uses.
+function questCategoryIconSVG(quest, size, color) {
+  const key = quest?.completionType === "structured-physical" ? (quest.structuredKind || "gym") : (quest?.completionType || "reflective");
+  const common = `width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5" style="flex:none"`;
+  switch (key) {
+    case "cardio":
+      return `<svg ${common}><path d="M3 12h4l2-6 4 12 2-6h6" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+    case "gym":
+      return `<svg ${common}><path d="M6 8v8M18 8v8" stroke-linecap="round"></path><rect x="3" y="9" width="3" height="6" rx="1"></rect><rect x="18" y="9" width="3" height="6" rx="1"></rect><line x1="6" y1="12" x2="18" y2="12"></line></svg>`;
+    case "recovery":
+      return `<svg ${common}><path d="M12 20s-7-4.35-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 5c-2.5 4.65-9.5 9-9.5 9z"></path></svg>`;
+    case "practice-test":
+      return `<svg ${common}><path d="M4 14v-2a8 8 0 0 1 16 0v2"></path><rect x="2.5" y="13" width="4" height="7" rx="2"></rect><rect x="17.5" y="13" width="4" height="7" rx="2"></rect></svg>`;
+    case "job-match-analysis":
+      return `<svg ${common}><rect x="4" y="3" width="10" height="14" rx="1"></rect><line x1="7" y1="7" x2="11" y2="7"></line><line x1="7" y1="10" x2="11" y2="10"></line><circle cx="16" cy="16" r="4"></circle><line x1="19" y1="19" x2="22" y2="22"></line></svg>`;
+    case "job-application-submit":
+      return `<svg ${common}><path d="M22 2L11 13"></path><path d="M22 2l-7 20-4-9-9-4z"></path></svg>`;
+    case "nutrition-log":
+      return `<svg ${common}><path d="M6 2v6a2 2 0 0 0 4 0V2M7 2v6" stroke-linecap="round"></path><line x1="7" y1="8" x2="7" y2="22"></line><path d="M17 2v9c0 1.5-1 2-1 2v9" stroke-linecap="round"></path></svg>`;
+    case "reflective":
+    default:
+      return `<svg ${common}><circle cx="12" cy="12" r="9"></circle><path d="M15 9l-2 5-5 2 2-5z"></path></svg>`;
+  }
+}
+
+// "Selesai ketika" checklist (design handoff) - derived from evidenceSchema/
+// completionType since no dod:string[] field exists server-side. Always
+// returns at least one bullet (falls back to the quest's own description)
+// so the checklist section is never empty.
+function deriveDoDChecklist(quest) {
+  const items = [];
+  const es = quest.evidenceSchema;
+  if (quest.completionType === "structured-physical" && es) {
+    if (es.activityType) items.push(`Aktivitas: ${es.activityType}`);
+    if (es.metricType === "distance" && es.target) items.push(`Jarak minimal ${es.target} km`);
+    if (es.metricType === "reps" && es.target) items.push(`${es.target} repetisi/set`);
+    if (es.metricType === "recovery") items.push("Catat tidur, air, makan berprotein, dan level nyeri");
+  } else if (quest.completionType === "practice-test") {
+    items.push("Selesaikan seluruh set latihan dan submit jawaban");
+  } else if (quest.completionType === "job-match-analysis") {
+    items.push("Upload lowongan dan lihat hasil match score-nya");
+  } else if (quest.completionType === "job-application-submit") {
+    items.push("Lengkapi detail lamaran dan submit");
+  } else if (quest.completionType === "nutrition-log") {
+    items.push("Catat semua makan hari ini sampai target tercapai");
+  }
+  if (!items.length) items.push(quest.description);
+  return items;
+}
+
+// CTA label state machine (design handoff): "Mulai Quest" -> "Lanjutkan"
+// -> "Lihat Hasil". nutrition-log keeps its existing always-open "Lanjut
+// Catat" special case unchanged (SOMA Nutrition Part B item 7 - no single
+// "Selesai" moment the button triggers), matching questSummaryCard's own
+// isNutrition branch above.
+function questCtaLabel(quest, id) {
+  if (quest?.completionType === "nutrition-log") return "Lanjut Catat";
+  const st = questCtaState.get(id);
+  if (st === "completed") return "Lihat Hasil";
+  if (st === "started") return "Lanjutkan";
+  return "Mulai Quest";
+}
+
+// Compact quest-hub row (design handoff): up to 3 equal-width cards, tap
+// selects in place - never reorders, matches the exact interaction shape
+// already proven by Pilih Pathway's .ppick-col (onboarding, tap sets an
+// index + re-render, selected card gets a glow, cards never move).
+function questHubCardsHTML(quests) {
+  const activeIdx = Math.min(selectedQuestIndex ?? 0, quests.length - 1);
+  return `
+    <div class="qhub-row">
+      ${quests.map((q, i) => {
+        const remaining = q.createdAt ? new Date(q.createdAt).getTime() + 24 * 60 * 60 * 1000 - Date.now() : null;
+        const { label, colorVar } = questUrgency(remaining);
+        // SOMA Nutrition Part B item 7: a PROGRESSIVE nutrition-log quest's
+        // live "Meals X/Y" progress is more useful here than a static
+        // description snippet - same info questSummaryCard used to surface
+        // before the Home redesign, just relocated to the compact card.
+        const summary = q.quest.completionType === "nutrition-log" && q.quest.progressive
+          ? nutritionProgressLabel(q.quest.progressive)
+          : (q.quest.description || "").split(/(?<=[.!?])\s/)[0];
+        return `
+        <button class="qhub-card ${i === activeIdx ? "selected" : ""}" data-qhub-idx="${i}">
+          <div class="qhub-icon">${questCategoryIconSVG(q.quest, 18, "#e8a33d")}</div>
+          <div class="qhub-title fr">${esc(q.quest.title)}</div>
+          <div class="qhub-summary">${esc(summary)}</div>
+          <div class="qhub-time mono" style="color:${colorVar}" data-qh-countdown="${q.id}" data-created="${esc(q.createdAt)}">${esc(label)}</div>
+        </button>`;
+      }).join("")}
+    </div>`;
+}
+
+// Detail panel (design handoff) for whichever quest is currently selected.
+// "Menuju target" stays visible above the why-accordion, never hidden
+// behind it, per the spec's own explicit rule. The why-accordion reuses
+// reasonOpenIds/[data-reason-toggle] unchanged - already keyed by quest id,
+// already expands in place with no remount. The CTA keeps the exact
+// data-reflect-id attribute and fires the existing click cascade
+// (beginStructuredOrReflectiveFlow + the 4 special-flow branches) -
+// nothing about quest completion itself changes, only what feeds the
+// button's label/disabled state is new.
+function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
+  const reasonOpen = reasonOpenIds.has(q.id);
+  const eyebrow = `QUEST HARI INI${q.quest.statFocus ? " · " + esc(statLabel(q.quest.statFocus)).toUpperCase() : ""}`;
+  const dod = deriveDoDChecklist(q.quest);
+  return `
+    <div class="qhub-detail">
+      <div class="qhub-eyebrow mono">${eyebrow}</div>
+      ${goalLabel ? `<div class="qhub-target">Menuju target: <span class="qhub-target-value">${esc(goalLabel)}</span></div>` : ""}
+      <h2 class="fr qhub-detail-title">${esc(q.quest.title)}</h2>
+      <p class="qhub-detail-desc">${esc(q.quest.description)}</p>
+      ${q.quest.completionType === "nutrition-log" && q.quest.progressive ? `<p class="qhub-target mono" style="color:var(--qh-gold)">${esc(nutritionProgressLabel(q.quest.progressive))}</p>` : ""}
+      <div class="qhub-dod-label mono">SELESAI KETIKA</div>
+      <ul class="qhub-dod-list">${dod.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>
+      <div class="qhub-detail-foot">
+        <span class="qhub-duration mono">±30 menit</span>
+        <button class="btn-primary" data-reflect-id="${q.id}" ${ctaDisabled ? "disabled" : ""}>${esc(ctaLabel)}</button>
+      </div>
+      <button class="qhub-why-toggle" data-reason-toggle="${q.id}">Kenapa Eleva kasih quest ini? <span class="qhub-why-arrow">${reasonOpen ? "↑" : "↓"}</span></button>
+      ${reasonOpen ? `<p class="qhub-why fadeUp">${esc(q.quest.why)}</p>` : ""}
+    </div>`;
 }
 
 // Fokus 2.2/2.3: manual override ("Opsi C") fields for the target picker -
@@ -3738,30 +3861,34 @@ function shortfallPromptHTML(r) {
     </div>`;
 }
 
-// Homepage redesign: persistent header (date + avatar + settings gear) and
-// bottom tab bar, shared across all 4 screens (Home/Kisahmu/Character/
-// Settings). Avatar and gear both route to Settings, per the handoff
-// ("Both currently route to Settings in the prototype; profile may get its
-// own screen later").
+// Eleva Home redesign (design handoff, 15 Agustus): header is now date
+// (left) + centered "ELEVA" wordmark + help "?" and settings gear (right,
+// circular orange-outline). Dropped the avatar-initial button - the new
+// spec's header has no avatar slot; #headerSettings alone keeps routing to
+// Settings (unchanged), which is also how Settings stays reachable now
+// that its bottom-tab entry is gone (see TAB_ITEMS below).
 function appHeaderHTML(s, extraIconsHTML) {
-  const initial = (s.profile?.name || "?").trim().charAt(0).toUpperCase() || "?";
   return `
-    <div class="app-header">
+    <div class="app-header qhub-header">
       <div class="mono header-date">${todayLabel().toUpperCase()}</div>
+      <div class="qhub-wordmark fr">ELEVA</div>
       <div class="header-icons">
         ${extraIconsHTML || ""}
-        <button class="header-icon-btn" id="headerAvatar" aria-label="Profil">${esc(initial)}</button>
-        <button class="header-icon-btn" id="headerSettings" aria-label="Settings">⚙</button>
+        <button class="header-icon-btn qhub-icon-btn" id="headerSettings" aria-label="Settings">⚙</button>
       </div>
     </div>`;
 }
-// Task 12: 5th tab, extensible grid of on-demand tools - see metaScreenHTML.
+// Eleva Home redesign: exactly 4 tabs per the spec (Home/Story/Avatar/
+// Meta) - internal `key` values stay the OLD names (kisahmu/character)
+// unchanged, only `label` changes, so activeScreen state and every
+// existing data-tab="..." selector (including e2e tests) keep working
+// untouched. Settings dropped from the tab bar entirely - the header's
+// own gear icon already routes there (see appHeaderHTML above).
 const TAB_ITEMS = [
   { key: "home", icon: "◆", label: "Home" },
-  { key: "kisahmu", icon: "📖", label: "Kisahmu" },
-  { key: "character", icon: "◈", label: "Character" },
-  { key: "meta", icon: "▦", label: "META" },
-  { key: "settings", icon: "⚙", label: "Settings" },
+  { key: "kisahmu", icon: "📖", label: "Story" },
+  { key: "character", icon: "◈", label: "Avatar" },
+  { key: "meta", icon: "▦", label: "Meta" },
 ];
 function tabBarHTML() {
   return `
@@ -3771,60 +3898,6 @@ function tabBarHTML() {
           <span class="tab-icon">${t.icon}</span>
           <span class="tab-label">${t.label}</span>
         </button>`).join("")}
-    </div>`;
-}
-
-// "Eleva Observed" reasoning-trace card - null when there's nothing yet to
-// observe (very first quest ever, or keyless fallback mode - see claude.js).
-function observedCardHTML(observed) {
-  if (!observed) return "";
-  return `
-    <div class="observed-card">
-      <div class="eyebrow mono" style="color:var(--accent);margin:0 0 8px">ELEVA OBSERVED</div>
-      <p class="observed-line">${esc(observed.yesterday)}</p>
-      <p class="observed-line dim">↓ Diamati: ${esc(observed.noticed)}</p>
-      <p class="observed-line">↓ Hari ini: ${esc(observed.today)}</p>
-    </div>`;
-}
-
-// Task 11c: Side Quest is now a REAL AI-generated bonus quest (not tied to
-// any goal) filling the carousel's otherwise-empty slots - the server
-// already generates/persists them (see GET /api/state), this just renders
-// whatever's currently open. Collapsed by default (a quick "→ N tersedia"
-// teaser) per the handoff's progressive-disclosure principle, expands to
-// full quest cards (reusing questSummaryCard, same "Mulai" flow as any
-// other quest) on tap.
-function sideQuestRowHTML(sideQuests) {
-  if (!sideQuests.length) return "";
-  return sideQuestsOpen
-    ? `<div class="side-quest-row open">
-        <button class="side-quest-toggle" data-toggle-sidequest>↑ Sembunyikan side quest</button>
-        ${sideQuests.map((q) => questSummaryCard(q, null)).join("")}
-      </div>`
-    : `<button class="side-quest-row" data-toggle-sidequest>→ ${sideQuests.length} Side Quest tersedia</button>`;
-}
-
-// Task 11f (Context Update): light, not a quest, not mandatory - a chip tap
-// commits immediately (no separate confirm step), the note is genuinely
-// optional and only shown as an expandable "Ceritakan lebih →" link so it
-// never blocks the one-tap path.
-function kondisiRowHTML(status, note) {
-  const isNormal = status === "Normal";
-  return `
-    <div class="kondisi-block">
-      ${kondisiOpen ? `
-        <div class="kondisi-label mono">GIMANA KONDISIMU HARI INI?</div>
-        <div class="kondisi-chips">
-          ${KONDISI_LABELS.map((l) => `<button class="kondisi-chip ${status === l ? "selected" : ""}" data-kondisi="${esc(l)}">${KONDISI_EMOJI[l]} ${esc(l)}</button>`).join("")}
-        </div>
-        <textarea class="kondisi-note-input" id="kondisiNoteInput" rows="2" placeholder="Ceritakan lebih (opsional)...">${esc(kondisiNoteDraft)}</textarea>
-        ${kondisiError ? `<p style="color:var(--rust);font-size:12.5px;margin:8px 0 0">${esc(kondisiError)}</p>` : ""}
-        <button class="kondisi-done" id="kondisiDone">Selesai</button>
-      ` : `
-        <div class="kondisi-summary">
-          <span><span class="kondisi-dot" style="color:${isNormal ? "var(--growth)" : "var(--accent)"}">●</span> Kondisi hari ini: <span class="kondisi-value">${isNormal ? "" : KONDISI_EMOJI[status] || ""} ${esc(status)}</span>${note ? ` <span class="kondisi-note-preview">— ${esc(note)}</span>` : ""}</span>
-          <button class="kondisi-update" id="kondisiUpdateBtn">Update</button>
-        </div>`}
     </div>`;
 }
 
@@ -4234,25 +4307,19 @@ async function openNutritionFlow(day) {
 
 function renderDashboard() {
   const s = appState;
-  // Task 11c: server now mixes real Side Quests into openQuests (flagged
-  // isSideQuest) alongside Primary Quests - split here once so the
-  // carousel/reflect-target logic below only ever sees Primary Quests, and
-  // Side Quests render separately via sideQuestRowHTML.
+  // Task 11c: server still mixes real Side Quests into openQuests (flagged
+  // isSideQuest) alongside Primary Quests - filtered out here since the
+  // Eleva Home redesign no longer surfaces Side Quests on this screen (per
+  // the founder's own decision), but META rows still need allOpenQuests
+  // findable below.
   const allOpenQuests = s.openQuests || [];
   // Task 12: META rows stay findable in allOpenQuests (so the reflect form
   // can look one up by id while a META session is in progress via
-  // targetDay/reflectTarget below), but never join the Primary Quest
-  // carousel - see the is_meta column comment in db.js's init().
+  // targetDay/reflectTarget below), but never join the Primary Quest row -
+  // see the is_meta column comment in db.js's init().
   const openQuests = allOpenQuests.filter((q) => !q.isSideQuest && !q.isMeta);
-  const sideQuests = allOpenQuests.filter((q) => q.isSideQuest);
   const goals = s.goals || [];
   const goalLabel = (goalIndex) => (goalIndex != null && goals[goalIndex] ? goals[goalIndex] : null);
-  // Task 7d.1: Milestone = the persistent current_target (Task 7b), shown
-  // alongside Primary Quest in the context header - null until a goal has
-  // one (before the first "Target Berikutnya" pick, or right after a fresh
-  // target replaces a reached one).
-  const goalTargets = s.goalTargets || {};
-  const milestoneLabel = (goalIndex) => (goalIndex != null && goalTargets[String(goalIndex)] ? goalTargets[String(goalIndex)].label : null);
   // Which open quest the reflect flow targets - looked up fresh from
   // appState every render (never cached), so a just-refreshed state after
   // a submit is always the source of truth. No implicit default: every
@@ -4403,71 +4470,40 @@ function renderDashboard() {
       ${mustRecord ? `<button class="btn-ghost" id="unableQuestBtn" data-unable-quest="${targetDay.id}" style="margin-top:${formReady ? "10px" : "4px"}">Aku nggak bisa quest ini →</button>` : ""}
     </div>` : "";
 
-  // Per-goal model: up to 3 quests can be open at once (one per active
-  // goal), none of them ever silently swapped out - the founder-reported
-  // regression this whole rewrite fixes. All shown as a swipeable carousel
-  // so the user can work whichever goal they feel like, in their own order.
-  // Collapses to the single card actually being reflected on while
-  // reflectOpen, so typing a reflection never fights a horizontal swipe
-  // for the same touch gesture - and to the "just completed" acknowledgment
-  // card when one is pending dismissal.
-  const questSectionHTML = completedResult ? completedResultCardHTML(completedResult)
+  // Eleva Home redesign (design handoff, 15 Agustus): up to 3 primary
+  // quests render as a compact card row + one detail panel for whichever
+  // is selected - selection never reorders the row (questHubCardsHTML,
+  // same .ppick-col mechanic as Pilih Pathway). Defensive cap at 3 even
+  // though generation already targets exactly that - getOpenQuests doesn't
+  // enforce it at the DB level, only the generation gate does. Collapses
+  // to the single quest actually being reflected on (detail panel + form,
+  // no card row) while reflectOpen, same "one focus at a time" precedent
+  // the old carousel used - and to the special-flow/completed-ack views
+  // exactly as before.
+  const homeQuests = openQuests.slice(0, 3);
+  const activeIdx = Math.min(selectedQuestIndex ?? 0, Math.max(homeQuests.length - 1, 0));
+  const selectedQuest = homeQuests[activeIdx] || null;
+  const selectedRemaining = selectedQuest?.createdAt ? new Date(selectedQuest.createdAt).getTime() + 24 * 60 * 60 * 1000 - Date.now() : null;
+  const selectedExpired = selectedRemaining != null && selectedRemaining <= 0;
+
+  // Home body: per the founder's own decision (design handoff, 15 Agustus),
+  // everything the OLD dashboard showed that isn't one of the new spec's 5
+  // layout pieces - API-key banner, chapter header, Eleva Observed, Side
+  // Quest row, Kondisi Hari Ini, RIWAYAT, nutrition-shortfall prompts - is
+  // dropped from Home entirely (their underlying functions/mechanisms stay,
+  // just unreachable from here now - same "not deleted, just unreachable"
+  // treatment as artifactsSheetHTML below).
+  const homeBodyHTML = completedResult ? completedResultCardHTML(completedResult)
     : practiceTestFlow ? practiceTestFlowHTML()
     : jobMatchFlow ? jobMatchFlowHTML()
     : jobApplicationFlow ? jobApplicationFlowHTML()
     : nutritionFlow ? nutritionFlowHTML()
-    : reflectOpen ? questSummaryCard(targetDay, goalLabel(targetDay?.goalIndex), milestoneLabel(targetDay?.goalIndex))
-    : openQuests.length > 1 ? `
-    <div class="quest-carousel">
-      ${openQuests.map((q) => questSummaryCard(q, goalLabel(q.goalIndex), milestoneLabel(q.goalIndex))).join("")}
-    </div>
-    <div class="eyebrow mono swipe-hint">← geser untuk lihat ${openQuests.length} quest yang lagi terbuka</div>`
-    : questSummaryCard(openQuests[0] || null, goalLabel(openQuests[0]?.goalIndex), milestoneLabel(openQuests[0]?.goalIndex));
-
-  // Homepage redesign: Home body is everything that used to be the whole
-  // dashboard (minus Character Stats, which moved to its own screen) -
-  // compact chapter context, Eleva Observed, quests, Side Quest placeholder,
-  // Kondisi Hari Ini, Riwayat. Kept as a local const (not a top-level
-  // function) since it closes over a dozen already-computed locals above
-  // (questSectionHTML, reflectFormHTML, goals, openQuests, etc.) that aren't
-  // worth threading through a separate function signature.
-  // SOMA Nutrition Part B item 9: nutrition-log quests resolve LAZILY (see
-  // resolveNutritionQuest, server/index.js) - there's no synchronous submit
-  // moment for the shortfall picker Task 7d item 6 built for structured-
-  // physical, so GET /api/state surfaces any still-unpicked ones and this
-  // banner shows them here instead. Same fixed-option/no-word-count/no-
-  // reflection-as-proof shape, one small card per pending quest.
-  const nutritionShortfallHTML = (s.pendingNutritionShortfalls || []).map((p) => `
-    <div class="quest-card" style="margin-bottom:10px">
-      <div class="kondisi-label mono">KENAPA TARGET NUTRISI "${esc(p.title)}" BELUM TERCAPAI?</div>
-      <div class="kondisi-chips">
-        ${p.reasons.map((r) => `<button class="kondisi-chip" data-nutrition-shortfall-quest="${p.id}" data-nutrition-shortfall-reason="${esc(r)}">${esc(r)}</button>`).join("")}
-      </div>
-    </div>`).join("");
-
-  const homeBodyHTML = `
-    ${s.aiActive ? "" : `<div class="banner-warn">Mode tanpa API key — quest masih generik. Tambahkan ANTHROPIC_API_KEY di .env supaya mentor beneran personal.</div>`}
-    ${nutritionShortfallHTML}
-    <div class="chapter-header compact">
-      <div class="bab mono">BAB ${s.chapterNumber} · ${esc(s.chapterTitle).toUpperCase()}</div>
-      <div class="rule"></div>
-      ${s.pathwayNoun ? `<div class="pathway-badge mono">${esc(maturityTier(s.growthSessions))} ${esc(s.pathwayNoun)}${s.pathwayStatus === "trial" ? ` <span class="trial-tag">(hipotesis — First Trial)</span>` : ""}</div>` : ""}
-    </div>
-    ${observedCardHTML(s.observed)}
-    ${questSectionHTML}
-    ${reflectFormHTML}
-    ${sideQuestRowHTML(reflectOpen ? sideQuests.filter((q) => q.id !== reflectTarget) : sideQuests)}
-    ${kondisiRowHTML(s.kondisiStatus || "Normal", s.kondisiNote)}
-    ${s.history?.length ? `
-    <div style="margin:20px 0 28px">
-      <div class="eyebrow mono">RIWAYAT</div>
-      ${s.history.map((d) => `
-        <div class="history-item done">
-          <div class="date mono">${d.date}</div>
-          <div class="title">${esc(d.quest?.title || "")}</div>
-          ${d.reflection?.text ? `<div class="snippet">${esc(d.reflection.text.slice(0, 90))}${d.reflection.text.length > 90 ? "…" : ""}</div>` : d.reflection?.structuredData ? `<div class="snippet mono">${esc(structSummary(d.reflection.structuredData))}</div>` : ""}
-        </div>`).join("")}
-    </div>` : ""}`;
+    : reflectOpen && targetDay ? questDetailPanelHTML(targetDay, goalLabel(targetDay.goalIndex), questCtaLabel(targetDay.quest, targetDay.id), false) + reflectFormHTML
+    : !homeQuests.length ? `<div class="quest-card">${spinnerHTML("AI sedang menyusun quest...")}</div>`
+    : `
+    <div class="qhub-heading mono">${homeQuests.length} quest berjalan, pilih satu untuk lihat detail.</div>
+    ${questHubCardsHTML(homeQuests)}
+    ${selectedQuest ? questDetailPanelHTML(selectedQuest, goalLabel(selectedQuest.goalIndex), questCtaLabel(selectedQuest.quest, selectedQuest.id), selectedExpired) : ""}`;
 
   const screenBodyHTML = activeScreen === "kisahmu" ? kisahmuScreenHTML(s)
     : activeScreen === "character" ? characterScreenHTML(s)
@@ -4475,21 +4511,23 @@ function renderDashboard() {
     : activeScreen === "meta" ? metaScreenHTML(s, allOpenQuests)
     : homeBodyHTML;
 
-  // Help "?" and Artifacts icons now sit INLINE in the header's icon row
-  // (not absolute-positioned floating over the body anymore) - the old
-  // top:96px placement started overlapping .banner-warn/.observed-card once
-  // Home's content grew taller than the fixed offset assumed.
-  const homeExtraIconsHTML = activeScreen === "home"
-    ? `<button class="header-icon-btn" id="openArtifacts" aria-label="Artifacts">🗎</button>${helpBtnHTML("dashboard")}`
+  // Eleva Home redesign: header now shows exactly 2 icons (help + settings)
+  // per spec - Artifacts dropped from Home's header (job-match-analysis/
+  // job-application-submit flows already have their own inline "upload CV"
+  // fallback when no Artifacts CV exists, so this only removes a "replace
+  // anytime" shortcut, not core functionality; artifactsSheetHTML/its
+  // handler stay in the file, unreachable, same treatment given other
+  // dropped Home content above).
+  const homeExtraIconsHTML = activeScreen === "home" ? helpBtnHTML("dashboard")
     : activeScreen === "meta" ? helpBtnHTML("meta")
     : "";
 
   root.innerHTML = `
-    <div class="shell app-shell">
+    <div class="shell app-shell qhub-shell">
       ${appHeaderHTML(s, homeExtraIconsHTML)}
-      ${activeScreen === "home" ? `${helpSheetHTML("dashboard")}${artifactsSheetHTML()}` : ""}
+      ${activeScreen === "home" ? helpSheetHTML("dashboard") : ""}
       ${activeScreen === "meta" ? helpSheetHTML("meta") : ""}
-      <div class="screen-body">${screenBodyHTML}</div>
+      <div class="screen-body qhub-scroll">${screenBodyHTML}</div>
       ${tabBarHTML()}
     </div>`;
 
@@ -4508,6 +4546,12 @@ function renderDashboard() {
   document.querySelectorAll("[data-reflect-id]").forEach((b) => b.addEventListener("click", async () => {
     const id = Number(b.dataset.reflectId);
     const quest = allOpenQuests.find((q) => q.id === id)?.quest;
+    // Eleva Home redesign: CTA label flips to "Lanjutkan" once tapped, for
+    // every branch below (practice-test/job-match/job-application/
+    // nutrition/default reflective all funnel through this one handler) -
+    // one insertion point instead of five. Ephemeral/session-only, see
+    // questCtaState's own comment near reasonOpenIds.
+    questCtaState.set(id, "started");
     // Task 9: practice-test quests skip the reflectOpen form entirely - they
     // get their own flow (answer, submit) instead of a text/structured-
     // fields box.
@@ -4798,6 +4842,7 @@ function renderDashboard() {
     try {
       const resp = await api("/api/practice-test/submit", { method: "POST", body: { questId: practiceTestFlow.questId, answers: practiceTestFlow.answers } });
       const qd = openQuests.find((q) => q.id === practiceTestFlow.questId);
+      questCtaState.set(practiceTestFlow.questId, "completed");
       completedResult = {
         questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
         mentorReply: resp.mentorReply, interpretation: resp.interpretation, deltas: resp.deltas,
@@ -4870,6 +4915,7 @@ function renderDashboard() {
         body: { questId: jobMatchFlow.questId, cvArtifactId: jobMatchFlow.cvArtifact.id, images: jobMatchFlow.images },
       });
       const qd = openQuests.find((q) => q.id === jobMatchFlow.questId);
+      questCtaState.set(jobMatchFlow.questId, "completed");
       completedResult = {
         // Task 14 point 6: no more delta chip (deltas always empty here) -
         // resp.target is the Milestone progress line instead (reuses
@@ -4924,6 +4970,7 @@ function renderDashboard() {
         body: { questId: jobApplicationFlow.questId, cvArtifactId: jobApplicationFlow.cvArtifact.id, ...jobApplicationFlow.form },
       });
       const qd = openQuests.find((q) => q.id === jobApplicationFlow.questId);
+      questCtaState.set(jobApplicationFlow.questId, "completed");
       completedResult = {
         questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
         mentorReply: resp.jobApplication ? `Lamaran ke ${resp.jobApplication.companyName} untuk ${resp.jobApplication.roleTitle} tercatat.` : "",
@@ -5269,6 +5316,7 @@ function renderDashboard() {
       // it here until the user dismisses it, instead of refetching state
       // immediately (which could otherwise swap this card out from under
       // them before they ever read it).
+      questCtaState.set(targetDay.id, "completed");
       completedResult = {
         // Task 7c: server computes the real status for structured-physical
         // quests (evidence vs target) - resp.status is authoritative, not
@@ -5316,8 +5364,14 @@ function renderDashboard() {
     if (activeScreen === "meta") metaRealmOpen = null;
     renderDashboard();
   }));
-  document.getElementById("headerAvatar")?.addEventListener("click", () => { activeScreen = "settings"; renderDashboard(); });
   document.getElementById("headerSettings")?.addEventListener("click", () => { activeScreen = "settings"; renderDashboard(); });
+  // Eleva Home redesign: tap a compact quest card to select it in place -
+  // same mechanic as Pilih Pathway's .ppick-col (index only, never
+  // reorders, re-render reflects the new selection in the detail panel).
+  document.querySelectorAll("[data-qhub-idx]").forEach((b) => b.addEventListener("click", () => {
+    selectedQuestIndex = Number(b.dataset.qhubIdx);
+    renderDashboard();
+  }));
   document.querySelectorAll("[data-reason-toggle]").forEach((b) => b.addEventListener("click", () => {
     const id = Number(b.dataset.reasonToggle);
     if (reasonOpenIds.has(id)) reasonOpenIds.delete(id); else reasonOpenIds.add(id);

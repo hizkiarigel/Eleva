@@ -117,6 +117,7 @@ async function test(name, fn) {
 
   await test("kind-only schema also goes straight to the questions (track defaults to academic)", async () => {
     await openDashboard();
+    await page.click('[data-qhub-idx="1"]'); // select the 2nd quest hub card (kindQuest) before its detail-panel CTA exists
     await page.click(`[data-reflect-id="${kindQuest}"]`);
     await page.waitForSelector("#ptSubmit", { timeout: 20000 });
     assert.strictEqual(await page.locator('text=Academic atau General Training?').count(), 0, "track picker must not appear");
@@ -125,6 +126,7 @@ async function test(name, fn) {
 
   await test("no schema also goes straight to the questions (defaults to reading/academic)", async () => {
     await openDashboard();
+    await page.click('[data-qhub-idx="2"]'); // select the 3rd quest hub card (bareQuest) before its detail-panel CTA exists
     await page.click(`[data-reflect-id="${bareQuest}"]`);
     await page.waitForSelector("#ptSubmit", { timeout: 20000 });
     assert.strictEqual(await page.locator('text=Mau latihan apa dulu?').count(), 0, "kind picker must not appear");

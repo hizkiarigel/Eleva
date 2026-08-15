@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786801729.2638881,
-    "ast_hash": "ef8d1cbe4e382a4bc117648d39ee2442",
+    "mtime": 1786813225.5555193,
+    "ast_hash": "bd466c74f9af21a2e3d127077a8ae0e7",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786800177.908055,
-    "ast_hash": "d9d33d39238037a7c79e70cbc55f125e",
+    "mtime": 1786814436.0595913,
+    "ast_hash": "8df9c34da933bb95261064e342ecfa6e",
     "semantic_hash": ""
   },
   "README.md": {
@@ -155,8 +155,8 @@
     "semantic_hash": "d06b0ae2738f35339a54701f5a85b1ca"
   },
   "tests/practicetest.e2e.js": {
-    "mtime": 1786546144.7758076,
-    "ast_hash": "979d479b45969449265e789c59e66f8c",
+    "mtime": 1786812759.0514917,
+    "ast_hash": "5f6a0cf734ad539212ea9c9ab5b820a9",
     "semantic_hash": ""
   },
   "tests/practicetest.js": {
@@ -175,8 +175,8 @@
     "semantic_hash": ""
   },
   "tests/livelihood.e2e.js": {
-    "mtime": 1786519468.5207195,
-    "ast_hash": "9468ec76952c305cc030d595e645068d",
+    "mtime": 1786813029.2035077,
+    "ast_hash": "f46ba8083dac3afd86b57031d35500a7",
     "semantic_hash": ""
   },
   "tests/livelihood.js": {
@@ -342,6 +342,11 @@
   "tests/onboarding-goal-setting.e2e.js": {
     "mtime": 1786792143.0770667,
     "ast_hash": "f937f6e3a5d12fa866768be861873d10",
+    "semantic_hash": ""
+  },
+  "tests/quest-hub.e2e.js": {
+    "mtime": 1786814140.3715737,
+    "ast_hash": "877898e4c0f6be6355cda7f6cd09529c",
     "semantic_hash": ""
   }
 }
