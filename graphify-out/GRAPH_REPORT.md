@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-15)
 
 ## Corpus Check
-- 51 files · ~456,703 words
+- 51 files · ~457,532 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 666 nodes · 1031 edges · 46 communities (39 shown, 7 thin omitted)
+- 666 nodes · 1033 edges · 46 communities (39 shown, 7 thin omitted)
 - Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 109 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `5444e204`
+- Built from commit: `10e1f954`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -54,7 +54,7 @@
 - onboarding-name.e2e.js
 - buildPathwayOptions
 - renderAuth
-- ensureCountdownTicking
+- questSummaryCard
 - Adaptive Scenario Cards
 - onboarding-bridge-audio.e2e.js
 - onboarding-draft-resume.e2e.js
@@ -133,7 +133,7 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.19
+Cohesion: 0.20
 Nodes (18): api(), authFinish(), beginPathwayBridge(), beginScenarioBridge(), boot(), clearBridgeTimers(), exitBridge(), openNutritionFlow() (+10 more)
 
 ### Community 10 - "onboarding-bridge.e2e.js"
@@ -157,8 +157,8 @@ Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
 ### Community 18 - "esc"
-Cohesion: 0.08
-Nodes (42): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), characterScreenHTML(), completedResultCardHTML(), durasiMenitFromFields() (+34 more)
+Cohesion: 0.09
+Nodes (37): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), characterScreenHTML(), completedResultCardHTML(), durasiMenitFromFields() (+29 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -177,8 +177,8 @@ Cohesion: 0.40
 Nodes (5): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence)
 
 ### Community 24 - "renderPolygonSVG"
-Cohesion: 0.21
-Nodes (15): attachPolygonHandlers(), axisLabelLayout(), clearActiveAxisNow(), formatRadarValue(), heptagonPath(), lockIconSVG(), polyPoint(), polyRadius() (+7 more)
+Cohesion: 0.43
+Nodes (7): axisLabelLayout(), heptagonPath(), lockIconSVG(), polyPoint(), polyRadius(), radiusPoint(), renderPolygonSVG()
 
 ### Community 25 - "Eleva README.md"
 Cohesion: 0.16
@@ -209,8 +209,8 @@ Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 34 - "renderAdaptive"
-Cohesion: 0.15
-Nodes (19): chapterInfoBtnHTML(), chapterPoint(), chapterProgressHTML(), chapterRadius(), counterPillHTML(), goalPlaceholder(), helpBtnHTML(), isStepValid() (+11 more)
+Cohesion: 0.11
+Nodes (27): attachPolygonHandlers(), chapterInfoBtnHTML(), chapterPoint(), chapterProgressHTML(), chapterRadius(), clearActiveAxisNow(), counterPillHTML(), formatRadarValue() (+19 more)
 
 ### Community 35 - "onboarding-chapter-analysis.e2e.js"
 Cohesion: 0.25
@@ -224,9 +224,9 @@ Nodes (3): assert, { chromium }, { spawn }
 Cohesion: 0.32
 Nodes (8): authConsentInfoModalHTML(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
 
-### Community 39 - "ensureCountdownTicking"
-Cohesion: 0.67
-Nodes (3): ensureCountdownTicking(), formatCountdown(), tickCountdowns()
+### Community 39 - "questSummaryCard"
+Cohesion: 0.25
+Nodes (8): ensureCountdownTicking(), formatCountdown(), nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
 
 ### Community 40 - "Adaptive Scenario Cards"
 Cohesion: 0.40

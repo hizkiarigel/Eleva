@@ -38,7 +38,7 @@
   "36": "onboarding-name.e2e.js",
   "37": "buildPathwayOptions",
   "38": "renderAuth",
-  "39": "ensureCountdownTicking",
+  "39": "questSummaryCard",
   "40": "Adaptive Scenario Cards",
   "41": "onboarding-bridge-audio.e2e.js",
   "42": "onboarding-draft-resume.e2e.js",

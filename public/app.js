@@ -740,7 +740,19 @@ function restoreOnboardingDraft(draft) {
     return;
   }
   ui = { view: "adaptive" };
-  if (["analysis", "pathway", "goals"].includes(draft.adaptivePhase)) {
+  // round 29: a chapterAnalysis blob saved by a pre-round-28 server lacks
+  // insightRows/pattern (new fields, round 28) - restoring it straight into
+  // the new "analysis" summary screen renders those two sections empty.
+  // Same "validate stored shape before trusting it, re-fetch if stale"
+  // precedent as the "card" branch's own beginScenarioBridge() fallback
+  // right below - not a data migration (this app has never migrated old-
+  // shape onboarding data, see LEGACY_STAT_LABELS/PRD.md's stale-shape
+  // precedent), just don't trust an incomplete stored blob. "pathway"/
+  // "goals" don't render insightRows/pattern, so no guard needed there.
+  const hasFreshChapterAnalysis = (ca) => !!ca && Array.isArray(ca.insightRows) && ca.insightRows.length === 2 && !!ca.pattern?.title;
+  if (draft.adaptivePhase === "analysis" && !hasFreshChapterAnalysis(chapterAnalysis)) {
+    beginPathwayBridge(); // stale/incomplete chapterAnalysis - re-fetch fresh from the already-collected cards, shows the pathway bridge while it does
+  } else if (["analysis", "pathway", "goals"].includes(draft.adaptivePhase)) {
     adaptivePhase = draft.adaptivePhase;
   } else if (draft.adaptivePhase === "card" && draft.adaptiveScenario) {
     adaptivePhase = "card";
@@ -1842,7 +1854,14 @@ function renderRadarComparisonSVG(radarRaw, radarCalibrated) {
   const beforePts = POLY_ORDER.map((k, i) => chapterPoint(i, radarRaw[k]));
   const afterPts = POLY_ORDER.map((k, i) => chapterPoint(i, radarCalibrated[k]));
   const beforeDots = beforePts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" class="chapter-radar-before-dot" />`).join("");
-  const afterDots = afterPts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="chapter-radar-after-dot" />`).join("");
+  // round 29: numeric value labels on the "Setelah Kalibrasi" (after) dots
+  // only, per founder ask - mirrors renderPolygonSVG()'s own poly-value
+  // pattern (text centered on the dot, y+3 to vertically center the glyph).
+  const afterDots = afterPts.map(([x, y], i) => {
+    const k = POLY_ORDER[i];
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="chapter-radar-after-dot" />
+      <text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="chapter-radar-after-value" text-anchor="middle">${formatRadarValue(radarCalibrated[k])}</text>`;
+  }).join("");
 
   // Axis labels at CH_LABELR - same "is this axis on the left/right/center"
   // anchor-flip idea axisLabelLayout() (line ~1697) already uses for the
