@@ -2866,15 +2866,21 @@ function renderAdaptive() {
     const noun = pendingPathway?.pathwayNoun || "";
     const goal1Approved = goalCards[0].status === "approved";
     root.innerHTML = `
-      <div class="shell">
-        ${helpBtnHTML("goals")}${helpSheetHTML("goals")}
+      <div class="shell shell-chapter">
+        <div class="radar-header-row">
+          <div class="eyebrow mono radar-header-eyebrow">ELEVA · SET YOUR GOAL</div>
+          ${helpBtnHTML("goals")}
+        </div>
         ${chapterProgressHTML("goals")}
-        ${pathwayHeaderHTML(pw, noun)}
-        ${actingMethodCardHTML(pw)}
-        <div class="gset-intro-row"><span>✨</span><span class="gset-intro-label">TENTUKAN GOAL-MU</span></div>
-        <p class="gset-intro-copy">Tulis goal yang ingin kamu capai selama 1 tahun ke depan. Eleva akan memeriksa dan memastikan goal-mu jelas, terukur, realistis, dan bisa dicapai manusia normal dalam maksimal 1 tahun.</p>
-        <div class="gset-cards">${goalCards.map((c, i) => goalCardHTML(c, i)).join("")}</div>
-        <span class="gset-ganti-link" id="gantiPathway">← Ganti Pathway</span>
+        ${helpSheetHTML("goals")}
+        <div class="fadeUp">
+          ${pathwayHeaderHTML(pw, noun)}
+          ${actingMethodCardHTML(pw)}
+          <div class="gset-intro-row"><span>✨</span><span class="gset-intro-label">TENTUKAN GOAL-MU</span></div>
+          <p class="gset-intro-copy">Tulis goal yang ingin kamu capai selama 1 tahun ke depan. Eleva akan memeriksa dan memastikan goal-mu jelas, terukur, realistis, dan bisa dicapai manusia normal dalam maksimal 1 tahun.</p>
+          <div class="gset-cards">${goalCards.map((c, i) => goalCardHTML(c, i)).join("")}</div>
+          <span class="gset-ganti-link" id="gantiPathway">← Ganti Pathway</span>
+        </div>
         <button class="btn-primary full gset-cta" id="startFirstTrial" ${goal1Approved ? "" : "disabled"}>⚑ Mulai First Trial (14 hari)</button>
       </div>
       ${gantiConfirmOpen ? `
