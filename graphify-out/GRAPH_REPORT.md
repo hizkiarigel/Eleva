@@ -1,16 +1,16 @@
 # Graph Report - Eleva  (2026-08-15)
 
 ## Corpus Check
-- 52 files · ~466,620 words
+- 52 files · ~467,770 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 694 nodes · 1094 edges · 51 communities (41 shown, 10 thin omitted)
+- 695 nodes · 1095 edges · 51 communities (42 shown, 9 thin omitted)
 - Extraction: 90% EXTRACTED · 10% INFERRED · 0% AMBIGUOUS · INFERRED: 111 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f88ac408`
+- Built from commit: `cef35934`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -33,13 +33,13 @@
 - Eleva Root CLAUDE.md — graphify Integration Rules
 - Task 4: Privacy Notice (minimal)
 - Task 6: Prompt Caching
-- renderDashboard
+- esc
 - practice-test-flow.md
 - metaTargets.js
 - livelihood.e2e.js
 - auth.e2e.js
 - DEPLOY_RAILWAY.md — Railway Deployment Guide
-- renderPolygonSVG
+- renderOnboarding
 - Eleva README.md
 - Growth-Gate (12-word deterministic check)
 - Task 5: Adaptive Pathway Onboarding
@@ -53,15 +53,15 @@
 - onboarding-chapter-analysis.e2e.js
 - onboarding-name.e2e.js
 - buildPathwayOptions
-- renderAuth
-- appHeaderHTML
-- statLabel
+- questSummaryCard
+- applyCalibrationCard
+- renderPolygonSVG
 - onboarding-bridge-audio.e2e.js
 - onboarding-draft-resume.e2e.js
 - startBridgeAudio
 - generate-onboarding-audio.js
 - onboarding-goal-setting.e2e.js
-- esc
+- goalCardHTML
 - auth.js
 - targets.js
 - structured.js
@@ -99,14 +99,14 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (51 total, 10 thin omitted)
+## Communities (51 total, 9 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.07
 Nodes (21): ai, app, auth, cookieSession, db, express, jobApplication, jobMatch (+13 more)
 
 ### Community 1 - "app.js"
-Cohesion: 0.04
+Cohesion: 0.03
 Nodes (53): adaptiveCards, adaptiveSelection, ARTIFACT_TYPE_LABEL, authForm, authTimers, AXIS_DEFINITIONS, AXIS_LABEL_RULES, BRIDGE_LOADING_SEQUENCE (+45 more)
 
 ### Community 2 - "claude.js"
@@ -138,8 +138,8 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "render"
-Cohesion: 0.19
-Nodes (19): api(), authFinish(), beginPathwayBridge(), beginScenarioBridge(), boot(), clearBridgeTimers(), exitBridge(), freshGoalCard() (+11 more)
+Cohesion: 0.13
+Nodes (27): api(), authConsentInfoModalHTML(), authFinish(), authHelpModalHTML(), authReducedMotion(), beginPathwayBridge(), beginScenarioBridge(), boot() (+19 more)
 
 ### Community 10 - "onboarding-bridge.e2e.js"
 Cohesion: 0.25
@@ -161,9 +161,9 @@ Nodes (4): assert, { chromium }, { Client }, { spawn }
 Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
-### Community 18 - "renderDashboard"
-Cohesion: 0.08
-Nodes (28): activeSomaQuest(), artifactsSheetHTML(), beginStructuredOrReflectiveFlow(), durasiMenitFromFields(), ensureCountdownTicking(), fileToBase64(), formatCountdown(), jobApplicationFlowHTML() (+20 more)
+### Community 18 - "esc"
+Cohesion: 0.09
+Nodes (37): activeSomaQuest(), appHeaderHTML(), artifactsSheetHTML(), axisDefinitionsHTML(), beginStructuredOrReflectiveFlow(), completedResultCardHTML(), durasiMenitFromFields(), elevaResponseHTML() (+29 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -181,9 +181,9 @@ Nodes (3): assert, { chromium }, { spawn }
 Cohesion: 0.29
 Nodes (7): DATABASE_URL Environment Variable, DEPLOY_RAILWAY.md — Railway Deployment Guide, Railway Section 7: Upgrade to Postgres + Auth + Beta Gate, SESSION_SECRET Environment Variable, Railway Volume (/data mount for persistence), Eleva PRD.md, Body Quest Completion Screen Screenshot
 
-### Community 24 - "renderPolygonSVG"
-Cohesion: 0.14
-Nodes (20): applyCalibrationCard(), applySynergyDrag(), attachPolygonHandlers(), axisLabelLayout(), clampCalibrationDelta(), clearActiveAxisNow(), heptagonPath(), isContraryPick() (+12 more)
+### Community 24 - "renderOnboarding"
+Cohesion: 0.21
+Nodes (14): attachPolygonHandlers(), clearActiveAxisNow(), counterPillHTML(), isStepValid(), layoutAxisInfoIcons(), nameSheetHTML(), polyValueFromRadius(), renderCounterPillDOM() (+6 more)
 
 ### Community 25 - "Eleva README.md"
 Cohesion: 0.16
@@ -214,8 +214,8 @@ Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 34 - "renderAdaptive"
-Cohesion: 0.18
-Nodes (18): actingMethodCardHTML(), chapterInfoBtnHTML(), chapterProgressHTML(), counterPillHTML(), discardAndBackToPathway(), helpBtnHTML(), isStepValid(), layoutAxisInfoIcons() (+10 more)
+Cohesion: 0.33
+Nodes (11): actingMethodCardHTML(), chapterInfoBtnHTML(), chapterProgressHTML(), discardAndBackToPathway(), helpBtnHTML(), pathwaySigilSVG(), renderAdaptive(), saveOnboardingDraft() (+3 more)
 
 ### Community 35 - "onboarding-chapter-analysis.e2e.js"
 Cohesion: 0.25
@@ -225,13 +225,17 @@ Nodes (3): assert, { chromium }, { spawn }
 Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 38 - "renderAuth"
-Cohesion: 0.32
-Nodes (8): authConsentInfoModalHTML(), authHelpModalHTML(), authReducedMotion(), clearAuthTimers(), renderAuth(), runAuthEntering(), runAuthFlash(), runAuthReducedFlash()
+### Community 38 - "questSummaryCard"
+Cohesion: 0.25
+Nodes (8): ensureCountdownTicking(), formatCountdown(), nutritionFlowHTML(), nutritionProgressLabel(), nutritionTotalsHTML(), questSummaryCard(), sideQuestRowHTML(), tickCountdowns()
 
-### Community 40 - "statLabel"
-Cohesion: 0.29
-Nodes (8): chapterPoint(), chapterRadius(), characterScreenHTML(), formatRadarValue(), radarSheetsHTML(), renderRadarComparisonSVG(), statLabel(), statLevelInfo()
+### Community 39 - "applyCalibrationCard"
+Cohesion: 0.33
+Nodes (6): applyCalibrationCard(), applySynergyDrag(), clampCalibrationDelta(), isContraryPick(), roundPreservingTotal(), synergyFor()
+
+### Community 40 - "renderPolygonSVG"
+Cohesion: 0.18
+Nodes (15): axisLabelLayout(), chapterPoint(), chapterRadius(), characterScreenHTML(), formatRadarValue(), heptagonPath(), lockIconSVG(), polyPoint() (+7 more)
 
 ### Community 41 - "onboarding-bridge-audio.e2e.js"
 Cohesion: 0.13
@@ -242,8 +246,8 @@ Cohesion: 0.25
 Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 43 - "startBridgeAudio"
-Cohesion: 0.36
-Nodes (8): clearBridgeAudioTimers(), ensureBridgeAudioEl(), preloadNextBridgeAudio(), setBridgeAudioIconPlaying(), speakBridgeVoiceFallback(), startBridgeAudio(), stopBridgeAudio(), warmBridgeAudio()
+Cohesion: 0.24
+Nodes (11): clearBridgeAudioTimers(), ensureBridgeAudioEl(), preloadNextBridgeAudio(), renderBridge(), renderBridgeDevPreview(), setBridgeAudioIconPlaying(), speakBridgeVoiceFallback(), startBridgeAudio() (+3 more)
 
 ### Community 44 - "generate-onboarding-audio.js"
 Cohesion: 0.22
@@ -253,9 +257,9 @@ Nodes (9): APPLY, BRIDGE_VOICE_LINES, fs, main(), onlyArg, OUTPUT_DIR, path, IMP
 Cohesion: 0.25
 Nodes (3): assert, { chromium }, { spawn }
 
-### Community 46 - "esc"
-Cohesion: 0.12
-Nodes (25): axisDefinitionsHTML(), completedResultCardHTML(), elevaResponseHTML(), esc(), goalCardAccentColor(), goalCardApprovedHTML(), goalCardBorderColor(), goalCardEditingBodyHTML() (+17 more)
+### Community 46 - "goalCardHTML"
+Cohesion: 0.29
+Nodes (7): goalCardAccentColor(), goalCardApprovedHTML(), goalCardBorderColor(), goalCardEditingBodyHTML(), goalCardFeedbackHTML(), goalCardHeadHTML(), goalCardHTML()
 
 ### Community 47 - "auth.js"
 Cohesion: 0.38
@@ -268,7 +272,7 @@ Nodes (4): CARDIO_ACTIVITIES, num(), SPEED_CAP_KMH, validateStructuredData()
 ## Knowledge Gaps
 - **217 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+212 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -284,6 +288,6 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `index.js` be split into smaller, more focused modules?**
   _Cohesion score 0.07389162561576355 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.03508771929824561 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.034482758620689655 - nodes in this community are weakly interconnected._
 - **Should `claude.js` be split into smaller, more focused modules?**
   _Cohesion score 0.06013986013986014 - nodes in this community are weakly interconnected._

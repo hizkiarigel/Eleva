@@ -1567,6 +1567,17 @@ function speakBridgeVoiceFallback(text, gen) {
   if (!window.speechSynthesis || !text) return;
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "id-ID";
+  // Round 38: without an explicit voice, each device picks its own default
+  // Indonesian TTS voice - female on iOS ("Damayanti"), but male on some
+  // other devices (founder-reported). There are no audio files in this repo
+  // (public/audio/onboarding/ is empty, speechSynthesis IS the voice), so
+  // the only lever is preferring a female Indonesian voice where the device
+  // offers one - best-effort by nature, devices only expose what they have.
+  try {
+    const idVoices = window.speechSynthesis.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith("id"));
+    const preferredVoice = idVoices.find((v) => /damayanti|female|wanita/i.test(v.name)) || idVoices[0];
+    if (preferredVoice) utterance.voice = preferredVoice;
+  } catch { /* voice preference is best-effort - never let it block the narration itself */ }
   utterance.onstart = () => { if (gen === bridgeAudioGen) setBridgeAudioIconPlaying(true); };
   utterance.onend = () => { if (gen === bridgeAudioGen) setBridgeAudioIconPlaying(false); };
   utterance.onerror = () => { if (gen === bridgeAudioGen) setBridgeAudioIconPlaying(false); };
@@ -2912,11 +2923,13 @@ function wireGoalSettingHandlers() {
   });
   document.querySelectorAll("[data-goal-text]").forEach((ta) => {
     ta.addEventListener("focus", () => {
-      // iOS keyboard shrinks the visual viewport without scrolling .fadeUp's
-      // own internal scroll region to follow the focused field - the delay
-      // lets the keyboard animation (and --vh's resulting shrink) settle
-      // before scrolling, or it'd target the pre-shrink layout.
-      setTimeout(() => ta.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+      // iOS keyboard covers the bottom of the (deliberately non-shrinking,
+      // see vhFrozenForKeyboard) fixed shell without scrolling .fadeUp's own
+      // internal scroll region to follow the focused field - the delay lets
+      // the keyboard animation settle first. block:"start" targets the top
+      // of the scroll container, guaranteed above the keyboard; "center"
+      // could land under it now that the shell keeps its full height.
+      setTimeout(() => ta.scrollIntoView({ block: "start", behavior: "smooth" }), 300);
     });
     ta.addEventListener("input", (e) => {
       const i = Number(ta.dataset.goalText);
@@ -5388,7 +5401,29 @@ function render() {
 // and every "Ndvh" in .shell-radar's compression clamp()s is replaced
 // with calc(var(--vh, 1dvh) * N). Kept live via resize/orientationchange/
 // visualViewport listeners so it tracks the toolbar showing/hiding.
+// Round 38: while the on-screen keyboard is open (an editable element is
+// focused), visualViewport.height shrinks - if --vh tracked that shrink,
+// every position:fixed shell sized off it would compress and its pinned
+// bottom CTA would ride UP on top of the keyboard (founder-reported on the
+// Goal Setting screen: "Ganti Pathway"/"Mulai First Trial" jumping above
+// the keyboard). Freezing --vh during editing keeps the shell at its
+// pre-keyboard height so the keyboard simply overlays the bottom, which is
+// the behavior the founder asked for - the focused textarea itself stays
+// visible via the focus scrollIntoView handler on the goal cards.
+let vhFrozenForKeyboard = false;
+function isEditableEl(el) {
+  return !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT");
+}
+document.addEventListener("focusin", (e) => {
+  if (isEditableEl(e.target)) vhFrozenForKeyboard = true;
+});
+document.addEventListener("focusout", (e) => {
+  if (!isEditableEl(e.target)) return;
+  vhFrozenForKeyboard = false;
+  setTimeout(setRealVH, 250); // re-measure after the keyboard-close animation settles
+});
 function setRealVH() {
+  if (vhFrozenForKeyboard) return;
   const h = (window.visualViewport ? window.visualViewport.height : window.innerHeight) * 0.01;
   document.documentElement.style.setProperty("--vh", h + "px");
 }

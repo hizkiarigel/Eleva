@@ -292,6 +292,14 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 .shell-qcard .radar-header-row { flex: none; }
 .shell-qcard .fadeUp { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
+/* Round 38: children of an internally-scrolling flex column must never
+   shrink below content height - scrolling exists precisely so they don't
+   have to. Without this, any child with overflow:hidden (whose automatic
+   minimum size is 0 per the flex spec, unlike its overflow:visible
+   siblings) can be silently squashed to 0px height when content overflows
+   - engine/font-metric dependent, which is how .gset-pathway-line rendered
+   fine in headless Chromium but vanished entirely on a real iPhone. */
+.shell-chapter .fadeUp > *, .shell-qcard .fadeUp > * { flex-shrink: 0; }
 .shell-qcard .onboard-nav-row { margin-top: auto; flex: none; }
 .shell-qcard .btn-primary { padding: 8px 20px; min-height: 0; }
 .qcard-header-right { display: flex; align-items: center; gap: 10px; }
