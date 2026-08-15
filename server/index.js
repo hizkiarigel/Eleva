@@ -58,7 +58,25 @@ app.use(
   })
 );
 
-app.use(express.static(path.join(__dirname, "..", "public")));
+// Round 37: this app has no build step - public/app.js and public/styles.css
+// are hand-served static files with no version query string/content hash.
+// express.static()'s default headers (Cache-Control: public, max-age=0 +
+// ETag) technically require revalidation on every load but don't guarantee
+// it survives a flaky connection - a real mobile browser on weak signal can
+// silently keep serving what's already on disk if the revalidation
+// round-trip fails, which matched a real founder-reported symptom (a fix
+// verified correct in this repo's own tests never showing up on their real
+// device across multiple deploys). no-store removes that failure mode
+// entirely for just these two files - other static assets keep default
+// caching, they aren't the problem.
+app.use(express.static(path.join(__dirname, "..", "public"), {
+  setHeaders: (res, filePath) => {
+    const base = path.basename(filePath);
+    if (base === "app.js" || base === "styles.css") {
+      res.setHeader("Cache-Control", "no-store");
+    }
+  },
+}));
 
 function todayKey(d) {
   return (d ? new Date(d) : new Date()).toLocaleDateString("en-CA"); // YYYY-MM-DD, server local time

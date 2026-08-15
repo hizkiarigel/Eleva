@@ -2911,6 +2911,13 @@ function wireGoalSettingHandlers() {
     });
   });
   document.querySelectorAll("[data-goal-text]").forEach((ta) => {
+    ta.addEventListener("focus", () => {
+      // iOS keyboard shrinks the visual viewport without scrolling .fadeUp's
+      // own internal scroll region to follow the focused field - the delay
+      // lets the keyboard animation (and --vh's resulting shrink) settle
+      // before scrolling, or it'd target the pre-shrink layout.
+      setTimeout(() => ta.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+    });
     ta.addEventListener("input", (e) => {
       const i = Number(ta.dataset.goalText);
       const card = goalCards[i];
