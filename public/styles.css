@@ -887,8 +887,8 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .qhub-card { flex: 1 1 0; min-width: 0; background: var(--qh-card); border: 1px solid var(--qh-border); border-radius: 10px; padding: 12px 10px; text-align: left; }
 .qhub-card.selected { border-color: var(--qh-gold); box-shadow: 0 0 0 1px var(--qh-gold), 0 0 14px rgba(232, 163, 61, .35); }
 .qhub-icon { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--qh-gold-dim); display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
-.qhub-title { color: var(--qh-ivory); font-size: 13px; line-height: 1.25; margin-bottom: 4px; }
-.qhub-summary { color: var(--qh-secondary); font-size: 11px; line-height: 1.35; margin-bottom: 6px; }
+.qhub-title { color: var(--qh-ivory); font-size: 13px; line-height: 1.25; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qhub-summary { color: var(--qh-secondary); font-size: 11px; line-height: 1.35; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qhub-time { font-size: 11px; }
 
 .qhub-detail { background: var(--qh-card); border: 1px solid var(--qh-border); border-radius: 12px; padding: 18px; }

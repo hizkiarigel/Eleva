@@ -184,15 +184,15 @@ async function test(name, fn) {
     await context.close();
   });
 
-  console.log("E2E: expired quest (deadline passed) shows 'Waktu habis' in red and disables the CTA");
-  await test("a quest past its 24h deadline shows 'Waktu habis' and a disabled CTA", async () => {
+  console.log("E2E: quest past the nominal 24h shows 'Waktu habis' but stays clickable through the invisible 4h grace window (round 40)");
+  await test("a quest at 25h old (inside the 24-28h grace) shows 'Waktu habis' but the CTA is NOT disabled", async () => {
     const { userId, cookieHeader } = await freshAccount(["Goal A"]);
     await insertQuest(userId, { goalIndex: 0, title: "Expired Quest", description: "d", createdAtSql: "now() - interval '25 hours'" });
     const { context, page } = await newPageForCookie(browser, cookieHeader);
     await page.goto(BASE);
     await page.waitForSelector(".qhub-time", { timeout: 20000 });
-    assert.strictEqual((await page.locator(".qhub-time").first().textContent()).trim(), "Waktu habis", "expected the expired label");
-    assert.ok(await page.locator("[data-reflect-id]").first().isDisabled(), "CTA must be disabled once the quest has expired");
+    assert.strictEqual((await page.locator(".qhub-time").first().textContent()).trim(), "Waktu habis", "expected the expired label (unchanged - still the nominal 24h threshold)");
+    assert.ok(!(await page.locator("[data-reflect-id]").first().isDisabled()), "CTA must stay clickable inside the 24-28h invisible grace window (round 40) - the real server deadline is 28h");
     await context.close();
   });
 

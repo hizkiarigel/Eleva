@@ -132,6 +132,20 @@ function computeEvidenceStatus(quest, structuredClean) {
 // never touches growth.
 const SHORTFALL_REASONS = ["Cuaca", "Cedera", "Gangguan/diinterupsi", "Kehabisan waktu", "Lainnya"];
 const SHORTFALL_THRESHOLD = 0.8;
+
+// Round 40 (founder feedback on the quest-hub redesign): a real server-side
+// quest deadline. Rolling window off createdAt, NOT a calendar/midnight
+// checkpoint - this app has no timezone-handling code anywhere and none
+// should be introduced here. 24h nominal (keep in sync with public/app.js
+// questUrgency's "Waktu habis" label threshold) + 4h invisible grace so
+// minor daily schedule drift (gym at 4pm one day, 5pm the next) doesn't
+// fail a quest - the grace is never surfaced as a countdown, only the
+// label's nominal 24h is shown; the extra time only affects when the
+// server actually closes+replaces the quest (see the expiry loop in
+// GET /api/state) and when the client's CTA lockout kicks in.
+const QUEST_NOMINAL_DEADLINE_MS = 24 * 60 * 60 * 1000;
+const QUEST_GRACE_MS = 4 * 60 * 60 * 1000;
+const QUEST_EXPIRY_MS = QUEST_NOMINAL_DEADLINE_MS + QUEST_GRACE_MS;
 function computeShortfallPrompt(quest, structuredClean) {
   const schema = quest?.evidenceSchema;
   if (!schema || schema.target == null || !structuredClean) return null;
@@ -192,6 +206,20 @@ async function resolveNutritionQuest(userId, dayId, quest, state) {
     growthSessions: newGrowthSessions, pathwayNoun: state.pathwayNoun,
   });
   return reflection;
+}
+
+// Round 40: closes a quest that missed its real 28h deadline (24h nominal +
+// 4h invisible grace, QUEST_EXPIRY_MS) without the user ever completing it.
+// Deterministic, no AI call - unlike resolveNutritionQuest above (a JUDGED
+// outcome fed through ai.processReflection), this is a neutral no-op close:
+// zero stat/streak penalty, per the founder's own explicit call ("dorong
+// mulai lagi, bukan menghukum"). The minimal shape here (status/text/
+// deltas/timestamp) matches every other reflection in this codebase closely
+// enough that nothing reading old reflections elsewhere breaks - no reader
+// assumes mentorReply/interpretation/etc. are always present.
+async function resolveExpiredQuest(userId, id) {
+  const reflection = { status: "expired", text: "", deltas: {}, timestamp: new Date().toISOString() };
+  await db.saveReflection(userId, id, reflection);
 }
 
 // Kisahmu: archives the chapter that's about to be superseded, BEFORE the
@@ -390,6 +418,30 @@ app.get("/api/state", requireAuth, async (req, res) => {
     if (resolvedAnyNutrition) {
       openQuests = await db.getOpenQuests(req.userId); // re-fetch: resolved rows must drop out of "open"
     }
+
+    // Round 40 (founder-reported regression): the 24h deadline shown to the
+    // user was 100% client-side cosmetic - the server never closed an
+    // unreflected quest, so a goal whose only open quest passed 24h could
+    // get permanently stuck (needySlots below never saw that goalIndex as
+    // empty, so it never regenerated). Same lazy-check shape as the
+    // nutrition loop just above: a rolling window off createdAt (28h real
+    // deadline, see QUEST_EXPIRY_MS), checked here on every GET /api/state.
+    // Resolution is neutral (no AI call, no stat impact) - see
+    // resolveExpiredQuest's own comment for why.
+    const expiredGoalIndexes = new Set();
+    let resolvedAnyExpired = false;
+    for (const q of openQuests) {
+      if (q.isMeta) continue; // META rows have no user-facing deadline UI, never auto-expire
+      if (q.quest?.lifecycleType === "progressive") continue; // handled by the nutrition loop above, its own clock
+      if (!q.createdAt || Date.now() - new Date(q.createdAt).getTime() < QUEST_EXPIRY_MS) continue;
+      await resolveExpiredQuest(req.userId, q.id);
+      if (q.goalIndex != null) expiredGoalIndexes.add(q.goalIndex);
+      resolvedAnyExpired = true;
+    }
+    if (resolvedAnyExpired) {
+      openQuests = await db.getOpenQuests(req.userId); // re-fetch: resolved rows must drop out of "open" before needySlots below
+    }
+
     const goalSlots = goals.length ? goals.map((_, i) => i) : [null];
     // Task 12 (META): a META row must never count as "this slot has an open
     // quest" - a goal_index-null META session would otherwise satisfy a
@@ -463,6 +515,11 @@ app.get("/api/state", requireAuth, async (req, res) => {
           // moderate for).
           kondisiStatus: state.kondisiStatus !== "Normal" ? state.kondisiStatus : undefined,
           kondisiNote: state.kondisiStatus !== "Normal" ? state.kondisiNote : undefined,
+          // Round 40: this goal's PREVIOUS quest just got auto-closed above
+          // (28h rolling deadline, neutral resolution) - signal it so
+          // generateQuest's prompt can make THIS replacement noticeably
+          // easier, to rebuild momentum instead of the usual difficulty.
+          previousQuestExpired: expiredGoalIndexes.has(goalIndex) ? true : undefined,
           jobMatchHint: jobMatchHint || undefined,
           stats: state.stats,
           chapterNumber: state.chapterNumber,

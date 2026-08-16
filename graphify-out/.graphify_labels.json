@@ -23,7 +23,7 @@
   "21": "livelihood.e2e.js",
   "22": "auth.e2e.js",
   "23": "DEPLOY_RAILWAY.md — Railway Deployment Guide",
-  "24": "renderOnboarding",
+  "24": "quest-expiry.e2e.js",
   "25": "Eleva README.md",
   "26": "Growth-Gate (12-word deterministic check)",
   "27": "Task 5: Adaptive Pathway Onboarding",
@@ -45,10 +45,10 @@
   "43": "startBridgeAudio",
   "44": "generate-onboarding-audio.js",
   "45": "onboarding-goal-setting.e2e.js",
-  "46": "Adaptive Scenario Cards",
+  "46": "applyCalibrationCard",
   "47": "auth.js",
   "48": "targets.js",
-  "49": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)",
+  "49": "buildPathwayOptions",
   "51": "structured.js",
   "53": "safety.js"
 }

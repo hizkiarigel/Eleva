@@ -3528,19 +3528,21 @@ function jobApplicationSummary(ja) {
   return `${ja.companyName} · ${ja.roleTitle} · Applied ${ja.dateApplied}`;
 }
 
-// Renders one open quest as a card - every card is equally "current" now
-// (per-goal model: nothing ever expires or goes stale, a quest just sits
-// open until its own goal's button is tapped), so there's no more today-
-// vs-missed distinction to style differently. goalLabel names which of the
-// user's (up to 3) goals this specific card is working toward - essential
-// once more than one card can be on screen at once.
+// Renders one open quest as a card - goalLabel names which of the user's
+// (up to 3) goals this specific card is working toward - essential once
+// more than one card can be on screen at once.
 // Provisional 24h countdown (founder request, 10 Agustus - explicitly
-// "sementara" while the real next solution gets figured out later): unlike
-// the old rolling-window countdown this fix's Fokus 1 removed, this one
-// NEVER causes the quest to be silently replaced/regenerated - the quest
-// stays exactly where it is, only the "Mulai" button locks out past 24h.
-// A goal whose only open quest locks out this way has no automatic
-// recovery yet (known, accepted gap per the founder's own words).
+// "sementara" while the real next solution gets figured out later): this
+// client-side 24h math ONLY drives the cosmetic "Waktu habis" label/color
+// (questUrgency) - it stays intentionally unchanged as the label threshold.
+// UPDATE (round 40): the server now DOES auto-close+replace a quest, but
+// only past a real 28h rolling deadline (server/index.js's expiry loop +
+// resolveExpiredQuest) - the old "known, accepted gap, no automatic
+// recovery" note above is now closed. The [data-quest-countdown]
+// disable-at-24h branch below this comment stays dead/cosmetic (no
+// template in the current quest-hub build ever emits that attribute) -
+// the real CTA lockout lives in renderDashboard's selectedExpired, which
+// now uses the 28h threshold to match the server, not this one.
 function formatCountdown(ms) {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(totalSec / 3600);
@@ -4483,7 +4485,17 @@ function renderDashboard() {
   const homeQuests = openQuests.slice(0, 3);
   const activeIdx = Math.min(selectedQuestIndex ?? 0, Math.max(homeQuests.length - 1, 0));
   const selectedQuest = homeQuests[activeIdx] || null;
-  const selectedRemaining = selectedQuest?.createdAt ? new Date(selectedQuest.createdAt).getTime() + 24 * 60 * 60 * 1000 - Date.now() : null;
+  // Round 40: CTA lockout now matches the REAL server deadline (24h nominal
+  // + 4h invisible grace = 28h, server/index.js QUEST_EXPIRY_MS), not the
+  // 24h nominal shown by questUrgency's label below - the button stays
+  // clickable through the grace window (hour 24-28) so minor schedule
+  // drift never locks someone out, while the label still flips to "Waktu
+  // habis" at the nominal 24h exactly as before (questUrgency, unchanged).
+  // In practice the server auto-resolves+replaces anything >=28h old on
+  // every GET /api/state before the client ever sees it, so this mostly
+  // guards a request that raced ahead of that resolution.
+  const QHUB_CTA_LOCKOUT_MS = 24 * 60 * 60 * 1000 + 4 * 60 * 60 * 1000;
+  const selectedRemaining = selectedQuest?.createdAt ? new Date(selectedQuest.createdAt).getTime() + QHUB_CTA_LOCKOUT_MS - Date.now() : null;
   const selectedExpired = selectedRemaining != null && selectedRemaining <= 0;
 
   // Home body: per the founder's own decision (design handoff, 15 Agustus),

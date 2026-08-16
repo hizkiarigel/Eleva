@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786813225.5555193,
-    "ast_hash": "bd466c74f9af21a2e3d127077a8ae0e7",
+    "mtime": 1786842510.6904361,
+    "ast_hash": "4999a30e60456e5dc27fff42d349891b",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -25,8 +25,8 @@
     "semantic_hash": "20fd1243671a1310360b35ac9f823ada"
   },
   "server/claude.js": {
-    "mtime": 1786791750.2810433,
-    "ast_hash": "da96cd4c7004d3974a3aee6fff9c90f3",
+    "mtime": 1786842488.5384347,
+    "ast_hash": "01b42688982d5dc2bea2eb73eb83e029",
     "semantic_hash": ""
   },
   "server/db.js": {
@@ -35,8 +35,8 @@
     "semantic_hash": ""
   },
   "server/index.js": {
-    "mtime": 1786799405.6720092,
-    "ast_hash": "99aa8b2504f35c0ba8e7556cc1ddb828",
+    "mtime": 1786842472.174434,
+    "ast_hash": "4a4c6ccbbb80ae9ed20e2f5d2d6dde3c",
     "semantic_hash": ""
   },
   "server/jobMatch.js": {
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786814436.0595913,
-    "ast_hash": "8df9c34da933bb95261064e342ecfa6e",
+    "mtime": 1786844237.4705389,
+    "ast_hash": "cf3ff343eb759274b84dab16ae938281",
     "semantic_hash": ""
   },
   "README.md": {
@@ -345,8 +345,18 @@
     "semantic_hash": ""
   },
   "tests/quest-hub.e2e.js": {
-    "mtime": 1786814140.3715737,
-    "ast_hash": "877898e4c0f6be6355cda7f6cd09529c",
+    "mtime": 1786842701.6664474,
+    "ast_hash": "6d3c7489664734ac37b296d13a44136a",
+    "semantic_hash": ""
+  },
+  "tests/quest-expiry-prompt.js": {
+    "mtime": 1786842779.046452,
+    "ast_hash": "d03155e606daa2c38ee5752c664aafbe",
+    "semantic_hash": ""
+  },
+  "tests/quest-expiry.e2e.js": {
+    "mtime": 1786842743.52645,
+    "ast_hash": "e5add5345ef0dca7c7362e53acc080b3",
     "semantic_hash": ""
   }
 }
