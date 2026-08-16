@@ -9,6 +9,7 @@ const safety = require("./safety");
 const structured = require("./structured");
 const targets = require("./targets");
 const practiceTestLib = require("./practiceTest");
+const listeningDiagnostic = require("./listeningDiagnostic");
 const jobMatch = require("./jobMatch");
 const jobApplication = require("./jobApplication");
 const nutrition = require("./nutrition");
@@ -625,7 +626,13 @@ app.get("/api/state", requireAuth, async (req, res) => {
       // progress cards (public/app.js metaScreenHTML) - see
       // db.countSessionsSince/startOfWeekKey/startOfMonthKey above.
       metaSessionCounts: {
-        lingua: await db.countSessionsSince(req.userId, "practice-test", startOfMonthKey()),
+        // Round 41: LINGUA's Listening row now creates completionType
+        // "listening-diagnostic" quests instead of "practice-test" - sum
+        // both so the combined LINGUA session count (shown on both the
+        // Reading and Listening rows) stays meaningful, not silently
+        // degrading to a Reading-only count.
+        lingua: (await db.countSessionsSince(req.userId, "practice-test", startOfMonthKey()))
+          + (await db.countSessionsSince(req.userId, "listening-diagnostic", startOfMonthKey())),
         somaActivity: await db.countSessionsSince(req.userId, "structured-physical", startOfWeekKey()),
         somaNutrition: await db.countSessionsSince(req.userId, "nutrition-log", startOfWeekKey()),
         labora: await db.countSessionsSince(req.userId, "job-match-analysis", startOfMonthKey()),
@@ -1143,6 +1150,40 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
   }
 });
 
+// IELTS Listening Half Diagnostic (round 41): unlike practice-test's submit
+// above, this content is fixed/server-code-defined (listeningDiagnostic.js),
+// not per-attempt AI-generated - no band ladder, no per-track state, no AI
+// call. Score IS stored (for future scoring-screen work) but deliberately
+// NOT surfaced in the response - the design handoff's own "not yet built"
+// list explicitly scopes this round's submitted screen to a plain answered-
+// count confirmation, no correctness shown yet.
+app.post("/api/listening-diagnostic/submit", requireAuth, async (req, res) => {
+  try {
+    const { questId, answers, runsCompleted } = req.body;
+    const day = await db.getQuestById(req.userId, questId);
+    if (!day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "listening-diagnostic") return res.status(400).json({ error: "Quest ini bukan tipe Listening Diagnostic." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+
+    const graded = listeningDiagnostic.gradeAnswers(listeningDiagnostic.ASSESSMENT.questions, answers || {});
+    const answeredCount = Object.keys(answers || {}).filter((k) => String(answers[k] || "").trim()).length;
+
+    const reflection = {
+      status: "done", text: "",
+      listeningDiagnosticResult: {
+        answeredCount, totalQuestions: 20, correct: graded.correct,
+        runsCompleted: Math.max(0, Math.min(listeningDiagnostic.RUN_LIMIT, Number(runsCompleted) || 0)),
+      },
+      deltas: {}, timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+    res.json({ ok: true, answeredCount, totalQuestions: 20 });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan hasil diagnostik." });
+  }
+});
+
 // --- Artifacts library (Task 10a): persistent per-user document store, not
 // tied to any single quest - a user can view/add/replace an artifact any
 // time via this icon, and any quest that needs one (job-match-analysis is
@@ -1382,6 +1423,20 @@ app.post("/api/meta/start", requireAuth, async (req, res) => {
         description: "Cek kecocokan lowongan bebas dari META, di luar rotasi goal harian.",
         why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
       };
+    } else if (tool === "listening-diagnostic") {
+      // Round 41: fixed 20-question IELTS Listening Half Diagnostic,
+      // replaces LINGUA's old generic AI-quiz "Listening" row. Unlike
+      // practice-test above, this tool's content is server-code-defined and
+      // identical for every attempt (listeningDiagnostic.js), not
+      // AI-generated - nothing about the quest itself needs to carry a
+      // payload, the client fetches the (answer-stripped) package below.
+      quest = {
+        completionType: "listening-diagnostic",
+        statFocus: "growth",
+        title: "IELTS Listening Half Diagnostic",
+        description: "Diagnostik Listening 20 soal dari META, di luar rotasi goal harian.",
+        why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
+      };
     } else if (tool === "nutrition") {
       // SOMA Nutrition Part B: a META Nutrition session has no goal-specific
       // target to derive a metric/count from (unlike a goal-generated
@@ -1400,7 +1455,12 @@ app.post("/api/meta/start", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Tools tidak dikenal." });
     }
     const created = await db.createQuest(req.userId, null, todayKey(), { quest, insight: null }, false, true);
-    res.json({ ok: true, quest: created });
+    // listening-diagnostic's package is static/identical for every user and
+    // attempt (no per-user variance to protect, unlike an AI-generated
+    // payload) - inlining the stripped package here avoids a second round
+    // trip and a stale-questId race a separate fetch would risk.
+    const extra = tool === "listening-diagnostic" ? { assessment: listeningDiagnostic.stripAnswers(listeningDiagnostic.ASSESSMENT) } : {};
+    res.json({ ok: true, quest: created, ...extra });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal memulai sesi META." });

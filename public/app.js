@@ -683,6 +683,25 @@ let jobMatchFlow = null;
 // dateApplied,submissionProof}, error}. step: "cv" (skipped straight to
 // "form" if a CV artifact already exists) -> "form".
 let jobApplicationFlow = null;
+// Round 41 (IELTS Listening Half Diagnostic, META: LINGUA): replaces
+// LINGUA's old generic AI-quiz "Listening" row (practiceTestFlow's
+// kind==="listening" path is now unreachable from there, left in place per
+// this codebase's "don't delete, just unreachable" convention). Unlike
+// every other *Flow object, "active"/"submitted" steps bypass the normal
+// .app-shell chrome entirely (see renderDashboard's early-return) - the
+// design's own "test mode" requirement (header+tab bar hidden during the
+// exam). null when inactive.
+// {
+//   questId, step: "intro" | "active" | "submitted",
+//   assessment: { recordings, questions, matchingLegend } | null,  // stripped package from POST /api/meta/start
+//   answers: {},                 // { [questionId]: string } - NEVER reset by a replay
+//   runsCompleted: 0,            // 0..2, only ever incremented by lstnFinishRun()
+//   playback: { state: "idle" | "playing-rec1" | "transition" | "playing-rec2" | "run-complete" | "error", gen: 0, recordingId: null },
+//   deadlineTs: null,            // Date.now() + 30min, set once on entering "active"
+//   submitConfirmOpen: false,
+//   error: "",
+// }
+let listeningDiagnosticFlow = null;
 // Task 12 (META): true while the inline Cardio/Gym/Recovery picker for the
 // "Body" META box is showing (tapped but no kind chosen yet). Reset after
 // /api/meta/start succeeds or the user backs out.
@@ -3105,6 +3124,131 @@ function speakScript(text) {
   window.speechSynthesis.speak(utterance);
 }
 
+// Round 41 (IELTS Listening Half Diagnostic) TTS orchestration. Real
+// speechSynthesis playback (founder's own confirmed choice - a real user
+// can actually complete the test today, not just see an inert shell), NOT
+// a reuse of speakScript() (different lifecycle: sequential two-segment
+// auto-chaining via utterance.onend, a transition pause in between, a
+// hard 2-run cap that must NOT consume a run on failure). Race-safety
+// mirrors the onboarding bridge audio system's bridgeAudioGen pattern
+// (app.js:1541+) - lstnGen is bumped by lstnStop(), and every async
+// callback below checks it before touching state, so a stop/replay/exit
+// mid-utterance can never let a stale callback act on current state.
+let lstnGen = 0;
+let lstnTransitionTimer = null;
+const LSTN_TRANSITION_MS = 2500;
+
+function lstnStop() {
+  lstnGen += 1;
+  window.speechSynthesis?.cancel();
+  if (lstnTransitionTimer) { clearTimeout(lstnTransitionTimer); lstnTransitionTimer = null; }
+}
+
+// "Start Listening" and "Putar sekali lagi" both call this. Never touches
+// .answers - a replay must never reset what the user has already typed.
+function lstnStartRun() {
+  const f = listeningDiagnosticFlow;
+  if (!f || f.runsCompleted >= 2) return;
+  lstnStop();
+  const gen = lstnGen;
+  f.playback = { state: "playing-rec1", gen, recordingId: 1 };
+  renderDashboard();
+  lstnSpeak(1, gen);
+}
+
+function lstnSpeak(recordingId, gen) {
+  const f = listeningDiagnosticFlow;
+  const rec = f?.assessment?.recordings.find((r) => r.recordingId === recordingId);
+  if (!window.speechSynthesis || !rec) { lstnFail(gen, recordingId); return; }
+  const utterance = new SpeechSynthesisUtterance(rec.script);
+  utterance.lang = "en-US";
+  utterance.rate = 0.95;
+  utterance.onend = () => {
+    if (gen !== lstnGen) return; // superseded mid-utterance - no-op
+    if (recordingId === 1) lstnBeginTransition(gen);
+    else lstnFinishRun(gen);
+  };
+  utterance.onerror = () => { if (gen === lstnGen) lstnFail(gen, recordingId); };
+  window.speechSynthesis.speak(utterance);
+}
+
+// Spec: a technical failure must NOT consume a run - runsCompleted is
+// untouched here, only bumped inside lstnFinishRun (after recording 2's
+// real completion).
+function lstnFail(gen, recordingId) {
+  if (gen !== lstnGen || !listeningDiagnosticFlow) return;
+  listeningDiagnosticFlow.playback = { state: "error", gen, recordingId };
+  renderDashboard();
+}
+
+function lstnRetry() {
+  const f = listeningDiagnosticFlow;
+  if (!f) return;
+  const { recordingId } = f.playback;
+  lstnStop();
+  const gen = lstnGen;
+  f.playback = { state: recordingId === 1 ? "playing-rec1" : "playing-rec2", gen, recordingId };
+  renderDashboard();
+  lstnSpeak(recordingId, gen);
+}
+
+// "Now turn to questions 11 to 20..." shown inline in the audio card for
+// ~2.5s, no modal/button - then Recording 2 auto-starts. No fake timer for
+// recording 2 itself: it's real speechSynthesis, chained off THIS
+// timeout's own gen check, so a stop() during the pause correctly cancels
+// the follow-on speak.
+function lstnBeginTransition(gen) {
+  const f = listeningDiagnosticFlow;
+  if (gen !== lstnGen || !f) return;
+  f.playback = { state: "transition", gen, recordingId: 1 };
+  renderDashboard();
+  lstnTransitionTimer = setTimeout(() => {
+    if (gen !== lstnGen || !listeningDiagnosticFlow) return; // stop/exit happened during the pause
+    listeningDiagnosticFlow.playback = { state: "playing-rec2", gen, recordingId: 2 };
+    renderDashboard();
+    lstnSpeak(2, gen);
+  }, LSTN_TRANSITION_MS);
+}
+
+// The ONE place runsCompleted changes - only reached after recording 2's
+// real utterance.onend, i.e. a genuinely completed full run.
+function lstnFinishRun(gen) {
+  const f = listeningDiagnosticFlow;
+  if (gen !== lstnGen || !f) return;
+  f.runsCompleted += 1;
+  f.playback = { state: "run-complete", gen, recordingId: 2 };
+  renderDashboard();
+}
+
+// Dedicated countdown, NOT a reuse of the page-lifetime countdownTimer/
+// tickCountdowns singleton (app.js ~3550+, used for quest-urgency chips
+// elsewhere and never torn down) - this one is scoped precisely to the
+// active-test step, explicitly started/stopped with it. Direct-DOM-write
+// per tick, same rationale as tickCountdowns: never interrupt in-progress
+// typing elsewhere on screen via a full re-render.
+let lstnTimerInterval = null;
+function lstnFormatMMSS(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+function lstnStartCountdown() {
+  if (lstnTimerInterval || !listeningDiagnosticFlow) return;
+  if (!listeningDiagnosticFlow.deadlineTs) listeningDiagnosticFlow.deadlineTs = Date.now() + 30 * 60 * 1000;
+  lstnTimerInterval = setInterval(() => {
+    const el = document.getElementById("lstnTimer");
+    if (!el || !listeningDiagnosticFlow) return lstnStopCountdown();
+    const remaining = Math.max(0, listeningDiagnosticFlow.deadlineTs - Date.now());
+    el.textContent = lstnFormatMMSS(remaining);
+    el.classList.toggle("lstn-timer-red", remaining <= 5 * 60 * 1000);
+    // No auto-submit at 0:00 (undefined by the design spec) - display just
+    // freezes at 00:00, matching this round's "no scoring/exit-confirm yet" scope.
+  }, 1000);
+}
+function lstnStopCountdown() {
+  clearInterval(lstnTimerInterval);
+  lstnTimerInterval = null;
+}
+
 const PRACTICE_LABELS = { reading: "Reading", listening: "Listening", academic: "Academic", general: "General Training" };
 
 function practiceQuestionHTML(q, idx) {
@@ -3426,6 +3570,294 @@ function artifactsSheetHTML() {
         <button class="btn-primary full" id="artifactsClose" style="margin-top:16px">Tutup</button>
       </div>
     </div>`;
+}
+
+// ==== Round 41: IELTS Listening Half Diagnostic ====================
+
+function lstnAnsweredCount(f) {
+  return Object.values(f.answers).filter((v) => String(v || "").trim()).length;
+}
+
+// Intro ("Test Ready") - renders WITH normal chrome present, same as
+// Practice Test's own kind/track picker steps. Only "Start Listening"
+// transitions into the chrome-hidden "active" step (renderDashboard's
+// early-return bypass).
+function listeningDiagnosticIntroHTML() {
+  const f = listeningDiagnosticFlow;
+  return `
+    <div class="lstn-intro fadeUp">
+      <div class="eyebrow mono" style="color:#6EA8FF">META · LINGUA</div>
+      <h1 class="fr lstn-intro-title">IELTS Listening</h1>
+      <p class="lstn-intro-subtitle">Academic · Half Diagnostic</p>
+      <div class="lstn-intro-stats">
+        <div class="lstn-intro-stat"><div class="lstn-intro-stat-num fr">20</div><div class="lstn-intro-stat-label">pertanyaan</div></div>
+        <div class="lstn-intro-stat"><div class="lstn-intro-stat-num fr">2</div><div class="lstn-intro-stat-label">recording</div></div>
+      </div>
+      <div class="lstn-intro-instr-label mono">INSTRUKSI</div>
+      <ul class="lstn-intro-instr-list">
+        <li>Sekali Play memutar Recording 1 dan Recording 2 secara otomatis.</li>
+        <li>Kamu bisa memutar seluruh tes maksimal 2 kali.</li>
+        <li>Jawaban tetap tersimpan saat pemutaran kedua.</li>
+        <li>Jawab sambil mendengarkan.</li>
+      </ul>
+      <div class="lstn-intro-plays mono">${f.runsCompleted}/2 diputar</div>
+      <button class="btn-primary full lstn-intro-cta" id="lstnStart">Start Listening</button>
+      <button class="btn-ghost full" id="lstnCancel" style="margin-top:10px">← Batal</button>
+    </div>`;
+}
+
+// Status strip - replaces the app header entirely during the active test.
+function lstnStripHTML(f) {
+  const st = f.playback.state;
+  let range = "Questions 1–20", rec = "Belum diputar";
+  if (st === "playing-rec1") { range = "Questions 1–10 of 20"; rec = "Recording 1 of 2"; }
+  else if (st === "transition") { range = "Questions 1–20"; rec = "Recording 1 of 2"; }
+  else if (st === "playing-rec2") { range = "Questions 11–20 of 20"; rec = "Recording 2 of 2"; }
+  else if (st === "run-complete" || st === "error") { range = "Questions 1–20"; rec = `Putaran ke-${f.runsCompleted} selesai`; }
+  return `
+    <div class="lstn-strip">
+      <div class="lstn-strip-range mono">${esc(range)}</div>
+      <div class="lstn-strip-rec mono">${esc(rec)}</div>
+      <div class="lstn-timer mono" id="lstnTimer">30:00</div>
+    </div>`;
+}
+
+function lstnAudioCardHTML(f) {
+  const st = f.playback.state;
+  const playing = st === "playing-rec1" || st === "playing-rec2";
+  const disablePlay = playing || st === "transition" || f.runsCompleted >= 2;
+  const title = playing ? "Sedang memutar..." : st === "run-complete" ? `Putaran ke-${f.runsCompleted} selesai` : st === "error" ? "Gagal memutar" : "Putar audio";
+  const sub = `${f.runsCompleted} / 2 diputar`;
+  const recLabel = st === "playing-rec2" ? "REC 2/2" : "REC 1/2";
+  let footer = "";
+  if (st === "transition") footer = `<p class="lstn-audio-transition">Now turn to questions 11 to 20…</p>`;
+  else if (st === "run-complete") footer = f.runsCompleted < 2
+    ? `<button class="lstn-replay-btn" id="lstnReplay">Putar sekali lagi</button>`
+    : `<button class="lstn-replay-btn" disabled>Audio sudah diputar 2 kali</button>`;
+  else if (st === "error") footer = `<p class="lstn-audio-error">Gagal memutar, coba lagi.</p><button class="lstn-replay-btn" id="lstnRetryPlay">Coba lagi</button>`;
+  else if (st === "idle") footer = `<p class="lstn-audio-hint">Sekali Play memutar Recording 1 lalu Recording 2 secara berurutan.</p>`;
+  return `
+    <div class="lstn-audio-card ${playing ? "lstn-playing" : ""}">
+      <div class="lstn-audio-row">
+        <button class="lstn-play-btn" id="lstnPlayBtn" ${disablePlay ? "disabled" : ""} aria-label="Putar">${playing ? "❚❚" : "▶"}</button>
+        <div style="flex:1;min-width:0">
+          <div class="lstn-audio-title">${esc(title)}</div>
+          <div class="lstn-audio-sub mono">${esc(sub)}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+          <span class="lstn-strip-rec mono">${recLabel}</span>
+          <div class="lstn-eq"><span></span><span></span><span></span><span></span></div>
+        </div>
+      </div>
+      ${footer ? `<div style="margin-top:10px">${footer}</div>` : ""}
+    </div>`;
+}
+
+function lstnBlockHTML({ range, title, instruction, live, inner }) {
+  return `
+    <div class="lstn-block ${live ? "lstn-block-live" : ""}">
+      <div class="lstn-block-label">
+        <span>QUESTIONS ${range}</span>
+        ${live ? `<span class="lstn-live-tag">SEDANG DIPUTAR</span>` : ""}
+      </div>
+      ${title ? `<div class="lstn-block-title fr">${esc(title)}</div>` : ""}
+      <p class="lstn-instruction">${instruction}</p>
+      ${inner}
+    </div>`;
+}
+
+function lstnNoteCompletionBlockHTML(f) {
+  const qs = f.assessment.questions.filter((q) => q.taskType === "note_completion");
+  const live = f.playback.state === "playing-rec1";
+  const rows = qs.map((q) => `
+    <div class="lstn-note-row">
+      <span class="lstn-note-label"><span class="mono lstn-qnum">${q.questionNumber}</span>${esc(q.prompt)}</span>
+      <input type="text" class="lstn-input" data-lstn-text="${q.questionId}" maxlength="40" placeholder="Jawaban" value="${esc(f.answers[q.questionId] || "")}" />
+    </div>`).join("");
+  return lstnBlockHTML({
+    range: "1–5", title: "Riverside Leisure Centre",
+    instruction: "Complete the notes below. Write NO MORE THAN TWO WORDS AND/OR A NUMBER for each answer.",
+    live, inner: rows,
+  });
+}
+
+function lstnMultipleChoiceBlockHTML(f) {
+  const qs = f.assessment.questions.filter((q) => q.taskType === "multiple_choice");
+  const live = f.playback.state === "playing-rec1";
+  const inner = qs.map((q) => `
+    <div class="lstn-mc-item">
+      <div class="lstn-note-label lstn-mc-prompt"><span class="mono lstn-qnum">${q.questionNumber}</span>${esc(q.prompt)}</div>
+      <div class="lstn-mc-options">
+        ${q.options.map((o) => `
+          <button class="status-btn ${f.answers[q.questionId] === o.letter ? "active" : ""}" data-lstn-mc="${q.questionId}" data-lstn-letter="${o.letter}">
+            <span class="lstn-letter-badge">${o.letter}</span> ${esc(o.label)}
+          </button>`).join("")}
+      </div>
+    </div>`).join("");
+  return lstnBlockHTML({ range: "6–10", title: null, instruction: "Choose the correct letter, A, B or C.", live, inner });
+}
+
+function lstnMatchingBlockHTML(f) {
+  const qs = f.assessment.questions.filter((q) => q.taskType === "matching");
+  const legend = f.assessment.matchingLegend;
+  const live = f.playback.state === "playing-rec2";
+  const legendHTML = `<div class="lstn-legend">${legend.map((o) => `<div class="lstn-legend-item"><b>${o.letter}</b> ${esc(o.label)}</div>`).join("")}</div>`;
+  const rows = qs.map((q) => `
+    <div class="lstn-match-row">
+      <div class="lstn-match-statement"><span class="mono lstn-qnum">${q.questionNumber}</span>${esc(q.prompt)}</div>
+      <div class="lstn-match-letters">
+        ${legend.map((o) => `<button class="lstn-letter-badge ${f.answers[q.questionId] === o.letter ? "active" : ""}" data-lstn-match="${q.questionId}" data-lstn-letter="${o.letter}">${o.letter}</button>`).join("")}
+      </div>
+    </div>`).join("");
+  return lstnBlockHTML({ range: "11–15", title: null, instruction: "Choose FIVE answers from the box, A–E.", live, inner: legendHTML + rows });
+}
+
+function lstnSentenceCompletionBlockHTML(f) {
+  const qs = f.assessment.questions.filter((q) => q.taskType === "sentence_completion");
+  const live = f.playback.state === "playing-rec2";
+  const rows = qs.map((q) => `
+    <div class="lstn-note-row lstn-sentence-row">
+      <span class="lstn-note-label"><span class="mono lstn-qnum">${q.questionNumber}</span>${esc(q.prompt)}</span>
+      <input type="text" class="lstn-input lstn-sentence-input" data-lstn-text="${q.questionId}" maxlength="40" placeholder="Jawaban" value="${esc(f.answers[q.questionId] || "")}" />
+    </div>`).join("");
+  return lstnBlockHTML({
+    range: "16–20", title: null,
+    instruction: "Complete the sentences below. Write NO MORE THAN TWO WORDS AND/OR A NUMBER for each answer.",
+    live, inner: rows,
+  });
+}
+
+function lstnActiveHTML() {
+  const f = listeningDiagnosticFlow;
+  return `
+    ${lstnStripHTML(f)}
+    <div class="lstn-scroll">
+      ${lstnAudioCardHTML(f)}
+      ${lstnNoteCompletionBlockHTML(f)}
+      ${lstnMultipleChoiceBlockHTML(f)}
+      ${lstnMatchingBlockHTML(f)}
+      ${lstnSentenceCompletionBlockHTML(f)}
+      ${f.error ? `<p class="lstn-audio-error" style="text-align:center;margin-top:8px">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="lstn-foot">
+      <span class="lstn-foot-count mono" id="lstnFootCount">${lstnAnsweredCount(f)} / 20 dijawab</span>
+      <button class="lstn-foot-submit" id="lstnFootSubmit">Submit jawaban</button>
+    </div>`;
+}
+
+function lstnSubmittedHTML() {
+  const f = listeningDiagnosticFlow;
+  return `
+    <div class="lstn-submitted">
+      <h2 class="fr">Diagnostik selesai</h2>
+      <p>${f.submittedAnsweredCount ?? lstnAnsweredCount(f)} dari 20 soal terjawab.</p>
+      <button class="btn-primary full" id="lstnBackToMeta">Kembali ke META</button>
+    </div>`;
+}
+
+// "N soal belum dijawab / Kembali cek / Tetap submit" - reuses .help-overlay/
+// .help-sheet verbatim (same precedent as the "Ganti Pathway" confirm sheet,
+// app.js gantiConfirmOverlay), only shown when questions remain unanswered.
+function lstnSubmitConfirmSheetHTML() {
+  const f = listeningDiagnosticFlow;
+  const unanswered = 20 - lstnAnsweredCount(f);
+  return `
+    <div class="help-overlay" id="lstnSubmitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p>${unanswered} soal belum dijawab. Kamu masih bisa kembali dan melengkapi jawabanmu.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="lstnSubmitBack" style="flex:1">Kembali cek</button>
+          <button class="btn-primary" id="lstnSubmitAnyway" style="flex:1">Tetap submit</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Full chrome bypass - no appHeaderHTML()/tabBarHTML() call at all, per the
+// design's "test mode" requirement. Reached only from renderDashboard's
+// early-return for step "active"/"submitted".
+function renderListeningDiagnosticTest() {
+  const f = listeningDiagnosticFlow;
+  root.innerHTML = `
+    <div class="lstn-shell">
+      ${f.step === "submitted" ? lstnSubmittedHTML() : lstnActiveHTML()}
+    </div>
+    ${f.submitConfirmOpen ? lstnSubmitConfirmSheetHTML() : ""}`;
+  wireListeningDiagnosticHandlers();
+  if (f.step === "active") lstnStartCountdown();
+}
+
+function lstnUpdateFooterCount() {
+  const el = document.getElementById("lstnFootCount");
+  if (!el || !listeningDiagnosticFlow) return;
+  el.textContent = `${lstnAnsweredCount(listeningDiagnosticFlow)} / 20 dijawab`;
+}
+
+async function lstnDoSubmit() {
+  const f = listeningDiagnosticFlow;
+  if (!f) return;
+  lstnStop();
+  lstnStopCountdown();
+  f.submitConfirmOpen = false;
+  f.error = "";
+  try {
+    const resp = await api("/api/listening-diagnostic/submit", { method: "POST", body: { questId: f.questId, answers: f.answers, runsCompleted: f.runsCompleted } });
+    f.step = "submitted";
+    f.submittedAnsweredCount = resp.answeredCount;
+  } catch (e) {
+    f.error = e.message;
+  }
+  renderDashboard();
+}
+
+function wireListeningDiagnosticHandlers() {
+  document.getElementById("lstnStart")?.addEventListener("click", () => {
+    listeningDiagnosticFlow.step = "active";
+    renderDashboard();
+    lstnStartRun();
+  });
+  document.getElementById("lstnCancel")?.addEventListener("click", () => {
+    // Same precedent as ptCancel: just clears client state, no API call -
+    // the just-created META quest row is left open/unreflected, same
+    // "orphaned META session is fine, never blocks anything" convention.
+    listeningDiagnosticFlow = null;
+    activeScreen = "meta";
+    renderDashboard();
+  });
+  document.getElementById("lstnPlayBtn")?.addEventListener("click", () => lstnStartRun());
+  document.getElementById("lstnReplay")?.addEventListener("click", () => lstnStartRun());
+  document.getElementById("lstnRetryPlay")?.addEventListener("click", () => lstnRetry());
+
+  document.querySelectorAll("[data-lstn-text]").forEach((input) => input.addEventListener("input", (e) => {
+    if (!listeningDiagnosticFlow) return;
+    listeningDiagnosticFlow.answers[e.target.dataset.lstnText] = e.target.value;
+    lstnUpdateFooterCount();
+  }));
+  document.querySelectorAll("[data-lstn-mc]").forEach((btn) => btn.addEventListener("click", () => {
+    listeningDiagnosticFlow.answers[btn.dataset.lstnMc] = btn.dataset.lstnLetter;
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-lstn-match]").forEach((btn) => btn.addEventListener("click", () => {
+    listeningDiagnosticFlow.answers[btn.dataset.lstnMatch] = btn.dataset.lstnLetter;
+    renderDashboard();
+  }));
+
+  document.getElementById("lstnFootSubmit")?.addEventListener("click", () => {
+    const f = listeningDiagnosticFlow;
+    const unanswered = 20 - lstnAnsweredCount(f);
+    if (unanswered > 0) { f.submitConfirmOpen = true; renderDashboard(); return; }
+    lstnDoSubmit();
+  });
+  document.getElementById("lstnSubmitBack")?.addEventListener("click", () => {
+    listeningDiagnosticFlow.submitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("lstnSubmitAnyway")?.addEventListener("click", () => lstnDoSubmit());
+  document.getElementById("lstnBackToMeta")?.addEventListener("click", () => {
+    listeningDiagnosticFlow = null;
+    activeScreen = "meta";
+    renderDashboard();
+  });
 }
 
 // Task 9: score + per-wrong-answer explanation, folded into the same
@@ -4308,6 +4740,15 @@ async function openNutritionFlow(day) {
 }
 
 function renderDashboard() {
+  // Round 41: the IELTS Listening Half Diagnostic's active exam/submitted
+  // screens are the one flow in this app that hides the normal header+tab
+  // bar entirely ("test mode", per the design handoff) - bypass the usual
+  // .app-shell assembly completely rather than threading a flag through it.
+  // The "intro" step does NOT bypass - it renders inside the normal chrome
+  // below, exactly like Practice Test's own kind/track picker steps do.
+  if (listeningDiagnosticFlow?.step === "active" || listeningDiagnosticFlow?.step === "submitted") {
+    return renderListeningDiagnosticTest();
+  }
   const s = appState;
   // Task 11c: server still mixes real Side Quests into openQuests (flagged
   // isSideQuest) alongside Primary Quests - filtered out here since the
@@ -4506,6 +4947,7 @@ function renderDashboard() {
   // just unreachable from here now - same "not deleted, just unreachable"
   // treatment as artifactsSheetHTML below).
   const homeBodyHTML = completedResult ? completedResultCardHTML(completedResult)
+    : listeningDiagnosticFlow ? listeningDiagnosticIntroHTML() // only reached for step==="intro" - "active"/"submitted" are already intercepted at the top of this function
     : practiceTestFlow ? practiceTestFlowHTML()
     : jobMatchFlow ? jobMatchFlowHTML()
     : jobApplicationFlow ? jobApplicationFlowHTML()
@@ -4575,10 +5017,12 @@ function renderDashboard() {
       // supplies kind/track when the quest itself was explicit about them;
       // otherwise this defaults to Reading/Academic (a fixed default, not an
       // AI guess - simplest predictable behavior). The picker UI itself
-      // (practiceTestFlowHTML's "kind"/"track" steps) still exists and is
-      // still used by the META tab's practice-test tool, where the user is
-      // deliberately choosing to start a session and picking what to
-      // practice IS the point.
+      // (practiceTestFlowHTML's "track" step) still exists and is still used
+      // by LINGUA's Reading row, where the user is deliberately choosing to
+      // start a session and picking what to practice IS the point. The
+      // "kind" step itself is unreachable from anywhere today (round 41:
+      // LINGUA's Listening row now launches the Listening Half Diagnostic
+      // instead of this generic AI quiz) - left in place, not deleted.
       const pts = quest.practiceTestSchema || {};
       const kind = pts.kind || "reading";
       const track = pts.track || "academic";
@@ -4707,23 +5151,42 @@ function renderDashboard() {
     }
     renderDashboard();
   }));
-  // META target-recommendation follow-up: LINGUA's Reading/Listening tool
-  // rows start a META practice-test session with the track PRESET (skips
-  // straight to practiceTestFlow's "track" step instead of asking kind
-  // first) - Writing/Speaking have no row here at all yet (coming-soon).
+  // LINGUA's Reading row starts the generic AI-quiz Practice Test flow with
+  // the track PRESET (skips straight to practiceTestFlow's "track" step
+  // instead of asking kind first). The Listening row now launches the round
+  // 41 IELTS Listening Half Diagnostic instead (a fixed, curated experience
+  // - replaces that old generic AI-quiz destination entirely per the
+  // founder's own confirmed decision; practiceTestFlow's kind==="listening"
+  // path becomes unreachable from here, left in place, same "don't delete,
+  // just unreachable" convention as elsewhere). Writing/Speaking have no row
+  // here at all yet (coming-soon).
   document.querySelectorAll("[data-lingua-track]").forEach((b) => b.addEventListener("click", async () => {
     const kind = b.dataset.linguaTrack;
     metaError = "";
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
-      const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "practice-test" } });
-      practiceTestFlow = { questId: quest.id, step: "track", kind, answers: {} };
+      if (kind === "listening") {
+        const { quest, assessment } = await api("/api/meta/start", { method: "POST", body: { tool: "listening-diagnostic" } });
+        listeningDiagnosticFlow = {
+          questId: quest.id, step: "intro", assessment, answers: {}, runsCompleted: 0,
+          playback: { state: "idle", gen: 0, recordingId: null }, deadlineTs: null, submitConfirmOpen: false, error: "",
+        };
+      } else {
+        const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "practice-test" } });
+        practiceTestFlow = { questId: quest.id, step: "track", kind, answers: {} };
+      }
       activeScreen = "home";
     } catch (e) {
       metaError = e.message;
     }
     renderDashboard();
   }));
+  // The listening-diagnostic "intro" step renders inside this normal chrome
+  // (unlike "active"/"submitted", which bypass renderDashboard() entirely
+  // above) - wireListeningDiagnosticHandlers() also binds lstnPlayBtn/
+  // lstnReplay/etc., all safe no-ops here since those ids don't exist on
+  // the intro screen, only lstnStart/lstnCancel do.
+  if (listeningDiagnosticFlow?.step === "intro") wireListeningDiagnosticHandlers();
   // META target-recommendation follow-up: tapping an ACTIVE target card
   // opens that realm's tool list ("World Map shows Target, Realm page shows
   // Tools" - founder framing) instead of jumping straight into a flow.

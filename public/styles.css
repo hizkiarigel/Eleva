@@ -904,6 +904,116 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .qhub-why-toggle { background: none; border: none; color: var(--qh-gold); font-size: 12.5px; padding: 0; }
 .qhub-why { color: var(--qh-secondary); font-size: 13px; font-style: italic; margin: 10px 0 0; }
 
+/* IELTS Listening Half Diagnostic (design handoff, round 41, META: LINGUA)
+   - screen-scoped literal-hex tokens, same "exact hex for exact-fidelity
+   handoffs" convention as --qh- and --ppick- (this screen's own fixed
+   palette, not the app's global --accent/--rust). .lstn-shell is the one
+   flow in this app with NO header/tab bar - a genuine full takeover, not a
+   variant of .app-shell. */
+.lstn-intro { padding: 4px 2px; }
+.lstn-intro-title { font-size: 30px; margin: 6px 0 2px; color: var(--text); }
+.lstn-intro-subtitle { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+.lstn-intro-stats { display: flex; gap: 10px; margin-bottom: 22px; }
+.lstn-intro-stat { flex: 1; border: 1px solid var(--hair); border-radius: 10px; padding: 14px 16px; }
+.lstn-intro-stat-num { font-size: 26px; color: #e8a33d; }
+.lstn-intro-stat-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.lstn-intro-instr-label { color: #e8a33d; font-size: 10.5px; letter-spacing: 1px; margin-bottom: 10px; }
+.lstn-intro-instr-list { list-style: none; margin: 0 0 18px; padding: 0; }
+.lstn-intro-instr-list li { position: relative; padding-left: 16px; color: var(--text); font-size: 13.5px; line-height: 1.6; margin-bottom: 10px; }
+.lstn-intro-instr-list li::before { content: "—"; position: absolute; left: 0; color: var(--muted); }
+.lstn-intro-plays { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+.lstn-intro-cta { background: linear-gradient(135deg, #f0b862, #dd9530); color: #08080c; border: none; }
+
+.lstn-shell {
+  position: fixed; inset: 10px; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: min(390px, 88vw);
+  height: calc(var(--vh, 1dvh) * 100 - 20px);
+  display: flex; flex-direction: column; box-sizing: border-box;
+  background: #08080c; color: #edeae3; font-family: "Inter", sans-serif;
+  border-radius: 0; overflow: hidden; z-index: 60;
+}
+.lstn-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 16px 90px; }
+
+.lstn-strip { flex: none; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.lstn-strip-range { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: #edeae3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lstn-strip-rec { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: #8b8a99; white-space: nowrap; }
+.lstn-timer { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: #e8a33d; border: 1px solid rgba(232, 163, 61, .4); border-radius: 20px; padding: 3px 10px; flex: none; }
+.lstn-timer.lstn-timer-red { color: #c9564f; border-color: rgba(201, 86, 79, .5); }
+
+.lstn-audio-card { background: #11111a; border: 1px solid rgba(255, 255, 255, .10); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; }
+.lstn-audio-row { display: flex; align-items: center; gap: 12px; }
+.lstn-play-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid #e8a33d; background: transparent; color: #e8a33d; flex: none; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.lstn-play-btn:disabled { opacity: .45; }
+.lstn-audio-card.lstn-playing .lstn-play-btn { background: #e8a33d; color: #08080c; box-shadow: 0 0 16px rgba(232, 163, 61, .45); }
+.lstn-audio-title { font-size: 14px; font-weight: 600; color: #edeae3; }
+.lstn-audio-sub { font-size: 11px; color: #e8a33d; margin-top: 2px; }
+.lstn-eq { display: flex; align-items: flex-end; gap: 3px; height: 16px; }
+.lstn-eq span { width: 3px; background: #e8a33d; border-radius: 2px; height: 4px; opacity: .3; }
+.lstn-audio-card.lstn-playing .lstn-eq span { animation: lstnEq .9s ease-in-out infinite; opacity: 1; }
+.lstn-eq span:nth-child(2) { animation-delay: .15s; }
+.lstn-eq span:nth-child(3) { animation-delay: .3s; }
+.lstn-eq span:nth-child(4) { animation-delay: .45s; }
+@keyframes lstnEq { 0%, 100% { height: 4px; } 50% { height: 16px; } }
+.lstn-audio-transition, .lstn-audio-hint, .lstn-audio-complete { font-size: 12.5px; color: #c9c6ce; margin: 0; }
+.lstn-audio-error { color: #c9564f; font-size: 12.5px; margin: 0 0 8px; }
+.lstn-replay-btn { border: 1px solid #e8a33d; color: #e8a33d; background: transparent; border-radius: 8px; padding: 8px 14px; font-size: 12.5px; }
+.lstn-replay-btn:disabled { border-color: rgba(255, 255, 255, .12); color: #8b8a99; }
+
+.lstn-block { background: #0f0f17; border: 1px solid rgba(255, 255, 255, .08); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+.lstn-block.lstn-block-live { border-color: rgba(232, 163, 61, .5); }
+.lstn-block-label { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; color: #8b8a99; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.lstn-live-tag { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; color: #e8a33d; border: 1px solid rgba(232, 163, 61, .5); border-radius: 20px; padding: 2px 8px; }
+.lstn-block-title { font-size: 16px; margin: 0 0 6px; color: #edeae3; }
+.lstn-instruction { font-size: 12px; color: #c9c6ce; line-height: 1.5; margin: 0 0 12px; }
+.lstn-qnum { color: #e8a33d; margin-right: 6px; font-size: 11px; }
+
+.lstn-note-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.lstn-note-row:last-child { border-bottom: none; }
+.lstn-note-label { font-size: 13px; color: #edeae3; flex: 1; }
+.lstn-input { background: #0e0e16; border: 1px solid rgba(255, 255, 255, .12); border-radius: 8px; color: #edeae3; padding: 8px 10px; font-size: 13px; width: 120px; text-align: right; flex: none; }
+.lstn-sentence-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+.lstn-sentence-input { width: 100%; text-align: left; }
+
+.lstn-mc-item { margin-bottom: 14px; }
+.lstn-mc-item:last-child { margin-bottom: 0; }
+.lstn-mc-prompt { margin-bottom: 8px; }
+.lstn-mc-options { display: flex; flex-direction: column; gap: 6px; }
+.lstn-shell .status-btn { flex: none; width: 100%; text-align: left; display: flex; align-items: center; gap: 10px; background: #0e0e16; border-color: rgba(255, 255, 255, .12); color: #c9c6ce; padding: 10px 12px; }
+.lstn-shell .status-btn.active { border-color: #e8a33d; background: rgba(232, 163, 61, .12); color: #e8a33d; }
+.lstn-letter-badge { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .2); display: inline-flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: 11px; flex: none; color: #c9c6ce; }
+.lstn-shell .status-btn.active .lstn-letter-badge { border-color: #e8a33d; color: #e8a33d; }
+
+.lstn-legend { background: #0e0e16; border: 1px solid rgba(255, 255, 255, .10); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+.lstn-legend-item { font-size: 12.5px; color: #c9c6ce; padding: 3px 0; }
+.lstn-legend-item b { color: #edeae3; font-family: "IBM Plex Mono", monospace; margin-right: 4px; }
+.lstn-match-row { padding: 9px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.lstn-match-row:last-child { border-bottom: none; }
+.lstn-match-statement { font-size: 13px; color: #edeae3; margin-bottom: 8px; }
+.lstn-match-letters { display: flex; gap: 6px; }
+.lstn-match-letters button.lstn-letter-badge { width: 30px; height: 30px; background: #0e0e16; border-color: rgba(255, 255, 255, .12); cursor: pointer; }
+.lstn-match-letters button.lstn-letter-badge.active { border-color: #e8a33d; background: rgba(232, 163, 61, .15); color: #e8a33d; }
+
+/* .help-overlay's own z-index (50) sits BELOW .lstn-foot (65) - the shared
+   sheet reused for the unanswered-questions confirm dialog would otherwise
+   render underneath the sticky footer, making its buttons unclickable.
+   Scoped by id (not a global .help-overlay bump) so every other screen's
+   help sheet stays exactly as it was. */
+#lstnSubmitConfirmOverlay { z-index: 70; }
+
+.lstn-foot {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 10px;
+  width: calc(100% - 20px); max-width: min(390px, 88vw);
+  background: #0b0b11; border: 1px solid rgba(255, 255, 255, .10); border-radius: 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; z-index: 65; box-sizing: border-box;
+}
+.lstn-foot-count { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: #c9c6ce; }
+.lstn-foot-submit { background: linear-gradient(135deg, #f0b862, #dd9530); color: #08080c; border: none; border-radius: 10px; padding: 10px 20px; font-weight: 600; font-size: 13.5px; }
+
+.lstn-submitted { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 24px; gap: 12px; }
+.lstn-submitted h2 { margin: 0; color: #edeae3; }
+.lstn-submitted p { color: #c9c6ce; font-size: 14px; margin: 0 0 8px; }
+
 .chapter-header.compact { margin-bottom: 20px; }
 .chapter-header.compact .bab { color: var(--muted); font-size: 10.5px; letter-spacing: 1.5px; margin-bottom: 8px; }
 .chapter-header.compact .rule { width: 36px; height: 2px; background: var(--accent); margin-bottom: 10px; }

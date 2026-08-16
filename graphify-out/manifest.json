@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "public/app.js": {
-    "mtime": 1786842510.6904361,
-    "ast_hash": "4999a30e60456e5dc27fff42d349891b",
+    "mtime": 1786897919.179117,
+    "ast_hash": "1ce75b1864e372c04e0558c7c36818d3",
     "semantic_hash": ""
   },
   "reference/Eleva_Prototype.jsx": {
@@ -35,8 +35,8 @@
     "semantic_hash": ""
   },
   "server/index.js": {
-    "mtime": 1786842472.174434,
-    "ast_hash": "4a4c6ccbbb80ae9ed20e2f5d2d6dde3c",
+    "mtime": 1786887912.8976295,
+    "ast_hash": "e71536ae8f320b3e63a3fe2be8e08970",
     "semantic_hash": ""
   },
   "server/jobMatch.js": {
@@ -130,8 +130,8 @@
     "semantic_hash": "6968ed948e0ea604c3983b50e26a1907"
   },
   "PRD.md": {
-    "mtime": 1786844237.4705389,
-    "ast_hash": "cf3ff343eb759274b84dab16ae938281",
+    "mtime": 1786901785.0510287,
+    "ast_hash": "9342c526aef6dcee5247c732430bb299",
     "semantic_hash": ""
   },
   "README.md": {
@@ -357,6 +357,21 @@
   "tests/quest-expiry.e2e.js": {
     "mtime": 1786842743.52645,
     "ast_hash": "e5add5345ef0dca7c7362e53acc080b3",
+    "semantic_hash": ""
+  },
+  "server/listeningDiagnostic.js": {
+    "mtime": 1786887848.317631,
+    "ast_hash": "c471f447992fd8a92527096d2cf475de",
+    "semantic_hash": ""
+  },
+  "tests/listening-diagnostic.e2e.js": {
+    "mtime": 1786898249.6751094,
+    "ast_hash": "c4cccccafc0ecfcde653167abd6105f6",
+    "semantic_hash": ""
+  },
+  "tests/listeningDiagnostic.js": {
+    "mtime": 1786898141.231112,
+    "ast_hash": "9ff512c611d713cf4239b678148255ee",
     "semantic_hash": ""
   }
 }
