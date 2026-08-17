@@ -700,6 +700,7 @@ let jobApplicationFlow = null;
 //   deadlineTs: null,            // Date.now() + 30min, set once on entering "active"
 //   submitConfirmOpen: false,
 //   error: "",
+//   submittedResult: null,       // { correct, total, answeredCount, wrong, byTaskType } | null - set by lstnDoSubmit() on success, read by lstnSubmittedHTML()
 // }
 let listeningDiagnosticFlow = null;
 // Task 12 (META): true while the inline Cardio/Gym/Recovery picker for the
@@ -3127,21 +3128,31 @@ function speakScript(text) {
 // Round 41 (IELTS Listening Half Diagnostic) TTS orchestration. Real
 // speechSynthesis playback (founder's own confirmed choice - a real user
 // can actually complete the test today, not just see an inert shell), NOT
-// a reuse of speakScript() (different lifecycle: sequential two-segment
-// auto-chaining via utterance.onend, a transition pause in between, a
-// hard 2-run cap that must NOT consume a run on failure). Race-safety
-// mirrors the onboarding bridge audio system's bridgeAudioGen pattern
-// (app.js:1541+) - lstnGen is bumped by lstnStop(), and every async
-// callback below checks it before touching state, so a stop/replay/exit
-// mid-utterance can never let a stale callback act on current state.
+// a reuse of speakScript() (different lifecycle: sequential multi-segment
+// auto-chaining via utterance.onend, a hard 2-run cap that must NOT
+// consume a run on failure). Race-safety mirrors the onboarding bridge
+// audio system's bridgeAudioGen pattern (app.js:1541+) - lstnGen is bumped
+// by lstnStop(), and every async callback below checks it before touching
+// state, so a stop/replay/exit mid-utterance can never let a stale
+// callback act on current state.
+//
+// Round-feedback update: each full run now speaks 5 utterances in
+// sequence, not 2 - a short spoken announcement before each recording,
+// the actual script, and a genuinely SPOKEN transition sentence between
+// them (previously the transition was visual-text-only, timed by a fixed
+// setTimeout). That fixed timer is gone entirely - chaining is now purely
+// onend-driven end to end, so the visual "transition" state stays up for
+// exactly as long as the transition sentence actually takes to speak, no
+// guessing at a duration that has to match real speech length.
 let lstnGen = 0;
-let lstnTransitionTimer = null;
-const LSTN_TRANSITION_MS = 2500;
+
+const LSTN_ANNOUNCE_REC1 = "Recording 1. You will hear a telephone conversation between a woman and a staff member at a leisure centre. Questions 1 to 10.";
+const LSTN_ANNOUNCE_TRANSITION = "That is the end of Recording 1. Now turn to questions 11 to 20.";
+const LSTN_ANNOUNCE_REC2 = "Recording 2. You will hear a talk given by a volunteer coordinator at a community garden. Questions 11 to 20.";
 
 function lstnStop() {
   lstnGen += 1;
   window.speechSynthesis?.cancel();
-  if (lstnTransitionTimer) { clearTimeout(lstnTransitionTimer); lstnTransitionTimer = null; }
 }
 
 // "Start Listening" and "Putar sekali lagi" both call this. Never touches
@@ -3153,23 +3164,36 @@ function lstnStartRun() {
   const gen = lstnGen;
   f.playback = { state: "playing-rec1", gen, recordingId: 1 };
   renderDashboard();
-  lstnSpeak(1, gen);
+  lstnSpeakOne(LSTN_ANNOUNCE_REC1, gen, 1, () => lstnBeginScript(1, gen));
 }
 
-function lstnSpeak(recordingId, gen) {
-  const f = listeningDiagnosticFlow;
-  const rec = f?.assessment?.recordings.find((r) => r.recordingId === recordingId);
-  if (!window.speechSynthesis || !rec) { lstnFail(gen, recordingId); return; }
-  const utterance = new SpeechSynthesisUtterance(rec.script);
+// One SpeechSynthesisUtterance - the single choke point every spoken step
+// (announcement, script, or transition sentence) goes through. gen-guarded
+// exactly like the rest of this chain; onDone only ever fires for the
+// generation that's still current, so a stop()/replay/exit mid-utterance
+// can't let a stale callback keep the chain going.
+function lstnSpeakOne(text, gen, recordingId, onDone) {
+  if (!window.speechSynthesis) { lstnFail(gen, recordingId); return; }
+  const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "en-US";
   utterance.rate = 0.95;
-  utterance.onend = () => {
-    if (gen !== lstnGen) return; // superseded mid-utterance - no-op
-    if (recordingId === 1) lstnBeginTransition(gen);
-    else lstnFinishRun(gen);
-  };
+  utterance.onend = () => { if (gen === lstnGen) onDone(); };
   utterance.onerror = () => { if (gen === lstnGen) lstnFail(gen, recordingId); };
   window.speechSynthesis.speak(utterance);
+}
+
+// Speaks the actual recording script (after its announcement has already
+// finished). recordingId===1 chains into the spoken transition;
+// recordingId===2 finishes the run.
+function lstnBeginScript(recordingId, gen) {
+  const f = listeningDiagnosticFlow;
+  if (gen !== lstnGen || !f) return;
+  const rec = f.assessment?.recordings.find((r) => r.recordingId === recordingId);
+  if (!rec) { lstnFail(gen, recordingId); return; }
+  lstnSpeakOne(rec.script, gen, recordingId, () => {
+    if (recordingId === 1) lstnBeginTransition(gen);
+    else lstnFinishRun(gen);
+  });
 }
 
 // Spec: a technical failure must NOT consume a run - runsCompleted is
@@ -3181,6 +3205,9 @@ function lstnFail(gen, recordingId) {
   renderDashboard();
 }
 
+// Retry redoes the announcement + script pair for whichever recording
+// failed - simpler and more consistent than tracking which exact sub-step
+// (announcement vs. script) errored.
 function lstnRetry() {
   const f = listeningDiagnosticFlow;
   if (!f) return;
@@ -3189,25 +3216,28 @@ function lstnRetry() {
   const gen = lstnGen;
   f.playback = { state: recordingId === 1 ? "playing-rec1" : "playing-rec2", gen, recordingId };
   renderDashboard();
-  lstnSpeak(recordingId, gen);
+  const announce = recordingId === 1 ? LSTN_ANNOUNCE_REC1 : LSTN_ANNOUNCE_REC2;
+  lstnSpeakOne(announce, gen, recordingId, () => lstnBeginScript(recordingId, gen));
 }
 
-// "Now turn to questions 11 to 20..." shown inline in the audio card for
-// ~2.5s, no modal/button - then Recording 2 auto-starts. No fake timer for
-// recording 2 itself: it's real speechSynthesis, chained off THIS
-// timeout's own gen check, so a stop() during the pause correctly cancels
-// the follow-on speak.
+// The spoken (not just visual) transition between recordings. The
+// "Now turn to questions 11 to 20…" banner stays up for exactly this
+// utterance's real spoken duration - chains straight into Recording 2's
+// own announcement+script pair on completion, no fixed timer involved.
 function lstnBeginTransition(gen) {
   const f = listeningDiagnosticFlow;
   if (gen !== lstnGen || !f) return;
   f.playback = { state: "transition", gen, recordingId: 1 };
   renderDashboard();
-  lstnTransitionTimer = setTimeout(() => {
-    if (gen !== lstnGen || !listeningDiagnosticFlow) return; // stop/exit happened during the pause
-    listeningDiagnosticFlow.playback = { state: "playing-rec2", gen, recordingId: 2 };
-    renderDashboard();
-    lstnSpeak(2, gen);
-  }, LSTN_TRANSITION_MS);
+  lstnSpeakOne(LSTN_ANNOUNCE_TRANSITION, gen, 1, () => lstnBeginRecording2(gen));
+}
+
+function lstnBeginRecording2(gen) {
+  const f = listeningDiagnosticFlow;
+  if (gen !== lstnGen || !f) return;
+  f.playback = { state: "playing-rec2", gen, recordingId: 2 };
+  renderDashboard();
+  lstnSpeakOne(LSTN_ANNOUNCE_REC2, gen, 2, () => lstnBeginScript(2, gen));
 }
 
 // The ONE place runsCompleted changes - only reached after recording 2's
@@ -3745,12 +3775,58 @@ function lstnActiveHTML() {
     </div>`;
 }
 
+const LSTN_TASK_TYPE_LABEL = {
+  note_completion: "Note Completion",
+  multiple_choice: "Multiple Choice",
+  matching: "Matching",
+  sentence_completion: "Sentence Completion",
+};
+
+// Round-feedback: real results screen (score + a deterministic per-task-
+// type breakdown + the wrong-answer list) - replaces the old bare
+// "Diagnostik selesai" text. Everything here comes straight from the
+// numbers the server already computed (listeningDiagnostic.gradeAnswers/
+// summarizeByTaskType) - no AI narration, per the founder's own explicit
+// scope for this screen. Breakdown wording/thresholds mirror the
+// established "Strong/Unstable" pattern from practiceTestResultHTML's
+// "ELEVA OBSERVED" block, but under this screen's own .lstn-result-*
+// classes and a plainer label - this test screen is deliberately
+// narrative-free (no game/AI framing mid-test, per round 41's own scope),
+// so it doesn't borrow Practice Test's branded vocabulary.
 function lstnSubmittedHTML() {
   const f = listeningDiagnosticFlow;
+  const r = f.submittedResult || {};
+  const byTaskType = r.byTaskType || {};
+  const wrong = r.wrong || [];
+  const types = Object.keys(LSTN_TASK_TYPE_LABEL).filter((t) => byTaskType[t]);
+  const strong = types.filter((t) => byTaskType[t].correct >= 4);
+  const weak = types.filter((t) => byTaskType[t].correct <= 2);
+  const rowLabel = (t) => `${esc(LSTN_TASK_TYPE_LABEL[t])} (${byTaskType[t].correct}/${byTaskType[t].total})`;
   return `
-    <div class="lstn-submitted">
-      <h2 class="fr">Diagnostik selesai</h2>
-      <p>${f.submittedAnsweredCount ?? lstnAnsweredCount(f)} dari 20 soal terjawab.</p>
+    <div class="lstn-result">
+      <div class="lstn-result-score fr">${r.correct ?? "–"} / 20</div>
+      <p class="lstn-result-sub">${r.answeredCount ?? lstnAnsweredCount(f)} dari 20 soal terjawab.</p>
+      <div class="lstn-result-block">
+        <div class="lstn-result-label mono">RINGKASAN PER TIPE SOAL</div>
+        ${strong.length ? `<p class="lstn-result-obs"><span class="lstn-result-obs-label strong">Kuat di</span> ${strong.map(rowLabel).join(" · ")}</p>` : ""}
+        ${weak.length ? `<p class="lstn-result-obs"><span class="lstn-result-obs-label weak">Perlu latihan</span> ${weak.map(rowLabel).join(" · ")}</p>` : ""}
+        ${!strong.length && !weak.length ? `<p class="lstn-result-obs lstn-result-obs-neutral">Semua tipe soal di rentang tengah — belum ada yang menonjol kuat atau lemah.</p>` : ""}
+        <div class="lstn-result-types mono">${types.map(rowLabel).join(" · ")}</div>
+      </div>
+      <div class="lstn-result-block">
+        <div class="lstn-result-label mono">SOAL YANG SALAH</div>
+        ${wrong.length ? `
+        <div class="lstn-result-wrong-scroll">
+          ${wrong.map((w) => `
+            <div class="lstn-result-wrong-row">
+              <span class="mono lstn-qnum">${w.questionNumber}</span>
+              <div style="min-width:0">
+                <div class="lstn-result-wrong-yours">Jawabanmu: ${esc(w.yourAnswer || "-")}</div>
+                <div class="lstn-result-wrong-correct">Benar: ${esc(w.correctAnswer)}</div>
+              </div>
+            </div>`).join("")}
+        </div>` : `<p class="lstn-result-obs lstn-result-obs-perfect">Semua benar!</p>`}
+      </div>
       <button class="btn-primary full" id="lstnBackToMeta">Kembali ke META</button>
     </div>`;
 }
@@ -3803,7 +3879,7 @@ async function lstnDoSubmit() {
   try {
     const resp = await api("/api/listening-diagnostic/submit", { method: "POST", body: { questId: f.questId, answers: f.answers, runsCompleted: f.runsCompleted } });
     f.step = "submitted";
-    f.submittedAnsweredCount = resp.answeredCount;
+    f.submittedResult = { correct: resp.correct, total: resp.totalQuestions, answeredCount: resp.answeredCount, wrong: resp.wrong, byTaskType: resp.byTaskType };
   } catch (e) {
     f.error = e.message;
   }
@@ -3833,13 +3909,22 @@ function wireListeningDiagnosticHandlers() {
     listeningDiagnosticFlow.answers[e.target.dataset.lstnText] = e.target.value;
     lstnUpdateFooterCount();
   }));
+  // Round-feedback fix: these used to call renderDashboard() (full re-render,
+  // resets .lstn-scroll's scroll position to 0 - the "tap an answer, page
+  // jumps to top" bug). Same lightweight pattern as the [data-lstn-text]
+  // handler above: mutate state, toggle .active on just the tapped group's
+  // buttons directly, update the footer count - no full re-render.
   document.querySelectorAll("[data-lstn-mc]").forEach((btn) => btn.addEventListener("click", () => {
-    listeningDiagnosticFlow.answers[btn.dataset.lstnMc] = btn.dataset.lstnLetter;
-    renderDashboard();
+    const qid = btn.dataset.lstnMc;
+    listeningDiagnosticFlow.answers[qid] = btn.dataset.lstnLetter;
+    document.querySelectorAll(`[data-lstn-mc="${qid}"]`).forEach((b) => b.classList.toggle("active", b === btn));
+    lstnUpdateFooterCount();
   }));
   document.querySelectorAll("[data-lstn-match]").forEach((btn) => btn.addEventListener("click", () => {
-    listeningDiagnosticFlow.answers[btn.dataset.lstnMatch] = btn.dataset.lstnLetter;
-    renderDashboard();
+    const qid = btn.dataset.lstnMatch;
+    listeningDiagnosticFlow.answers[qid] = btn.dataset.lstnLetter;
+    document.querySelectorAll(`[data-lstn-match="${qid}"]`).forEach((b) => b.classList.toggle("active", b === btn));
+    lstnUpdateFooterCount();
   }));
 
   document.getElementById("lstnFootSubmit")?.addEventListener("click", () => {

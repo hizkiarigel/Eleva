@@ -22,8 +22,24 @@ const BASE = `http://localhost:${PORT}`;
 const CHROMIUM = process.env.CHROMIUM_PATH || "/opt/pw-browsers/chromium";
 
 let failures = 0;
+// A fresh Chromium instance per test (not one shared instance reused across
+// all 10) - each test body already reads `browser` via closure at call
+// time, so relaunching it here needs no changes to any test's own code.
+// Found necessary during this round's work: 10 sequential full-onboarding
+// contexts in one long-lived browser process reliably crashed the browser
+// right around the 9th context (not random - same point both times,
+// plenty of free memory/`/dev/shm`), even though the original 8-test file
+// never hit this. Slightly slower (~1-2s extra launch time per test), but
+// removes a whole class of accumulated-instability flakiness in this
+// sandboxed environment.
+let browser = null;
 async function test(name, fn) {
   try {
+    if (browser) {
+      await browser.close().catch(() => {});
+      await new Promise((r) => setTimeout(r, 1000)); // let the OS fully reap the old Chromium process before relaunching
+    }
+    browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: ["--disable-dev-shm-usage", "--no-sandbox"] });
     await fn();
     console.log(`  ok - ${name}`);
   } catch (e) {
@@ -39,7 +55,16 @@ function spawnServer(port) {
     SESSION_SECRET: "testsecret", BETA_CODE: "TESTCODE", PORT: String(port),
   };
   delete env.ANTHROPIC_API_KEY;
-  const server = spawn("node", ["server/index.js"], { env, stdio: ["ignore", "pipe", "pipe"] });
+  // detached: true - puts the server child in its OWN process group, not
+  // this script's. Found necessary during this round's work: relaunching a
+  // fresh Chromium per test (see the `test()` helper above) occasionally
+  // triggers a hard Chromium crash under sustained sequential load in this
+  // sandboxed environment, and without `detached`, that crash was somehow
+  // taking the server child down too (observed via a bare SIGTERM on the
+  // server, no server-side error/exception logged) - consistent with an
+  // OS-level signal hitting the whole shared process group rather than a
+  // bug in either the server or the app code being tested.
+  const server = spawn("node", ["server/index.js"], { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
   let log = "";
   server.stdout.on("data", (d) => { log += d; });
   server.stderr.on("data", (d) => { log += d; });
@@ -82,6 +107,14 @@ async function clearSpeakLog(page) {
 }
 async function speakLog(page) {
   return page.evaluate(() => window.__speakLog || []);
+}
+// Round-feedback: each full run now speaks 5 utterances in sequence
+// (announce rec1 -> rec1 script -> spoken transition -> announce rec2 ->
+// rec2 script), all chained via onend with no fixed-duration timer left in
+// the chain - so walking a run to completion in a test is just firing
+// onend N times in a row, no waitForTimeout needed anywhere.
+async function fireOnendTimes(page, n) {
+  for (let i = 0; i < n; i++) await fireLastOnend(page);
 }
 
 // Full signup -> onboarding -> dashboard -> META -> LINGUA -> Listening row
@@ -162,12 +195,11 @@ async function answerAllQuestions(page) {
 
 (async () => {
   const { server, log } = spawnServer(PORT);
-  let browser;
   try {
     await waitForServer(BASE, log);
-    browser = await chromium.launch({ executablePath: CHROMIUM, headless: true });
+    // browser itself is now launched fresh inside test() (module scope, see above).
 
-    await test("intro screen keeps normal chrome; active step hides it, submitted stays hidden, Kembali ke META restores it", async () => {
+    await test("intro screen keeps normal chrome; active step hides it, submitted stays hidden, results screen renders (Item 4), Kembali ke META restores it", async () => {
       const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
       const page = await context.newPage();
       const pageErrors = [];
@@ -190,6 +222,28 @@ async function answerAllQuestions(page) {
       const submittedChrome = await page.evaluate(() => ({ header: !!document.querySelector(".app-header"), tabbar: !!document.querySelector(".tab-bar") }));
       assert.deepStrictEqual(submittedChrome, { header: false, tabbar: false });
 
+      // Round-feedback Item 4: the results screen shows score, per-task-type
+      // breakdown, and wrong-answer list (folded into this test - not a
+      // separate one - to keep the total number of fresh Chromium launches
+      // in this file bounded; see the `browser`/`test()` comment above).
+      // answerAllQuestions() fills every text field with "test answer"
+      // (always wrong) and picks the FIRST option/letter for every MC/
+      // matching question - against the real answer key this reliably
+      // produces a mix of right (Q11 matching happens to be "A") and wrong
+      // answers, enough to exercise both the breakdown and the wrong-list
+      // rendering without the test itself needing the server-side-only
+      // answer key.
+      const result = await page.evaluate(() => ({
+        score: document.querySelector(".lstn-result-score")?.textContent || "",
+        breakdownText: document.querySelector(".lstn-result-types")?.textContent || "",
+        wrongRows: document.querySelectorAll(".lstn-result-wrong-row").length,
+        wrongRowSample: document.querySelector(".lstn-result-wrong-row")?.textContent || "",
+      }));
+      assert.ok(/\/ 20/.test(result.score), `score line must show "X / 20", got "${result.score}"`);
+      assert.ok(/Note Completion|Multiple Choice|Matching|Sentence Completion/.test(result.breakdownText), "per-task-type breakdown must render type labels");
+      assert.ok(result.wrongRows > 0, "the mixed answer set must produce at least one wrong-answer row");
+      assert.ok(/Jawabanmu:/.test(result.wrongRowSample) && /Benar:/.test(result.wrongRowSample), "each wrong row must show both the given and correct answer");
+
       await page.click("#lstnBackToMeta");
       await page.waitForSelector(".app-header", { timeout: 10000 });
       const afterBackChrome = await page.evaluate(() => ({ header: !!document.querySelector(".app-header"), tabbar: !!document.querySelector(".tab-bar") }));
@@ -199,21 +253,35 @@ async function answerAllQuestions(page) {
       await context.close();
     });
 
-    await test("sequential auto-chain: exactly 2 speak() calls, recording 1 then recording 2, in order", async () => {
+    await test("sequential auto-chain: 5 spoken utterances per run (announce->script->transition->announce->script), in order", async () => {
       const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
       const page = await context.newPage();
       await installLstnSpeechMock(page);
       await startActiveTest(page, "lstn-chain");
 
       let log = await speakLog(page);
-      assert.strictEqual(log.length, 1, "recording 1 should start immediately");
-      assert.ok(/Riverside Leisure Centre/.test(log[0].text), "first call should be recording 1's script");
+      assert.strictEqual(log.length, 1, "the Recording 1 announcement should start immediately");
+      assert.ok(/Recording 1\. You will hear/.test(log[0].text), "first call should be the spoken Recording 1 announcement");
 
-      await fireLastOnend(page); // recording 1 finishes -> transition begins
-      await page.waitForTimeout(2700); // LSTN_TRANSITION_MS (2500ms) + margin for recording 2 to auto-start
+      await fireLastOnend(page); // announcement finishes -> recording 1 script starts
       log = await speakLog(page);
-      assert.strictEqual(log.length, 2, "recording 2 should auto-start after the transition pause");
-      assert.ok(/Bright Start Community Garden|Hello everyone/.test(log[1].text), "second call should be recording 2's script");
+      assert.strictEqual(log.length, 2);
+      assert.ok(/Riverside Leisure Centre/.test(log[1].text), "second call should be recording 1's script");
+
+      await fireLastOnend(page); // script finishes -> spoken transition starts (no more fixed timer - purely onend-chained)
+      log = await speakLog(page);
+      assert.strictEqual(log.length, 3);
+      assert.ok(/end of Recording 1/.test(log[2].text), "third call should be the spoken transition, not just visual text");
+
+      await fireLastOnend(page); // transition finishes -> recording 2 announcement starts
+      log = await speakLog(page);
+      assert.strictEqual(log.length, 4);
+      assert.ok(/Recording 2\. You will hear/.test(log[3].text), "fourth call should be the spoken Recording 2 announcement");
+
+      await fireLastOnend(page); // announcement finishes -> recording 2 script starts
+      log = await speakLog(page);
+      assert.strictEqual(log.length, 5);
+      assert.ok(/Bright Start Community Garden|Hello everyone/.test(log[4].text), "fifth call should be recording 2's script");
 
       await context.close();
     });
@@ -224,21 +292,17 @@ async function answerAllQuestions(page) {
       await installLstnSpeechMock(page);
       await startActiveTest(page, "lstn-cap");
 
-      // Run 1
-      await fireLastOnend(page);
-      await page.waitForTimeout(2700);
-      await fireLastOnend(page); // recording 2 finishes -> run 1 complete
+      // Run 1 - 5 spoken steps (announce1, script1, transition, announce2, script2)
+      await fireOnendTimes(page, 5);
       await page.waitForSelector("#lstnReplay", { timeout: 5000 });
 
       // Run 2
       await clearSpeakLog(page);
       await page.click("#lstnReplay");
       await page.waitForTimeout(100);
-      await fireLastOnend(page);
-      await page.waitForTimeout(2700);
-      await fireLastOnend(page); // run 2 complete - 2/2 runs used
+      await fireOnendTimes(page, 5);
       const log = await speakLog(page);
-      assert.strictEqual(log.length, 2, "run 2 should also produce exactly 2 speak calls");
+      assert.strictEqual(log.length, 5, "run 2 should also produce exactly 5 speak calls");
 
       const replayDisabled = await page.evaluate(() => {
         const btn = document.querySelector(".lstn-replay-btn");
@@ -256,7 +320,7 @@ async function answerAllQuestions(page) {
       await installLstnSpeechMock(page);
       await startActiveTest(page, "lstn-error");
 
-      await fireLastOnerror(page);
+      await fireLastOnerror(page); // fails on the very first utterance (Recording 1's spoken announcement)
       await page.waitForSelector(".lstn-audio-error", { timeout: 5000 });
       const errorState = await page.evaluate(() => ({
         errorVisible: !!document.querySelector(".lstn-audio-error"),
@@ -264,18 +328,18 @@ async function answerAllQuestions(page) {
       }));
       assert.ok(errorState.errorVisible && errorState.retryBtn, "error state + retry button must show");
 
-      // Retry re-attempts recording 1 (not treated as a consumed run) and completing
-      // a full run afterward should still land on runsCompleted === 1, not 2 -
-      // i.e. the earlier failure never silently counted.
+      // Retry re-attempts recording 1's announcement (not treated as a consumed
+      // run) and completing a full run afterward should still land on
+      // runsCompleted === 1, not 2 - i.e. the earlier failure never silently counted.
       await clearSpeakLog(page);
       await page.click("#lstnRetryPlay");
       let log = await speakLog(page);
       assert.strictEqual(log.length, 1, "retry should re-issue exactly one speak call");
-      assert.ok(/Riverside Leisure Centre/.test(log[0].text), "retry must replay the SAME recording that failed (recording 1)");
+      assert.ok(/Recording 1\. You will hear/.test(log[0].text), "retry must re-announce the SAME recording that failed (recording 1)");
 
-      await fireLastOnend(page);
-      await page.waitForTimeout(2700);
-      await fireLastOnend(page); // completes the run for real this time
+      // Walk the rest of the chain to completion: announce(already speaking)
+      // -> script -> transition -> announce2 -> script2 = 5 onend fires total.
+      await fireOnendTimes(page, 5);
       await page.waitForSelector("#lstnReplay", { timeout: 5000 });
       // Only 1 run should be marked complete overall (the failed attempt never counted) -
       // replay must still be enabled (only 1/2 used), not disabled.
@@ -293,10 +357,10 @@ async function answerAllQuestions(page) {
       await installLstnSpeechMock(page);
       await startActiveTest(page, "lstn-race");
 
-      // Recording 1 is "playing" (never fired onend). Answer everything so
-      // the footer submit skips the confirm sheet and calls lstnDoSubmit()
-      // directly, which calls lstnStop() first thing - bumping lstnGen out
-      // from under the still-pending utterance captured above.
+      // Recording 1's announcement is "playing" (never fired onend). Answer
+      // everything so the footer submit skips the confirm sheet and calls
+      // lstnDoSubmit() directly, which calls lstnStop() first thing - bumping
+      // lstnGen out from under the still-pending utterance captured above.
       await answerAllQuestions(page);
       await page.click("#lstnFootSubmit");
       await page.waitForSelector("#lstnBackToMeta", { timeout: 10000 });
@@ -313,7 +377,7 @@ async function answerAllQuestions(page) {
       await context.close();
     });
 
-    await test("all 4 task types are answerable and reflected in the live footer count", async () => {
+    await test("all 4 task types are answerable and reflected in the live footer count; MC/matching taps don't scroll-jump (Item 1)", async () => {
       const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
       const page = await context.newPage();
       await installLstnSpeechMock(page);
@@ -321,6 +385,25 @@ async function answerAllQuestions(page) {
 
       let count = await page.locator("#lstnFootCount").textContent();
       assert.ok(/^0 \/ 20/.test(count.trim()), `expected 0/20 before answering, got "${count}"`);
+
+      // Round-feedback Item 1: tapping an MC/matching answer must not
+      // scroll .lstn-scroll back to the top (previously called
+      // renderDashboard(), a full re-render). Folded into this test - not
+      // a separate one - to keep the total fresh-Chromium-launch count in
+      // this file bounded; see the `browser`/`test()` comment above.
+      await page.evaluate(() => { document.querySelector(".lstn-scroll").scrollTop = 400; });
+      const scrollBefore = await page.evaluate(() => document.querySelector(".lstn-scroll").scrollTop);
+      assert.ok(scrollBefore > 0, "scroll setup should have actually moved the scroll position");
+      // Raw JS .click() via evaluate, not Playwright's page.click()/
+      // locator.click() - those auto-scroll their target into view before
+      // clicking (a real Playwright actionability feature), which would
+      // itself move scrollTop and defeat the point of this exact check.
+      await page.evaluate(() => document.querySelector("[data-lstn-mc]").click());
+      const scrollAfterMc = await page.evaluate(() => document.querySelector(".lstn-scroll").scrollTop);
+      assert.strictEqual(scrollAfterMc, scrollBefore, "tapping an MC answer must not reset scroll position");
+      await page.evaluate(() => document.querySelector("[data-lstn-match]").click());
+      const scrollAfterMatch = await page.evaluate(() => document.querySelector(".lstn-scroll").scrollTop);
+      assert.strictEqual(scrollAfterMatch, scrollBefore, "tapping a matching answer must not reset scroll position");
 
       await answerAllQuestions(page);
       await page.waitForTimeout(150);

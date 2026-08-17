@@ -155,10 +155,30 @@ function gradeAnswers(questions, answers) {
     if (validForms.includes(given) && given !== "") {
       correct += 1;
     } else {
-      wrong.push({ questionId: q.questionId, questionNumber: q.questionNumber, yourAnswer: String((answers && answers[q.questionId]) || "").slice(0, 200), correctAnswer: q.correctAnswer });
+      wrong.push({ questionId: q.questionId, questionNumber: q.questionNumber, taskType: q.taskType, yourAnswer: String((answers && answers[q.questionId]) || "").slice(0, 200), correctAnswer: q.correctAnswer });
     }
   }
   return { correct, total: questions.length, wrong };
+}
+
+// Deterministic per-task-type breakdown for the results screen (round
+// feedback: the results/score screen the founder asked for) - no AI, built
+// purely from questions (knows the total per type) and gradeAnswers'
+// taskType-tagged wrong[] (knows the misses per type). Every taskType
+// present in `questions` always gets an entry, even if wrong has nothing
+// for it (a perfect type still needs to show up as e.g. "5/5").
+function summarizeByTaskType(questions, wrong) {
+  const summary = {};
+  for (const q of questions) {
+    if (!summary[q.taskType]) summary[q.taskType] = { correct: 0, total: 0 };
+    summary[q.taskType].total += 1;
+  }
+  const missesByType = {};
+  for (const w of wrong) missesByType[w.taskType] = (missesByType[w.taskType] || 0) + 1;
+  for (const taskType of Object.keys(summary)) {
+    summary[taskType].correct = summary[taskType].total - (missesByType[taskType] || 0);
+  }
+  return summary;
 }
 
 // Word-limit check for note/sentence completion answers, per the design's
@@ -211,4 +231,4 @@ if (!_validation.valid) {
   throw new Error(`listeningDiagnostic: invalid fixed assessment package - ${_validation.errors.join("; ")}`);
 }
 
-module.exports = { ASSESSMENT, RUN_LIMIT, TIME_LIMIT_MS, stripAnswers, gradeAnswers, checkWordLimit, validateAssessment };
+module.exports = { ASSESSMENT, RUN_LIMIT, TIME_LIMIT_MS, stripAnswers, gradeAnswers, summarizeByTaskType, checkWordLimit, validateAssessment };

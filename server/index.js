@@ -1166,18 +1166,19 @@ app.post("/api/listening-diagnostic/submit", requireAuth, async (req, res) => {
     if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
 
     const graded = listeningDiagnostic.gradeAnswers(listeningDiagnostic.ASSESSMENT.questions, answers || {});
+    const byTaskType = listeningDiagnostic.summarizeByTaskType(listeningDiagnostic.ASSESSMENT.questions, graded.wrong);
     const answeredCount = Object.keys(answers || {}).filter((k) => String(answers[k] || "").trim()).length;
 
     const reflection = {
       status: "done", text: "",
       listeningDiagnosticResult: {
-        answeredCount, totalQuestions: 20, correct: graded.correct,
+        answeredCount, totalQuestions: 20, correct: graded.correct, wrong: graded.wrong, byTaskType,
         runsCompleted: Math.max(0, Math.min(listeningDiagnostic.RUN_LIMIT, Number(runsCompleted) || 0)),
       },
       deltas: {}, timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
-    res.json({ ok: true, answeredCount, totalQuestions: 20 });
+    res.json({ ok: true, answeredCount, totalQuestions: 20, correct: graded.correct, wrong: graded.wrong, byTaskType });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan hasil diagnostik." });

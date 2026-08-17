@@ -1,16 +1,16 @@
-# Graph Report - Eleva  (2026-08-16)
+# Graph Report - Eleva  (2026-08-17)
 
 ## Corpus Check
-- 58 files · ~484,891 words
+- 58 files · ~486,745 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 779 nodes · 1229 edges · 55 communities (47 shown, 8 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 115 edges (avg confidence: 0.51)
+- 784 nodes · 1245 edges · 58 communities (48 shown, 10 thin omitted)
+- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 116 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `0ef1a0e0`
+- Built from commit: `40bc6b56`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -55,7 +55,7 @@
 - listening-diagnostic.e2e.js
 - renderDashboard
 - quest-hub.e2e.js
-- renderPolygonSVG
+- renderOnboarding
 - onboarding-bridge-audio.e2e.js
 - onboarding-draft-resume.e2e.js
 - questDetailPanelHTML
@@ -64,16 +64,19 @@
 - wireListeningDiagnosticHandlers
 - auth.js
 - targets.js
-- goalCardHTML
+- startBridgeAudio
 - Adaptive Scenario Cards
 - structured.js
 - 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)
 - safety.js
-- todayKey
+- applyCalibrationCard
+- mmss
+- appHeaderHTML
+- buildPathwayOptions
 
 ## God Nodes (most connected - your core abstractions)
-1. `esc()` - 53 edges
-2. `renderDashboard()` - 42 edges
+1. `esc()` - 54 edges
+2. `renderDashboard()` - 43 edges
 3. `renderAdaptive()` - 22 edges
 4. `hasKey()` - 16 edges
 5. `renderOnboarding()` - 14 edges
@@ -103,15 +106,15 @@
 - **graphify Skill Documentation Set** — _claude_skills_graphify_skill_definition, _claude_skills_graphify_references_add_watch_guide, _claude_skills_graphify_references_exports_guide, _claude_skills_graphify_references_extraction_spec_prompt, _claude_skills_graphify_references_github_and_merge_guide, _claude_skills_graphify_references_hooks_guide, _claude_skills_graphify_references_query_guide, _claude_skills_graphify_references_transcribe_guide, _claude_skills_graphify_references_update_guide [EXTRACTED 1.00]
 - **Eleva Adaptive Pathway Onboarding Flow** — prd_radar_7_axis_mece, prd_adaptive_scenario_cards, prd_pathway_carousel, prd_goal_capture, prd_woop_framework [INFERRED 0.85]
 
-## Communities (55 total, 8 thin omitted)
+## Communities (58 total, 10 thin omitted)
 
 ### Community 0 - "index.js"
 Cohesion: 0.07
-Nodes (19): ai, app, auth, cookieSession, db, express, jobApplication, jobMatch (+11 more)
+Nodes (22): ai, app, auth, cookieSession, db, express, jobApplication, jobMatch (+14 more)
 
 ### Community 1 - "app.js"
 Cohesion: 0.03
-Nodes (68): adaptiveCards, adaptiveSelection, applyCalibrationCard(), applySynergyDrag(), ARTIFACT_TYPE_LABEL, authForm, authTimers, AXIS_DEFINITIONS (+60 more)
+Nodes (55): adaptiveCards, adaptiveSelection, ARTIFACT_TYPE_LABEL, authForm, authTimers, AXIS_DEFINITIONS, AXIS_LABEL_RULES, BRIDGE_LOADING_SEQUENCE (+47 more)
 
 ### Community 2 - "claude.js"
 Cohesion: 0.05
@@ -142,8 +145,8 @@ Cohesion: 0.08
 Nodes (25): bcrypt, cookie-session, dotenv, express, mammoth, dependencies, bcrypt, cookie-session (+17 more)
 
 ### Community 9 - "renderAdaptive"
-Cohesion: 0.07
-Nodes (52): actingMethodCardHTML(), api(), authConsentInfoModalHTML(), authFinish(), authHelpModalHTML(), authReducedMotion(), beginPathwayBridge(), beginScenarioBridge() (+44 more)
+Cohesion: 0.10
+Nodes (38): actingMethodCardHTML(), api(), authConsentInfoModalHTML(), authFinish(), authHelpModalHTML(), authReducedMotion(), beginPathwayBridge(), beginScenarioBridge() (+30 more)
 
 ### Community 10 - "onboarding-bridge.e2e.js"
 Cohesion: 0.25
@@ -166,8 +169,8 @@ Cohesion: 0.50
 Nodes (4): Anti-Sycophancy Principle (honest verdict), Artifacts Library (Task 10a), Job Match Analysis (Task 10b), server/jobMatch.js (job match content building)
 
 ### Community 18 - "esc"
-Cohesion: 0.15
-Nodes (24): artifactsSheetHTML(), axisDefinitionsHTML(), completedResultCardHTML(), elevaResponseHTML(), esc(), helpSheetHTML(), jobApplicationSummary(), jobMatchResultHTML() (+16 more)
+Cohesion: 0.11
+Nodes (31): artifactsSheetHTML(), axisDefinitionsHTML(), completedResultCardHTML(), elevaResponseHTML(), esc(), goalCardAccentColor(), goalCardApprovedHTML(), goalCardBorderColor() (+23 more)
 
 ### Community 20 - "metaTargets.js"
 Cohesion: 0.33
@@ -218,7 +221,7 @@ Cohesion: 0.33
 Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 34 - "server/listeningDiagnostic.js"
-Cohesion: 0.15
+Cohesion: 0.14
 Nodes (10): ASSESSMENT, checkWordLimit(), gradeAnswers(), MATCHING_LEGEND, norm(), QUESTIONS, validateAssessment(), _validation (+2 more)
 
 ### Community 35 - "onboarding-chapter-analysis.e2e.js"
@@ -231,19 +234,19 @@ Nodes (3): assert, { chromium }, { spawn }
 
 ### Community 37 - "listening-diagnostic.e2e.js"
 Cohesion: 0.15
-Nodes (6): assert, { chromium }, clearSpeakLog(), reachListeningIntro(), { spawn }, startActiveTest()
+Nodes (8): assert, { chromium }, clearSpeakLog(), fireLastOnend(), fireOnendTimes(), reachListeningIntro(), { spawn }, startActiveTest()
 
 ### Community 38 - "renderDashboard"
-Cohesion: 0.10
-Nodes (25): activeSomaQuest(), appHeaderHTML(), beginStructuredOrReflectiveFlow(), durasiMenitFromFields(), fileToBase64(), helpBtnHTML(), jobApplicationFlowHTML(), jobMatchFlowHTML() (+17 more)
+Cohesion: 0.13
+Nodes (24): activeSomaQuest(), beginStructuredOrReflectiveFlow(), durasiMenitFromFields(), fileToBase64(), jobApplicationFlowHTML(), jobMatchFlowHTML(), kisahmuScreenHTML(), listeningDiagnosticIntroHTML() (+16 more)
 
 ### Community 39 - "quest-hub.e2e.js"
 Cohesion: 0.22
 Nodes (4): assert, { chromium }, { Client }, { spawn }
 
-### Community 40 - "renderPolygonSVG"
-Cohesion: 0.14
-Nodes (22): attachPolygonHandlers(), axisLabelLayout(), chapterPoint(), chapterRadius(), characterScreenHTML(), clearActiveAxisNow(), formatRadarValue(), heptagonPath() (+14 more)
+### Community 40 - "renderOnboarding"
+Cohesion: 0.11
+Nodes (29): attachPolygonHandlers(), axisLabelLayout(), chapterPoint(), chapterRadius(), characterScreenHTML(), clearActiveAxisNow(), counterPillHTML(), formatRadarValue() (+21 more)
 
 ### Community 41 - "onboarding-bridge-audio.e2e.js"
 Cohesion: 0.13
@@ -273,9 +276,9 @@ Nodes (10): lstnAnsweredCount(), lstnDoSubmit(), lstnFormatMMSS(), lstnStartCoun
 Cohesion: 0.38
 Nodes (6): AuthError, bcrypt, db, login(), normalizeEmail(), signup()
 
-### Community 49 - "goalCardHTML"
-Cohesion: 0.29
-Nodes (7): goalCardAccentColor(), goalCardApprovedHTML(), goalCardBorderColor(), goalCardEditingBodyHTML(), goalCardFeedbackHTML(), goalCardHeadHTML(), goalCardHTML()
+### Community 49 - "startBridgeAudio"
+Cohesion: 0.24
+Nodes (11): clearBridgeAudioTimers(), ensureBridgeAudioEl(), preloadNextBridgeAudio(), renderBridge(), renderBridgeDevPreview(), setBridgeAudioIconPlaying(), speakBridgeVoiceFallback(), startBridgeAudio() (+3 more)
 
 ### Community 50 - "Adaptive Scenario Cards"
 Cohesion: 0.40
@@ -289,14 +292,18 @@ Nodes (4): CARDIO_ACTIVITIES, num(), SPEED_CAP_KMH, validateStructuredData()
 Cohesion: 0.50
 Nodes (5): Eleva PRD.md, 7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy), SYNERGY Weight Matrix (single-pool redistribution), Eleva_Correlation_Matrix.html — Research Evidence Ledger, Body Quest Completion Screen Screenshot
 
-### Community 54 - "todayKey"
+### Community 54 - "applyCalibrationCard"
+Cohesion: 0.33
+Nodes (6): applyCalibrationCard(), applySynergyDrag(), clampCalibrationDelta(), isContraryPick(), roundPreservingTotal(), synergyFor()
+
+### Community 55 - "mmss"
 Cohesion: 0.67
-Nodes (3): startOfMonthKey(), startOfWeekKey(), todayKey()
+Nodes (3): mmss(), paceLabel(), structSummary()
 
 ## Knowledge Gaps
-- **238 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+233 more)
+- **239 isolated node(s):** `name`, `version`, `description`, `main`, `type` (+234 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **8 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -304,14 +311,14 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `Eleva README.md` connect `Eleva README.md` to `7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)`, `Goal Capture (v13, bridge to First Trial)`, `DEPLOY_RAILWAY.md — Railway Deployment Guide`?**
   _High betweenness centrality (0.003) - this node is a cross-community bridge._
 - **Why does `Task 5: Adaptive Pathway Onboarding` connect `Task 5: Adaptive Pathway Onboarding` to `Adaptive Scenario Cards`, `7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)`, `Goal Capture (v13, bridge to First Trial)`?**
-  _High betweenness centrality (0.003) - this node is a cross-community bridge._
-- **Why does `esc()` connect `esc` to `app.js`, `realmIconSVG`, `renderDashboard`, `renderPolygonSVG`, `renderAdaptive`, `questDetailPanelHTML`, `goalCardHTML`?**
+  _High betweenness centrality (0.002) - this node is a cross-community bridge._
+- **Why does `esc()` connect `esc` to `app.js`, `renderDashboard`, `realmIconSVG`, `renderOnboarding`, `renderAdaptive`, `questDetailPanelHTML`, `wireListeningDiagnosticHandlers`, `startBridgeAudio`?**
   _High betweenness centrality (0.002) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
-  _238 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _239 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `index.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.07142857142857142 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06881720430107527 - nodes in this community are weakly interconnected._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.030729359496482783 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.03278688524590164 - nodes in this community are weakly interconnected._
 - **Should `claude.js` be split into smaller, more focused modules?**
   _Cohesion score 0.053923541247484906 - nodes in this community are weakly interconnected._

@@ -39,7 +39,7 @@
   "37": "listening-diagnostic.e2e.js",
   "38": "renderDashboard",
   "39": "quest-hub.e2e.js",
-  "40": "renderPolygonSVG",
+  "40": "renderOnboarding",
   "41": "onboarding-bridge-audio.e2e.js",
   "42": "onboarding-draft-resume.e2e.js",
   "43": "questDetailPanelHTML",
@@ -48,10 +48,13 @@
   "46": "wireListeningDiagnosticHandlers",
   "47": "auth.js",
   "48": "targets.js",
-  "49": "goalCardHTML",
+  "49": "startBridgeAudio",
   "50": "Adaptive Scenario Cards",
   "51": "structured.js",
   "52": "7-Axis MECE Radar (Body/Growth/Livelihood/Emotional/Social/Purpose/Autonomy)",
   "53": "safety.js",
-  "54": "todayKey"
+  "54": "applyCalibrationCard",
+  "55": "mmss",
+  "56": "appHeaderHTML",
+  "57": "buildPathwayOptions"
 }

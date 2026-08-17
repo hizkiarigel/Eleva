@@ -148,6 +148,53 @@ test("all-wrong scores 0/20 and lists every question in wrong[]", () => {
   assert.strictEqual(g.correct, 0);
   assert.strictEqual(g.wrong.length, 20);
 });
+test("round-feedback: wrong[] entries carry the question's own taskType", () => {
+  const qs = ld.ASSESSMENT.questions.filter((q) => ["q1", "q6", "q11", "q16"].includes(q.questionId));
+  const g = ld.gradeAnswers(qs, {});
+  const byId = Object.fromEntries(g.wrong.map((w) => [w.questionId, w.taskType]));
+  assert.strictEqual(byId.q1, "note_completion");
+  assert.strictEqual(byId.q6, "multiple_choice");
+  assert.strictEqual(byId.q11, "matching");
+  assert.strictEqual(byId.q16, "sentence_completion");
+});
+
+console.log("Unit: summarizeByTaskType (round-feedback results-screen breakdown)");
+test("all-correct: every task type shows total/total, zero misses", () => {
+  const answers = {};
+  ld.ASSESSMENT.questions.forEach((q) => { answers[q.questionId] = q.correctAnswer; });
+  const g = ld.gradeAnswers(ld.ASSESSMENT.questions, answers);
+  const summary = ld.summarizeByTaskType(ld.ASSESSMENT.questions, g.wrong);
+  assert.deepStrictEqual(summary, {
+    note_completion: { correct: 5, total: 5 },
+    multiple_choice: { correct: 5, total: 5 },
+    matching: { correct: 5, total: 5 },
+    sentence_completion: { correct: 5, total: 5 },
+  });
+});
+test("all-wrong: every task type shows 0/total", () => {
+  const answers = {};
+  ld.ASSESSMENT.questions.forEach((q) => { answers[q.questionId] = "___definitely_wrong___"; });
+  const g = ld.gradeAnswers(ld.ASSESSMENT.questions, answers);
+  const summary = ld.summarizeByTaskType(ld.ASSESSMENT.questions, g.wrong);
+  for (const type of Object.keys(summary)) assert.strictEqual(summary[type].correct, 0);
+});
+test("mixed misses land in the correct per-type bucket, other types stay perfect", () => {
+  // Miss q1/q2 (note_completion) and q11 (matching) only - everything else correct.
+  const answers = {};
+  ld.ASSESSMENT.questions.forEach((q) => { answers[q.questionId] = q.correctAnswer; });
+  answers.q1 = "wrong"; answers.q2 = "wrong"; answers.q11 = "wrong";
+  const g = ld.gradeAnswers(ld.ASSESSMENT.questions, answers);
+  const summary = ld.summarizeByTaskType(ld.ASSESSMENT.questions, g.wrong);
+  assert.strictEqual(summary.note_completion.correct, 3);
+  assert.strictEqual(summary.matching.correct, 4);
+  assert.strictEqual(summary.multiple_choice.correct, 5);
+  assert.strictEqual(summary.sentence_completion.correct, 5);
+});
+test("summarizeByTaskType is built from questions' totals, not just wrong[] - a type with zero misses still appears", () => {
+  const summary = ld.summarizeByTaskType(ld.ASSESSMENT.questions, []);
+  assert.strictEqual(Object.keys(summary).length, 4);
+  assert.strictEqual(summary.multiple_choice.correct, 5);
+});
 
 console.log("Unit: checkWordLimit");
 test("within limit passes", () => assert.strictEqual(ld.checkWordLimit("main building", 2), true));

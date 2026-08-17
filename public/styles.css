@@ -1010,9 +1010,29 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .lstn-foot-count { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: #c9c6ce; }
 .lstn-foot-submit { background: linear-gradient(135deg, #f0b862, #dd9530); color: #08080c; border: none; border-radius: 10px; padding: 10px 20px; font-weight: 600; font-size: 13.5px; }
 
-.lstn-submitted { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 24px; gap: 12px; }
-.lstn-submitted h2 { margin: 0; color: #edeae3; }
-.lstn-submitted p { color: #c9c6ce; font-size: 14px; margin: 0 0 8px; }
+/* Round-feedback: real results screen (replaces the old centered
+   .lstn-submitted "Diagnostik selesai" text). Scrollable like .lstn-scroll
+   (same flex:1 1 auto/min-height:0/overflow-y:auto recipe) since the
+   breakdown + up-to-20-row wrong-answer list can exceed the fixed
+   .lstn-shell viewport - the shell itself stays fixed, only this content
+   region scrolls. */
+.lstn-result { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 24px 20px 28px; box-sizing: border-box; }
+.lstn-result-score { font-size: 34px; color: #e8a33d; text-align: center; margin: 0 0 4px; }
+.lstn-result-sub { color: #c9c6ce; font-size: 13.5px; text-align: center; margin: 0 0 22px; }
+.lstn-result-block { margin: 0 0 16px; padding: 14px 16px; background: #0e0e16; border: 1px solid rgba(255, 255, 255, .08); border-radius: 12px; }
+.lstn-result-label { color: #948f9c; font-size: 10.5px; letter-spacing: 1px; margin: 0 0 10px; }
+.lstn-result-obs { font-size: 13px; margin: 0 0 6px; line-height: 1.5; color: #edeae3; }
+.lstn-result-obs-label { display: inline-block; margin-right: 6px; font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; color: #948f9c; }
+.lstn-result-obs-label.strong { color: var(--growth); }
+.lstn-result-obs-label.weak { color: var(--rust); }
+.lstn-result-obs-neutral { color: #948f9c; }
+.lstn-result-obs-perfect { color: var(--growth); }
+.lstn-result-types { color: #6b6875; font-size: 11px; margin-top: 8px; }
+.lstn-result-wrong-scroll { max-height: 260px; overflow-y: auto; }
+.lstn-result-wrong-row { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.lstn-result-wrong-row:last-child { border-bottom: none; }
+.lstn-result-wrong-yours { font-size: 12.5px; color: #c9c6ce; }
+.lstn-result-wrong-correct { font-size: 12.5px; color: var(--growth); margin-top: 2px; }
 
 .chapter-header.compact { margin-bottom: 20px; }
 .chapter-header.compact .bab { color: var(--muted); font-size: 10.5px; letter-spacing: 1.5px; margin-bottom: 8px; }
