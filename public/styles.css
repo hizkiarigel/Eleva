@@ -822,6 +822,20 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .axis-def-name { display: block; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
 .axis-def-text { color: var(--muted); }
 
+/* SOMA Training Item 2: confirm card styling - reuses .help-overlay/.help-sheet
+   pattern with mode-specific title/description. */
+.soma-confirm-title {
+  font-family: "Fraunces", serif; font-weight: 600; font-size: 19px; color: #f1eee8;
+  margin: 0 0 12px;
+}
+.soma-confirm-desc {
+  font-family: "Inter", sans-serif; font-size: 15px; line-height: 1.65; color: #948f9c;
+  margin: 0 0 18px;
+}
+.soma-confirm-buttons {
+  display: flex; gap: 12px; align-items: center; justify-content: flex-end;
+}
+
 /* Homepage redesign (design handoff, 11 Agustus): persistent header + bottom
    tab bar, Home restructure, Kisahmu/Character/Settings screens. Reuses the
    existing token set (var(--accent) etc.) rather than the handoff's own hex

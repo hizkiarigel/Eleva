@@ -169,10 +169,10 @@ async function test(name, fn) {
     assert.strictEqual(await page.locator(".meta-realm-card-tools-link").count(), 3, "every realm's tools stay reachable regardless of target state");
   });
 
-  await test("opening SOMA's tool list from the empty state shows Movement/Recovery/Nutrition, and tapping Nutrition starts a fresh META session", async () => {
+  await test("opening SOMA's tool list from the empty state shows Training/Recovery/Nutrition, and tapping Nutrition starts a fresh META session", async () => {
     await page.click('[data-meta-realm-open="soma"]');
     await page.waitForSelector("#metaRealmBack", { timeout: 20000 });
-    assert.ok(await page.locator('[data-soma-mode="activity"]:has-text("Movement")').count(), "Movement row must be present");
+    assert.ok(await page.locator('[data-soma-mode="activity"]:has-text("Training")').count(), "Training row must be present");
     assert.ok(await page.locator('[data-soma-mode="recovery"]:has-text("Recovery")').count(), "Recovery row must be present");
     assert.ok(await page.locator('[data-soma-mode="nutrition"]:has-text("Nutrition")').count(), "Nutrition row must be present");
     await page.click('[data-soma-mode="nutrition"]');

@@ -348,13 +348,55 @@ function helpSheetHTML(key) {
       </div>
     </div>`;
 }
-// One delegated listener for open/close - survives every innerHTML re-render,
+// SOMA Training Item 2: confirm card for Recovery and fresh Nutrition paths.
+// Reuses .help-overlay/.help-sheet styling per spec, with mode-specific copy.
+function somaConfirmCardHTML() {
+  if (!somaModeConfirmPending) return "";
+  const { mode, quest } = somaModeConfirmPending;
+  const title = mode === "recovery" ? "Mulai sesi pemulihan?" : "Mulai pencatatan nutrisi?";
+  const desc = mode === "recovery"
+    ? "Catat tidur, hidrasi, dan langkah pemulihan Anda."
+    : "Catat asupan nutrisi untuk hari ini.";
+  return `
+    <div class="help-overlay" id="somaModeConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <div class="soma-confirm-title">${esc(title)}</div>
+        <p class="soma-confirm-desc">${esc(desc)}</p>
+        <div class="soma-confirm-buttons">
+          <button class="btn-ghost" id="somaModeConfirmCancel">Batal</button>
+          <button class="btn-primary" id="somaModeConfirmOk">Mulai</button>
+        </div>
+      </div>
+    </div>`;
+}
+// Delegated listener for open/close - survives every innerHTML re-render,
 // so no per-screen wiring needed. Clicking the dimmed backdrop closes too
 // (light, non-blocking, per the PRD's DoD).
 document.addEventListener("click", (e) => {
   const btn = e.target.closest?.("[data-help]");
   if (btn) { helpOpen = btn.dataset.help; render(); return; }
   if (e.target.id === "helpOverlay" || e.target.id === "closeHelp") { helpOpen = null; render(); }
+  // SOMA Training Item 2: confirm card cancel
+  if (e.target.id === "somaModeConfirmCancel" || e.target.id === "somaModeConfirmOverlay") {
+    somaModeConfirmPending = null; render(); return;
+  }
+  // SOMA Training Item 2: confirm card confirm - delegate to the actual flow setup
+  if (e.target.id === "somaModeConfirmOk") {
+    e.preventDefault();
+    const { mode, quest } = somaModeConfirmPending;
+    somaModeConfirmPending = null;
+    // Item 3: refresh appState so the newly created quest appears on the dashboard
+    api("/api/state").then((state) => { appState = state; }).catch(() => {});
+    if (mode === "recovery") {
+      reflectTarget = quest.id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
+      structForm = {}; reflectError = ""; unableQuestId = null;
+      recordMode = true; structKind = "recovery"; structKindAuto = true;
+    } else {
+      openNutritionFlow(quest);
+    }
+    activeScreen = "home";
+    render();
+  }
 });
 
 const MATURITY_TIERS = ["Emerging", "Practicing", "Reliable", "System", "Master"];
@@ -735,6 +777,9 @@ let metaTargetBusy = false; // guards the confirm/add-goal buttons while a reque
 // evidence).
 let nutritionFlow = null;
 let nfSearchTimer = null; // debounce handle for the Nutrition page's live food search
+// SOMA Training Item 2: confirm card for Recovery and fresh Nutrition paths
+// {mode: "recovery"|"nutrition", quest} pending user confirmation
+let somaModeConfirmPending = null;
 // Task 10a (Artifacts library): sheet state, independent of any quest flow -
 // reachable any time via its own icon, not just from job-match-analysis.
 let artifactsOpen = false;
@@ -4648,7 +4693,7 @@ function metaRealmToolsHTML(realm, s) {
   const counts = s.metaSessionCounts || { lingua: 0, somaActivity: 0, somaNutrition: 0, labora: 0 };
   if (realm === "soma") {
     return [
-      realmProgressCardHTML("#63E38B", "soma", 24, "Movement", `Cardio & gym · ${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="activity"`),
+      realmProgressCardHTML("#63E38B", "soma", 24, "Training", `Cardio & gym · ${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="activity"`),
       realmProgressCardHTML("#63E38B", "soma", 24, "Recovery", `Tidur, hidrasi, pemulihan · ${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="recovery"`),
       realmProgressCardHTML("#63E38B", "soma", 24, "Nutrition", `${counts.somaNutrition} sesi minggu ini`, metaSessionPct(counts.somaNutrition), `data-soma-mode="nutrition"`),
     ].join("");
@@ -5066,6 +5111,7 @@ function renderDashboard() {
       ${appHeaderHTML(s, homeExtraIconsHTML)}
       ${activeScreen === "home" ? helpSheetHTML("dashboard") : ""}
       ${activeScreen === "meta" ? helpSheetHTML("meta") : ""}
+      ${somaConfirmCardHTML()}
       <div class="screen-body qhub-scroll">${screenBodyHTML}</div>
       ${tabBarHTML()}
     </div>`;
@@ -5198,12 +5244,11 @@ function renderDashboard() {
     }
     renderDashboard();
   }));
-  // Meta Inner Realm: SOMA's Movement/Recovery/Nutrition tool rows call
+  // Meta Inner Realm: SOMA's Training/Recovery/Nutrition tool rows call
   // straight into here - "activity"/"recovery" resume the existing quest if
   // one is active (either sub-kind counts as the same "activity" domain),
   // else "activity" falls through to the cardio/gym kind picker, "recovery"
-  // skips the picker entirely (its kind is already known), "nutrition"
-  // resumes or starts a brand-new PROGRESSIVE quest directly.
+  // and "nutrition" show a confirm card before opening the flow (Item 2 fix).
   document.querySelectorAll("[data-soma-mode]").forEach((b) => b.addEventListener("click", async () => {
     const mode = b.dataset.somaMode;
     const active = activeSomaQuest(allOpenQuests, mode === "recovery" ? "activity" : mode);
@@ -5219,20 +5264,20 @@ function renderDashboard() {
       renderDashboard();
       return;
     }
+    // For recovery and nutrition fresh quests, fetch and show confirm card
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
       if (mode === "recovery") {
         const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "body", kind: "recovery" } });
-        reflectTarget = quest.id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
-        structForm = {}; reflectError = ""; unableQuestId = null;
-        recordMode = true; structKind = "recovery"; structKindAuto = true;
+        somaModeConfirmPending = { mode: "recovery", quest };
       } else {
         const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "nutrition" } });
-        await openNutritionFlow(quest);
+        somaModeConfirmPending = { mode: "nutrition", quest };
       }
-      activeScreen = "home";
     } catch (e) {
       metaError = e.message;
+      renderDashboard();
+      return;
     }
     renderDashboard();
   }));
