@@ -169,13 +169,20 @@ async function test(name, fn) {
     assert.strictEqual(await page.locator(".meta-realm-card-tools-link").count(), 3, "every realm's tools stay reachable regardless of target state");
   });
 
-  await test("opening SOMA's tool list from the empty state shows Movement/Recovery/Nutrition, and tapping Nutrition starts a fresh META session", async () => {
+  await test("opening SOMA's tool list from the empty state shows Training/Recovery/Nutrition, and tapping Nutrition asks for confirmation before starting a fresh META session", async () => {
     await page.click('[data-meta-realm-open="soma"]');
     await page.waitForSelector("#metaRealmBack", { timeout: 20000 });
-    assert.ok(await page.locator('[data-soma-mode="activity"]:has-text("Movement")').count(), "Movement row must be present");
+    assert.ok(await page.locator('[data-soma-mode="activity"]:has-text("Training")').count(), "Training row must be present (Movement→Training rename)");
     assert.ok(await page.locator('[data-soma-mode="recovery"]:has-text("Recovery")').count(), "Recovery row must be present");
     assert.ok(await page.locator('[data-soma-mode="nutrition"]:has-text("Nutrition")').count(), "Nutrition row must be present");
+    // Movement→Training spec item 2: a fresh-start Nutrition tap shows a
+    // confirm card FIRST (nothing created server-side yet) - same
+    // interstitial pattern Training's cardio/gym kind picker already has.
     await page.click('[data-soma-mode="nutrition"]');
+    await page.waitForSelector("#metaSomaConfirmBtn", { timeout: 20000 });
+    assert.ok(await page.locator("text=Mulai tracking Nutrition?").count(), "confirm card must render before any quest is created");
+    assert.strictEqual((await sql.query("SELECT count(*) FROM days WHERE is_meta")).rows[0].count, "0", "no META quest may exist before the confirm tap");
+    await page.click("#metaSomaConfirmBtn");
     await page.waitForSelector('text=Waktu makan', { timeout: 20000 });
     assert.ok(await page.locator("text=Meals 0/3").count(), "fresh META nutrition quest should start at 0/3");
   });

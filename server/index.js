@@ -15,6 +15,7 @@ const jobApplication = require("./jobApplication");
 const nutrition = require("./nutrition");
 const nutritionEntry = require("./nutritionEntry");
 const metaTargets = require("./metaTargets");
+const exerciseCatalog = require("./exerciseCatalog");
 
 // Task 14 (Livelihood Milestone, PRD.md section 26): auto-creates the fixed
 // "10 Qualified Applications" milestone the first time a Livelihood goal's
@@ -1391,6 +1392,18 @@ app.post("/api/job-application/submit", requireAuth, async (req, res) => {
 // analyze) are otherwise completely unmodified - a META quest completes
 // through the exact same code as a Today's Trial quest of the same
 // completionType, so growth-gate/Decay/Riwayat all apply identically.
+// Training spec: the fixed exercise catalog for the multi-exercise workout
+// log - static server data (see server/exerciseCatalog.js), fetched once by
+// the client when the Training session form opens. Auth-gated like every
+// other /api route, but user-independent content.
+app.get("/api/exercise-catalog", requireAuth, (req, res) => {
+  res.json({
+    exercises: exerciseCatalog.EXERCISES,
+    muscleGroups: exerciseCatalog.MUSCLE_GROUPS,
+    muscleGroupLabels: exerciseCatalog.MUSCLE_GROUP_LABELS,
+  });
+});
+
 app.post("/api/meta/start", requireAuth, async (req, res) => {
   try {
     const { tool, kind } = req.body;
@@ -1403,6 +1416,11 @@ app.post("/api/meta/start", requireAuth, async (req, res) => {
         completionType: "structured-physical",
         structuredKind: kind,
         evidenceSchema: null, // no Milestone target to compare against - a free session
+        // Training spec: NEW gym sessions started from META get the
+        // multi-exercise workout log (client renders the gym-session form
+        // off this flag). Legacy single-exercise gym quests already in
+        // flight lack it and keep the old form - never force-migrated.
+        ...(kind === "gym" ? { gymSession: true } : {}),
         statFocus: "body",
         title: "Latihan Mandiri",
         description: "Sesi latihan bebas dari META — catat aktivitasmu, tidak terikat ke goal atau Milestone manapun.",

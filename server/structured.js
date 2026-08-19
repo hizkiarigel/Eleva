@@ -8,6 +8,8 @@
 
 const CARDIO_ACTIVITIES = ["Lari", "Jalan cepat", "Sepeda", "Lompat tali", "Lainnya"];
 
+const exerciseCatalog = require("./exerciseCatalog");
+
 // Per-activity plausible top speeds (km/h). The PRD's own example of an
 // impossible combo - 15 km in 20 minutes "running" (45 km/h) - falls to the
 // Lari cap. Generous on purpose: the goal is catching fabrication-grade
@@ -124,7 +126,87 @@ function validateStructuredData(kind, data) {
     };
   }
 
+  // SOMA Training multi-exercise session (Movement→Training spec): a full
+  // workout log - multiple exercises from the FIXED catalog, each with its
+  // own sets grid. Same defense-in-depth split as the single-exercise gym
+  // kind above: everything is code-validated here (ids resolved against the
+  // server catalog, per-set plausibility caps identical to gym's), and the
+  // end-of-session evaluation (volume/calories/dominant muscle group) is
+  // computed server-side from catalog numbers - a client can never inflate
+  // a calorie estimate by sending its own. Legacy "gym" entries above are
+  // untouched: in-flight single-exercise quests keep validating exactly as
+  // before, this is a NEW kind, not a migration.
+  if (kind === "gym-session") {
+    const rawExercises = Array.isArray(data.exercises) ? data.exercises : [];
+    if (rawExercises.length === 0) return { ok: false, error: "Tambah minimal satu gerakan dulu." };
+    if (rawExercises.length > 20) return { ok: false, error: "Lebih dari 20 gerakan dalam satu sesi tidak wajar — cek lagi daftarnya." };
+
+    const cleanExercises = [];
+    for (const ex of rawExercises) {
+      const entry = exerciseCatalog.EXERCISES_BY_ID.get(String(ex?.exerciseId || ""));
+      if (!entry) return { ok: false, error: "Ada gerakan yang tidak dikenal di katalog — pilih dari daftar gerakan." };
+      const rawSets = Array.isArray(ex.sets) ? ex.sets : [];
+      if (rawSets.length === 0) return { ok: false, error: `${entry.name}: tambah minimal satu set.` };
+      if (rawSets.length > 50) return { ok: false, error: `${entry.name}: lebih dari 50 set tidak wajar — cek lagi angkanya.` };
+      const cleanSets = [];
+      for (const s of rawSets) {
+        const reps = num(s?.reps);
+        const weight = s?.weightKg === "" || s?.weightKg == null ? null : num(s.weightKg);
+        const done = Boolean(s?.done);
+        // An unchecked (not-done) set may be left blank - it's a plan row,
+        // not evidence. A DONE set must carry plausible numbers.
+        if (done) {
+          if (reps == null || !Number.isInteger(reps) || reps <= 0) return { ok: false, error: `${entry.name}: repetisi wajib angka bulat lebih dari 0 untuk set yang selesai.` };
+          if (reps > 500) return { ok: false, error: `${entry.name}: lebih dari 500 repetisi per set tidak wajar — cek lagi angkanya.` };
+          if (weight != null && (weight < 0 || weight > 500)) return { ok: false, error: `${entry.name}: beban di luar rentang wajar (0-500 kg) — cek lagi angkanya.` };
+        }
+        cleanSets.push({
+          ...(reps != null && Number.isInteger(reps) && reps > 0 ? { reps } : {}),
+          ...(weight != null && weight >= 0 ? { weightKg: weight } : {}),
+          done,
+        });
+      }
+      cleanExercises.push({
+        exerciseId: entry.id,
+        // Name/muscle group come from the server catalog, never trusted
+        // from the client payload.
+        name: entry.name,
+        muscleGroup: entry.primaryMuscleGroup,
+        sets: cleanSets,
+      });
+    }
+
+    if (!cleanExercises.some((ex) => ex.sets.some((s) => s.done))) {
+      return { ok: false, error: "Tandai minimal satu set sebagai selesai — belum ada yang bisa dicatat sebagai bukti." };
+    }
+
+    return { ok: true, clean: { kind: "gym-session", exercises: cleanExercises, evaluation: evaluateGymSession(cleanExercises) } };
+  }
+
   return { ok: false, error: "Jenis quest terstruktur tidak dikenal." };
 }
 
-module.exports = { validateStructuredData, CARDIO_ACTIVITIES };
+// End-of-session evaluation per the Training spec - only COMPLETED (done)
+// sets count toward all three numbers. Dominant muscle group = the group
+// with the most completed sets; ties list every winner rather than forcing
+// a single one (spec's own rule). Calories are Σ(catalog caloriesPerSet ×
+// completed sets) - rough and static by design, directional feedback only.
+function evaluateGymSession(cleanExercises) {
+  let totalVolumeKg = 0;
+  let estimatedCalories = 0;
+  const setsPerGroup = {};
+  for (const ex of cleanExercises) {
+    const entry = exerciseCatalog.EXERCISES_BY_ID.get(ex.exerciseId);
+    for (const s of ex.sets) {
+      if (!s.done) continue;
+      totalVolumeKg += (s.weightKg || 0) * (s.reps || 0);
+      estimatedCalories += entry ? entry.caloriesPerSet : 0;
+      setsPerGroup[ex.muscleGroup] = (setsPerGroup[ex.muscleGroup] || 0) + 1;
+    }
+  }
+  const max = Math.max(0, ...Object.values(setsPerGroup));
+  const dominantMuscleGroups = Object.keys(setsPerGroup).filter((g) => setsPerGroup[g] === max);
+  return { totalVolumeKg: Math.round(totalVolumeKg), estimatedCalories, dominantMuscleGroups };
+}
+
+module.exports = { validateStructuredData, evaluateGymSession, CARDIO_ACTIVITIES };
