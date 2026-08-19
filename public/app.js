@@ -728,10 +728,39 @@ let listeningDiagnosticFlow = null;
 //   error: "", result: null,     // result: {score,total,wrong,assessment,mentorReply} from submit
 // }
 let readingTestFlow = null;
+// Video Quest (video-quiz, LABORA design handoff): user learns from ONE
+// self-picked YouTube video, then proves understanding through a
+// source-locked 15-question HOTS assessment. Same chrome-free test-mode
+// architecture as readingTestFlow: every step except "intro" bypasses the
+// normal .app-shell via renderDashboard's early-return. In-flight answers
+// are client-only (a reload restarts answering, same trade-off as rdg);
+// the locked video + generated question set live server-side, so re-entry
+// resumes with the SAME set via the idempotent /api/video-quiz/start.
+// {
+//   questId, origin: "home" | "meta",
+//   topic, passThreshold, estimatedMinutes,   // from quest.videoQuiz
+//   step: "intro" | "pick" | "ready" | "locked" | "assessment" | "review" | "result" | "pembahasan",
+//   videoUrl: "",                // the pick step's input draft
+//   checking: false,             // "Memeriksa materi..." in flight
+//   checkError: "",              // validate-step error/not-relevant message
+//   materi: null,                // { videoMeta, videoId, rationale } after a relevant check (pre-lock)
+//   locked: null,                // { videoUrl, videoMeta, videoId } once the source lock exists
+//   lastResult: null,            // quest.videoQuizState.lastResult mirror (fail landing on re-entry)
+//   attempt: 1,
+//   questions: null,             // stripped set from /start (no correct/explanation)
+//   index: 0, answers: {},       // answers[qid] = array of option ids (even for single)
+//   navOpen, sourceOpen, submitConfirmOpen, exitConfirmOpen: false,
+//   result: null,                // submit response (pass: includes review[] for pembahasan)
+//   error: "",
+// }
+let videoQuizFlow = null;
 // Task 12 (META): true while the inline Cardio/Gym/Recovery picker for the
 // "Body" META box is showing (tapped but no kind chosen yet). Reset after
 // /api/meta/start succeeds or the user backs out.
 let metaBodyPicking = false;
+// Video Quest's LABORA row gets the same inline-card treatment as
+// metaBodyPicking: true while the "what topic?" input card is showing.
+let metaVideoQuestPicking = false;
 // Movement→Training spec item 2: Recovery (and fresh-start Nutrition) get
 // the same confirm-before-create step Movement's kind picker already gives -
 // "recovery" | "nutrition" while the inline confirm card is showing, null
@@ -4613,6 +4642,597 @@ function wireReadingTestHandlers() {
   });
 }
 
+// ==== Video Quest (video-quiz) =====================================
+// Test-mode shell for the source-locked video assessment (LABORA design
+// handoff), cloned from the rdg* family's architecture: chrome bypass via
+// renderDashboard early-return, surgical answer updates, .help-overlay
+// sheets (with the same z-index override need, see styles.css #vq*Overlay).
+// One question per screen (design spec) instead of rdg's block panes.
+
+function vqQuestionCount(f) {
+  return f.questions ? f.questions.length : 15;
+}
+function vqAnswersFor(f, qid) {
+  return Array.isArray(f.answers[qid]) ? f.answers[qid] : [];
+}
+function vqAnsweredCount(f) {
+  return (f.questions || []).filter((q) => vqAnsweredCount.one(f, q.id)).length;
+}
+vqAnsweredCount.one = (f, qid) => vqAnswersFor(f, qid).length > 0;
+
+// Flow constructor from an open quest day. A quest whose videoQuizState
+// already carries a lock skips intro/pick entirely and lands on the locked
+// view (design spec: re-entry never re-validates, never allows a swap).
+function startVideoQuiz(day, origin) {
+  const quest = day.quest || {};
+  const vq = quest.videoQuiz || {};
+  const st = quest.videoQuizState || null;
+  videoQuizFlow = {
+    questId: day.id, origin: origin || "home",
+    topic: vq.topic || quest.title || "",
+    passThreshold: vq.passThreshold ?? 11,
+    estimatedMinutes: vq.estimatedMinutes ?? 25,
+    step: st?.lockedVideoUrl ? "locked" : "intro",
+    videoUrl: "", checking: false, checkError: "",
+    materi: null,
+    locked: st?.lockedVideoUrl ? { videoUrl: st.lockedVideoUrl, videoMeta: st.lockedVideoMeta || {}, videoId: st.lockedVideoId || null } : null,
+    lastResult: st?.lastResult || null,
+    attempt: st?.attempt || 1,
+    questions: null, index: 0, answers: {},
+    navOpen: false, sourceOpen: false, submitConfirmOpen: false, exitConfirmOpen: false,
+    result: null, error: "",
+  };
+}
+
+function vqVideoId(f) {
+  const source = f.locked || f.materi;
+  if (source?.videoId) return source.videoId;
+  const m = String(source?.videoUrl || f.videoUrl || "").match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+// The locked/candidate video card - thumbnail + title + external link (the
+// design shows a thumbnail with "Buka Video", never an embedded player;
+// closest existing precedent is the listening diagnostic's audio card).
+function vqVideoCardHTML(f, videoMeta, videoUrl) {
+  const vid = vqVideoId(f);
+  const mins = videoMeta?.durationSec ? Math.round(videoMeta.durationSec / 60) : null;
+  return `
+    <div class="vq-video-card">
+      <div class="vq-thumb">
+        ${vid ? `<img src="https://img.youtube.com/vi/${esc(vid)}/hqdefault.jpg" alt="" loading="lazy" />` : ""}
+        <span class="vq-thumb-play">▶</span>
+      </div>
+      <div class="vq-video-title">${esc(videoMeta?.title || "Video materi")}</div>
+      ${videoMeta?.channel ? `<div class="vq-video-meta">${esc(videoMeta.channel)}${mins ? ` · ±${mins} menit` : ""}</div>` : ""}
+      ${videoUrl ? `<a class="vq-video-link" href="${esc(videoUrl)}" target="_blank" rel="noopener noreferrer">Buka Video</a>` : ""}
+    </div>`;
+}
+
+// Intro - renders INSIDE the normal chrome, same as the rdg/lstn intros.
+function vqIntroHTML() {
+  const f = videoQuizFlow;
+  return `
+    <div class="rdg-intro fadeUp">
+      <div class="eyebrow mono" style="color:#FFC46E">META · LABORA</div>
+      <h1 class="fr rdg-intro-title">Video Quest</h1>
+      <p class="rdg-intro-subtitle">${esc(f.topic)}</p>
+      <div class="rdg-intro-stats">
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">15</div><div class="rdg-intro-stat-label">soal</div></div>
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">≥${f.passThreshold}</div><div class="rdg-intro-stat-label">buat lulus</div></div>
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">±${f.estimatedMinutes}</div><div class="rdg-intro-stat-label">menit</div></div>
+      </div>
+      <div class="rdg-intro-instr-label mono">CARA MAINNYA</div>
+      <div class="rdg-intro-qlist">
+        <div class="rdg-intro-qrow"><span class="mono rdg-intro-qrange">1</span><span>Cari satu video YouTube yang membahas topik ini</span></div>
+        <div class="rdg-intro-qrow"><span class="mono rdg-intro-qrange">2</span><span>Pelajari videonya — setelah assessment dimulai, video dikunci sampai lulus</span></div>
+        <div class="rdg-intro-qrow"><span class="mono rdg-intro-qrange">3</span><span>Jawab 15 soal dari isi video itu (${f.passThreshold}/15 buat lulus)</span></div>
+      </div>
+      <button class="btn-primary full rdg-intro-cta" id="vqStart">Mulai Quest</button>
+      <button class="btn-ghost full" id="vqCancel" style="margin-top:10px">← Batal</button>
+    </div>`;
+}
+
+function vqTopBarHTML(f, { lock = false, backId = "vqBack" } = {}) {
+  return `
+    <div class="vq-topbar">
+      ${lock
+        ? `<button class="vq-lock-btn" id="vqLockBtn" aria-label="Lihat materi terkunci">🔒</button>`
+        : `<button class="rdg-back" id="${backId}" aria-label="Kembali">‹</button>`}
+      <div class="vq-topbar-title">Assessment</div>
+      <span style="width:34px;flex:none"></span>
+    </div>`;
+}
+
+// "Pilih materi belajarmu" - URL input + Periksa Materi. A not-relevant
+// verdict keeps the input so the user can paste a different link.
+function vqPickHTML() {
+  const f = videoQuizFlow;
+  return `
+    <div class="vq-topbar">
+      <button class="rdg-back" id="vqPickBack" aria-label="Kembali">‹</button>
+      <div class="vq-topbar-title"></div>
+      <span style="width:34px;flex:none"></span>
+    </div>
+    <div class="vq-body">
+      <h1 class="fr vq-h1">Pilih materi belajarmu</h1>
+      <p class="vq-sub">Cari satu video YouTube yang membahas:</p>
+      <p class="vq-topic">${esc(f.topic)}</p>
+      <div class="eyebrow mono vq-field-label">LINK YOUTUBE</div>
+      <input type="url" class="vq-input" id="vqUrlInput" placeholder="Tempel link YouTube..." value="${esc(f.videoUrl)}" ${f.checking ? "disabled" : ""} inputmode="url" autocomplete="off" />
+      <div class="vq-note">Setelah assessment dimulai, video ini tidak dapat diganti sampai quest selesai.</div>
+      ${f.checkError ? `<p class="vq-error">${esc(f.checkError)}</p>` : ""}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-primary full" id="vqCheckBtn" ${f.checking ? "disabled" : ""}>${f.checking ? "Memeriksa materi..." : "Periksa Materi"}</button>
+    </div>`;
+}
+
+// "Materi siap" - relevance confirmed, one last chance to swap before the
+// lock. Starting the assessment here is what locks the source server-side.
+function vqReadyHTML() {
+  const f = videoQuizFlow;
+  return `
+    <div class="vq-topbar">
+      <button class="rdg-back" id="vqPickBack" aria-label="Kembali">‹</button>
+      <div class="vq-topbar-title"></div>
+      <span style="width:34px;flex:none"></span>
+    </div>
+    <div class="vq-body">
+      <h1 class="fr vq-h1">Materi siap</h1>
+      <p class="vq-sub vq-relevant">✓ Materi relevan dengan topik "${esc(f.topic)}"</p>
+      ${f.materi?.rationale ? `<p class="vq-rationale">${esc(f.materi.rationale)}</p>` : ""}
+      ${vqVideoCardHTML(f, f.materi?.videoMeta, f.videoUrl)}
+      <div class="vq-note">Setelah assessment dimulai, video ini dikunci — tidak bisa diganti sampai kamu lulus.</div>
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-primary full" id="vqBeginAssessment">Saya Sudah Belajar → Mulai Assessment</button>
+      <button class="btn-ghost full" id="vqSwap" style="margin-top:10px">Ganti Video</button>
+    </div>`;
+}
+
+// Source-locked landing: reachable on any re-entry while the quest is
+// locked, and via "Pelajari Lagi" after a fail. Same video every time.
+function vqLockedHTML() {
+  const f = videoQuizFlow;
+  const r = f.lastResult;
+  return `
+    <div class="vq-topbar">
+      <button class="rdg-back" id="vqLockedBack" aria-label="Kembali">‹</button>
+      <div class="vq-topbar-title"></div>
+      <span style="width:34px;flex:none"></span>
+    </div>
+    <div class="vq-body vq-center">
+      <div class="vq-lock-badge">🔒</div>
+      <h1 class="fr vq-h1" style="text-align:center">Materi dikunci untuk quest ini</h1>
+      <p class="vq-sub" style="text-align:center">Kamu akan menggunakan materi yang sama sampai lulus.</p>
+      ${vqVideoCardHTML(f, f.locked?.videoMeta, f.locked?.videoUrl)}
+      ${r && !r.passed && (r.weakConcepts || []).length ? `
+        <div class="eyebrow mono vq-chips-label" style="color:var(--rust)">FOKUS ULANG</div>
+        <div class="chip-row vq-chip-row">${r.weakConcepts.map((c) => `<span class="vq-chip vq-chip-weak">${esc(c)}</span>`).join("")}</div>` : ""}
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+      <p class="vq-muted">Materi bermasalah?</p>
+    </div>
+    <div class="vq-foot-single">
+      ${r && !r.passed
+        ? `<button class="btn-primary full" id="vqRetry">↻ Ulang Assessment</button>`
+        : `<button class="btn-primary full" id="vqResume">Mulai Assessment</button>`}
+    </div>`;
+}
+
+// One question per screen (design spec). format "single" renders radio-
+// style rows; "multi" (exactly one per set) renders checkbox-style rows
+// with a "pilih semua yang benar" helper - the app's first multi-select.
+function vqAssessmentHTML() {
+  const f = videoQuizFlow;
+  const total = vqQuestionCount(f);
+  const q = f.questions[f.index];
+  const chosen = vqAnswersFor(f, q.id);
+  const multi = q.format === "multi";
+  return `
+    ${vqTopBarHTML(f, { lock: true })}
+    <div class="vq-progress-head">
+      <button class="vq-progress-label" id="vqNavBtn">${esc(f.topic)} · <b>Soal ${f.index + 1} dari ${total}</b> ▾</button>
+      <div class="rdg-progress-track vq-progress-track"><div class="rdg-progress-fill" style="width:${Math.round(((f.index + 1) / total) * 100)}%"></div></div>
+    </div>
+    <div class="vq-body" id="vqQuestionPane">
+      <p class="vq-question-text">${esc(q.prompt)}</p>
+      ${multi ? `<p class="vq-multi-hint mono">PILIH SEMUA JAWABAN YANG BENAR</p>` : ""}
+      <div class="vq-options">
+        ${q.options.map((o) => `
+          <button class="vq-option ${chosen.includes(o.id) ? "active" : ""}" data-vq-opt="${esc(q.id)}" data-vq-value="${esc(o.id)}" data-vq-multi="${multi ? "1" : ""}">
+            <span class="vq-indicator ${multi ? "vq-indicator-box" : ""}"></span>
+            <span class="vq-option-text">${esc(o.text)}</span>
+          </button>`).join("")}
+      </div>
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="vq-foot">
+      <button class="btn-ghost" id="vqPrev" style="flex:0 0 auto" ${f.index === 0 ? "disabled" : ""}>←</button>
+      <button class="rdg-foot-next" id="vqNext">${f.index >= total - 1 ? "Review Jawaban" : "Lanjutkan"}</button>
+    </div>`;
+}
+
+// Question navigator sheet - the rdg overview idea, flattened to one
+// 15-dot grid (no blocks here).
+function vqNavigatorSheetHTML(f) {
+  return `
+    <div class="help-overlay" id="vqNavOverlay">
+      <div class="help-sheet fadeUp rdg-sheet">
+        <div class="eyebrow mono" style="margin:0 0 10px">NAVIGASI SOAL</div>
+        <div class="vq-grid">
+          ${f.questions.map((q, i) => `<button class="vq-cell ${vqAnsweredCount.one(f, q.id) ? "answered" : ""} ${i === f.index ? "current" : ""}" data-vq-jump="${i}">${i + 1}</button>`).join("")}
+        </div>
+        <p class="rdg-ov-legend mono">${vqAnsweredCount(f)}/${vqQuestionCount(f)} dijawab</p>
+        <button class="btn-ghost full" id="vqNavClose">Tutup</button>
+      </div>
+    </div>`;
+}
+
+// Source-locked bottom sheet: the lock icon's target during the assessment.
+function vqSourceSheetHTML(f) {
+  return `
+    <div class="help-overlay" id="vqSourceOverlay">
+      <div class="help-sheet fadeUp rdg-sheet">
+        <div class="eyebrow mono" style="margin:0 0 10px">🔒 MATERI TERKUNCI</div>
+        <p class="vq-sub" style="margin:0 0 12px">Kamu akan menggunakan materi yang sama sampai lulus.</p>
+        ${vqVideoCardHTML(f, f.locked?.videoMeta, f.locked?.videoUrl)}
+        <button class="btn-ghost full" id="vqSourceClose" style="margin-top:12px">Kembali ke soal</button>
+      </div>
+    </div>`;
+}
+
+function vqExitConfirmSheetHTML() {
+  return `
+    <div class="help-overlay" id="vqExitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p>Keluar dari assessment? Jawaban sesi ini tidak tersimpan, tapi materimu tetap terkunci untuk quest ini.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="vqExitStay" style="flex:1">Lanjutkan</button>
+          <button class="btn-primary" id="vqExitConfirm" style="flex:1">Keluar</button>
+        </div>
+      </div>
+    </div>`;
+}
+function vqSubmitConfirmSheetHTML() {
+  return `
+    <div class="help-overlay" id="vqSubmitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p><b>Kirim jawaban?</b> Setelah dikirim, jawaban tidak dapat diubah.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="vqSubmitBack" style="flex:1">Kembali cek</button>
+          <button class="btn-primary" id="vqSubmitConfirm" style="flex:1">Kirim Jawaban</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// "Review Jawaban" - answered-status grid, submit gated on 15/15 (design
+// spec: no partial submits, unlike rdg's "Submit anyway").
+function vqReviewHTML() {
+  const f = videoQuizFlow;
+  const total = vqQuestionCount(f);
+  const answered = vqAnsweredCount(f);
+  return `
+    ${vqTopBarHTML(f, { lock: true })}
+    <div class="vq-body">
+      <h1 class="fr vq-h1">Review Jawaban</h1>
+      <p class="vq-sub">${answered} dari ${total} soal telah dijawab.</p>
+      <div class="vq-grid vq-grid-review">
+        ${f.questions.map((q, i) => `<button class="vq-cell ${vqAnsweredCount.one(f, q.id) ? "answered" : ""}" data-vq-jump="${i}">${i + 1}</button>`).join("")}
+      </div>
+      <div class="vq-note">Setelah dikirim, jawaban tidak dapat diubah.</div>
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-primary full" id="vqSubmit" ${answered < total ? "disabled" : ""}>Kirim Jawaban</button>
+      <button class="btn-ghost full" id="vqReviewBack" style="margin-top:10px">← Kembali ke soal</button>
+    </div>`;
+}
+
+// Result: pass (score, strong/weak chips, pembahasan, finish) or fail
+// (BELUM LULUS, FOKUS ULANG chips, Pelajari Lagi / Ulang Assessment).
+function vqResultHTML() {
+  const f = videoQuizFlow;
+  const r = f.result;
+  const chips = (list, cls) => `<div class="chip-row vq-chip-row">${list.map((c) => `<span class="vq-chip ${cls}">${esc(c)}</span>`).join("")}</div>`;
+  if (r.passed) {
+    return `
+      <div class="vq-body vq-result">
+        <div class="vq-result-score"><span class="fr vq-score-big" style="color:var(--growth)">${r.score}</span><span class="fr vq-score-total"> / ${r.total}</span></div>
+        <div class="eyebrow mono vq-verdict" style="color:var(--growth)">LULUS</div>
+        ${r.mentorReply ? `<p class="vq-sub">${esc(r.mentorReply)}</p>` : `<p class="vq-sub">Kamu membuktikan pemahamanmu dari materi yang kamu pilih sendiri.</p>`}
+        ${(r.strongConcepts || []).length ? `<div class="eyebrow mono vq-chips-label" style="color:var(--growth)">KONSEP KUAT</div>${chips(r.strongConcepts, "vq-chip-strong")}` : ""}
+        ${(r.weakConcepts || []).length ? `<div class="eyebrow mono vq-chips-label" style="color:var(--rust)">MASIH BISA DIPERKUAT</div>${chips(r.weakConcepts, "vq-chip-weak")}` : ""}
+      </div>
+      <div class="vq-foot-single">
+        <button class="btn-ghost full" id="vqPembahasan">Lihat Pembahasan</button>
+        <button class="btn-primary full" id="vqFinish" style="margin-top:10px">Selesaikan Quest</button>
+      </div>`;
+  }
+  return `
+    <div class="vq-body vq-result">
+      <div class="vq-result-score"><span class="fr vq-score-big" style="color:var(--rust)">${r.score}</span><span class="fr vq-score-total"> / ${r.total}</span></div>
+      <div class="eyebrow mono vq-verdict" style="color:var(--rust)">BELUM LULUS</div>
+      <p class="vq-sub">Kamu sudah dekat. Perkuat beberapa konsep sebelum mencoba lagi.</p>
+      ${(r.weakConcepts || []).length ? `<div class="eyebrow mono vq-chips-label" style="color:var(--rust)">FOKUS ULANG</div>${chips(r.weakConcepts, "vq-chip-weak")}` : ""}
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-ghost full" id="vqStudyAgain">▶ Pelajari Lagi</button>
+      <button class="btn-primary full" id="vqRetry" style="margin-top:10px">↻ Ulang Assessment</button>
+    </div>`;
+}
+
+// Pembahasan (pass only): per-question review from the submit response -
+// same <details> treatment as rdg's wrong-answer review, but covering all
+// 15 (correct ones collapsed too, the design's full answer review).
+function vqPembahasanHTML() {
+  const f = videoQuizFlow;
+  const review = f.result?.review || [];
+  const optText = (q, ids) => (ids || []).map((id) => {
+    const o = (q.options || []).find((x) => x.id === id);
+    return o ? o.text : id;
+  }).join(" · ") || "-";
+  return `
+    ${vqTopBarHTML(f, { backId: "vqPembahasanBack" })}
+    <div class="vq-body">
+      <h1 class="fr vq-h1">Pembahasan</h1>
+      <p class="vq-sub">${esc(f.topic)} · ${f.result.score}/${f.result.total}</p>
+      ${review.map((w, i) => `
+        <details class="rdg-wrong ${w.isCorrect ? "vq-correct" : ""}">
+          <summary><span class="mono rdg-qnum" style="${w.isCorrect ? "color:var(--growth)" : "color:var(--rust)"}">${i + 1}</span> ${esc(w.prompt.length > 80 ? w.prompt.slice(0, 80) + "…" : w.prompt)}</summary>
+          <div class="rdg-wrong-body">
+            <p class="mono">Jawabanmu: ${esc(optText(w, w.yourAnswer))}</p>
+            <p class="mono">Benar: ${esc(optText(w, w.correct))}</p>
+            ${w.explanation ? `<p>${esc(w.explanation)}</p>` : ""}
+          </div>
+        </details>`).join("")}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-primary full" id="vqFinish">Selesaikan Quest</button>
+    </div>`;
+}
+
+// Full chrome bypass, same pattern as renderReadingTest.
+function renderVideoQuiz() {
+  const f = videoQuizFlow;
+  let inner;
+  if (f.step === "pick") inner = vqPickHTML();
+  else if (f.step === "ready") inner = vqReadyHTML();
+  else if (f.step === "locked") inner = vqLockedHTML();
+  else if (f.step === "review") inner = vqReviewHTML();
+  else if (f.step === "result") inner = vqResultHTML();
+  else if (f.step === "pembahasan") inner = vqPembahasanHTML();
+  else inner = vqAssessmentHTML();
+  root.innerHTML = `
+    <div class="rdg-shell vq-shell">${inner}</div>
+    ${f.navOpen ? vqNavigatorSheetHTML(f) : ""}
+    ${f.sourceOpen ? vqSourceSheetHTML(f) : ""}
+    ${f.submitConfirmOpen ? vqSubmitConfirmSheetHTML() : ""}
+    ${f.exitConfirmOpen ? vqExitConfirmSheetHTML() : ""}`;
+  wireVideoQuizHandlers();
+}
+
+// "Periksa Materi": server fetches the transcript + judges relevance. A
+// not-relevant verdict keeps the pick step (rationale shown, input kept).
+async function vqDoValidate() {
+  const f = videoQuizFlow;
+  if (!f || f.checking) return;
+  const url = String(document.getElementById("vqUrlInput")?.value || "").trim();
+  f.videoUrl = url;
+  if (!url) {
+    f.checkError = "Tempel link video YouTube dulu.";
+    renderDashboard();
+    return;
+  }
+  f.checking = true;
+  f.checkError = "";
+  renderDashboard();
+  try {
+    const resp = await api("/api/video-quiz/validate", { method: "POST", body: { questId: f.questId, videoUrl: url } });
+    f.checking = false;
+    if (!resp.relevant) {
+      f.checkError = resp.rationale || `Video ini belum membahas "${f.topic}". Coba video lain.`;
+    } else {
+      f.materi = { videoMeta: resp.videoMeta, videoId: resp.videoMeta?.videoId || null, rationale: resp.rationale || "" };
+      f.step = "ready";
+    }
+  } catch (e) {
+    f.checking = false;
+    f.checkError = e.message;
+  }
+  renderDashboard();
+}
+
+// /start: FIRST START locks the candidate video server-side; RESUME returns
+// the same set idempotently; retry=true regenerates from the same locked
+// transcript ("Ulang Assessment").
+async function vqDoStart(retry) {
+  const f = videoQuizFlow;
+  if (!f) return;
+  f.error = "";
+  root.innerHTML = spinnerHTML(retry ? "Menyusun set soal baru dari materimu..." : "Menyusun soal dari materimu...");
+  try {
+    const resp = await api("/api/video-quiz/start", { method: "POST", body: { questId: f.questId, ...(retry ? { retry: true } : {}) } });
+    f.locked = resp.locked;
+    f.attempt = resp.attempt;
+    f.passThreshold = resp.passThreshold ?? f.passThreshold;
+    f.questions = resp.questions;
+    f.index = 0;
+    f.answers = {};
+    f.result = null;
+    f.step = "assessment";
+  } catch (e) {
+    f.error = e.message;
+    // A failed FIRST start leaves the video unlocked server-side - stay
+    // where the user was so they can retry or swap.
+    if (f.step !== "locked" && f.step !== "result") f.step = f.materi ? "ready" : "pick";
+  }
+  renderDashboard();
+}
+
+async function vqDoSubmit() {
+  const f = videoQuizFlow;
+  if (!f) return;
+  f.submitConfirmOpen = false;
+  f.error = "";
+  root.innerHTML = spinnerHTML("Menilai jawaban...");
+  try {
+    const resp = await api("/api/video-quiz/submit", { method: "POST", body: { questId: f.questId, answers: f.answers } });
+    f.result = resp;
+    f.lastResult = { score: resp.score, total: resp.total, passed: resp.passed, strongConcepts: resp.strongConcepts, weakConcepts: resp.weakConcepts };
+    if (resp.passed) questCtaState.set(f.questId, "completed");
+    f.step = "result";
+  } catch (e) {
+    f.error = e.message;
+    f.step = "review";
+  }
+  renderDashboard();
+}
+
+function wireVideoQuizHandlers() {
+  const f = videoQuizFlow;
+  if (!f) return;
+
+  // Intro (inside normal chrome)
+  document.getElementById("vqStart")?.addEventListener("click", () => {
+    f.step = f.locked ? "locked" : "pick";
+    renderDashboard();
+  });
+  document.getElementById("vqCancel")?.addEventListener("click", () => {
+    videoQuizFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+
+  // Pick / ready / locked navigation. Backing out is client-state only -
+  // the open quest row stays open (same convention as rdgCancel).
+  document.getElementById("vqPickBack")?.addEventListener("click", () => {
+    if (f.step === "ready") { f.step = "pick"; renderDashboard(); return; }
+    f.step = "intro";
+    renderDashboard();
+  });
+  document.getElementById("vqLockedBack")?.addEventListener("click", () => {
+    videoQuizFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+  document.getElementById("vqCheckBtn")?.addEventListener("click", () => vqDoValidate());
+  document.getElementById("vqUrlInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") vqDoValidate();
+  });
+  document.getElementById("vqSwap")?.addEventListener("click", () => {
+    f.materi = null;
+    f.step = "pick";
+    renderDashboard();
+  });
+  document.getElementById("vqBeginAssessment")?.addEventListener("click", () => vqDoStart(false));
+  document.getElementById("vqResume")?.addEventListener("click", () => vqDoStart(false));
+  document.getElementById("vqRetry")?.addEventListener("click", () => vqDoStart(true));
+
+  // Assessment top bar: back = exit confirm, lock = source sheet.
+  document.getElementById("vqBack")?.addEventListener("click", () => {
+    f.exitConfirmOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqExitStay")?.addEventListener("click", () => {
+    f.exitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("vqExitConfirm")?.addEventListener("click", () => {
+    videoQuizFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+  document.getElementById("vqLockBtn")?.addEventListener("click", () => {
+    f.sourceOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqSourceClose")?.addEventListener("click", () => {
+    f.sourceOpen = false;
+    renderDashboard();
+  });
+
+  // Answers: surgical updates only (the rdg scroll lesson). Single-select
+  // replaces the choice; the multi question toggles membership.
+  document.querySelectorAll("[data-vq-opt]").forEach((btn) => btn.addEventListener("click", () => {
+    const qid = btn.dataset.vqOpt;
+    const value = btn.dataset.vqValue;
+    if (btn.dataset.vqMulti) {
+      const current = vqAnswersFor(f, qid);
+      f.answers[qid] = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+      btn.classList.toggle("active", f.answers[qid].includes(value));
+    } else {
+      f.answers[qid] = [value];
+      document.querySelectorAll(`[data-vq-opt="${qid}"]`).forEach((b) => b.classList.toggle("active", b === btn));
+    }
+  }));
+
+  // Footer: prev/next; last question's next goes to Review.
+  document.getElementById("vqPrev")?.addEventListener("click", () => {
+    if (f.index > 0) { f.index -= 1; renderDashboard(); }
+  });
+  document.getElementById("vqNext")?.addEventListener("click", () => {
+    if (f.index < vqQuestionCount(f) - 1) f.index += 1;
+    else f.step = "review";
+    renderDashboard();
+  });
+
+  // Navigator sheet + jump cells (also on the Review grid).
+  document.getElementById("vqNavBtn")?.addEventListener("click", () => {
+    f.navOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqNavClose")?.addEventListener("click", () => {
+    f.navOpen = false;
+    renderDashboard();
+  });
+  document.querySelectorAll("[data-vq-jump]").forEach((btn) => btn.addEventListener("click", () => {
+    f.index = Number(btn.dataset.vqJump) || 0;
+    f.navOpen = false;
+    f.step = "assessment";
+    renderDashboard();
+  }));
+
+  // Review + submit (gated on 15/15 via the disabled attribute).
+  document.getElementById("vqReviewBack")?.addEventListener("click", () => {
+    f.step = "assessment";
+    renderDashboard();
+  });
+  document.getElementById("vqSubmit")?.addEventListener("click", () => {
+    f.submitConfirmOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqSubmitBack")?.addEventListener("click", () => {
+    f.submitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("vqSubmitConfirm")?.addEventListener("click", () => vqDoSubmit());
+
+  // Result paths.
+  document.getElementById("vqStudyAgain")?.addEventListener("click", () => {
+    f.step = "locked";
+    renderDashboard();
+  });
+  document.getElementById("vqPembahasan")?.addEventListener("click", () => {
+    f.step = "pembahasan";
+    renderDashboard();
+  });
+  document.getElementById("vqPembahasanBack")?.addEventListener("click", () => {
+    f.step = "result";
+    renderDashboard();
+  });
+  document.getElementById("vqFinish")?.addEventListener("click", async () => {
+    videoQuizFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state").catch(() => appState);
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+}
+
 // Task 9: score + per-wrong-answer explanation, folded into the same
 // completedResultCardHTML acknowledgment used for every other quest type -
 // same "Lanjut" dismiss/refetch flow, no separate results screen to build.
@@ -4816,6 +5436,8 @@ function questCategoryIconSVG(quest, size, color) {
       return `<svg ${common}><path d="M22 2L11 13"></path><path d="M22 2l-7 20-4-9-9-4z"></path></svg>`;
     case "nutrition-log":
       return `<svg ${common}><path d="M6 2v6a2 2 0 0 0 4 0V2M7 2v6" stroke-linecap="round"></path><line x1="7" y1="8" x2="7" y2="22"></line><path d="M17 2v9c0 1.5-1 2-1 2v9" stroke-linecap="round"></path></svg>`;
+    case "video-quiz":
+      return `<svg ${common}><rect x="2.5" y="5" width="19" height="14" rx="2"></rect><path d="M10 9.5l5 2.5-5 2.5z" stroke-linejoin="round"></path></svg>`;
     case "reflective":
     default:
       return `<svg ${common}><circle cx="12" cy="12" r="9"></circle><path d="M15 9l-2 5-5 2 2-5z"></path></svg>`;
@@ -4842,6 +5464,9 @@ function deriveDoDChecklist(quest) {
     items.push("Lengkapi detail lamaran dan submit");
   } else if (quest.completionType === "nutrition-log") {
     items.push("Catat semua makan hari ini sampai target tercapai");
+  } else if (quest.completionType === "video-quiz") {
+    items.push("Pilih & kunci satu video YouTube yang relevan dengan topiknya");
+    items.push(`Jawab 15 soal dari materi video itu (lulus ≥ ${quest.videoQuiz?.passThreshold ?? 11}/15)`);
   }
   if (!items.length) items.push(quest.description);
   return items;
@@ -5332,6 +5957,7 @@ function metaRealmToolsHTML(realm, s) {
   }
   return [
     realmProgressCardHTML("#FFC46E", "labora", 22, "Job Match", `${counts.labora} sesi bulan ini`, metaSessionPct(counts.labora), `data-meta-tool="job-match"`),
+    realmProgressCardHTML("#FFC46E", "labora", 22, "Video Quest", `Belajar dari video pilihanmu · ${counts.labora} sesi bulan ini`, metaSessionPct(counts.labora), `data-meta-tool="video-quest"`),
     `<div class="meta-realm-card meta-realm-card-info" style="border:1px solid #FFC46E44">
       ${realmIconSVG("labora", 22, "#FFC46E")}
       <div class="meta-realm-card-content">
@@ -5377,6 +6003,16 @@ function metaRealmDetailHTML(realm, s) {
           </div>
         </div>
         <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
+      </div>` : ""}
+      ${metaVideoQuestPicking ? `
+      <div class="quest-card fadeUp" style="margin-top:16px">
+        <div class="field">
+          <label>Topik apa yang mau kamu pelajari?</label>
+          <p style="color:var(--muted);font-size:13px;margin:6px 0 8px">Kamu akan cari satu video YouTube tentang topik ini, lalu diuji 15 soal dari materi video itu.</p>
+          <input type="text" class="meta-goal-add-input" id="metaVideoQuestTopic" placeholder="Mis. Data Entry Fundamentals" maxlength="160" style="width:100%" />
+        </div>
+        <button class="btn-primary full" id="metaVideoQuestStart">Mulai Video Quest</button>
+        <button class="btn-ghost" id="metaVideoQuestCancel" style="margin-top:10px">← Batal</button>
       </div>` : ""}
       ${metaSomaConfirm ? `
       <div class="quest-card fadeUp" style="margin-top:16px">
@@ -6413,6 +7049,10 @@ function renderDashboard() {
   if (readingTestFlow && readingTestFlow.step !== "intro") {
     return renderReadingTest();
   }
+  // Video Quest: same chrome bypass for every step except "intro".
+  if (videoQuizFlow && videoQuizFlow.step !== "intro") {
+    return renderVideoQuiz();
+  }
   // BODY · MOVEMENT execution flow: its own state machine, own shell (no
   // bottom tab bar, minimal header), same "bypass renderDashboard's normal
   // assembly entirely" pattern as the listening diagnostic's test mode
@@ -6621,6 +7261,7 @@ function renderDashboard() {
   const homeBodyHTML = completedResult ? completedResultCardHTML(completedResult)
     : listeningDiagnosticFlow ? listeningDiagnosticIntroHTML() // only reached for step==="intro" - "active"/"submitted" are already intercepted at the top of this function
     : readingTestFlow ? readingTestIntroHTML() // same: only "intro" reaches here
+    : videoQuizFlow ? vqIntroHTML() // same: only "intro" reaches here
     : practiceTestFlow ? practiceTestFlowHTML()
     : jobMatchFlow ? jobMatchFlowHTML()
     : jobApplicationFlow ? jobApplicationFlowHTML()
@@ -6725,6 +7366,22 @@ function renderDashboard() {
       renderDashboard();
       return;
     }
+    // Video Quest: same "own flow, not reflectOpen" pattern. One fresh
+    // /api/state refresh first (the MOVEMENT staleness lesson) - the lock
+    // in quest.videoQuizState may have been created on another tab/device,
+    // and re-entry must land on the locked view, never back on pick.
+    if (quest?.completionType === "video-quiz") {
+      root.innerHTML = spinnerHTML("Memuat quest...");
+      appState = await api("/api/state").catch(() => appState);
+      const fresh = (appState.openQuests || []).find((q) => q.id === id);
+      if (!fresh) {
+        renderDashboard();
+        return;
+      }
+      startVideoQuiz(fresh, "home");
+      renderDashboard();
+      return;
+    }
     // Task 10b: job-match-analysis quests check the Artifacts library first -
     // a returning user with a CV already on file skips straight to the job
     // posting upload step, never asked to re-upload the same CV.
@@ -6804,6 +7461,16 @@ function renderDashboard() {
   document.querySelectorAll("[data-meta-tool]").forEach((b) => b.addEventListener("click", async () => {
     const tool = b.dataset.metaTool;
     metaError = "";
+    // Video Quest needs a topic first - show the inline topic card (same
+    // confirm-before-create treatment as metaBodyPicking/metaSomaConfirm:
+    // no quest exists server-side until the user actually starts).
+    if (tool === "video-quest") {
+      metaVideoQuestPicking = true;
+      metaBodyPicking = false;
+      metaSomaConfirm = null;
+      renderDashboard();
+      return;
+    }
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
       const { quest } = await api("/api/meta/start", { method: "POST", body: { tool } });
@@ -6879,6 +7546,29 @@ function renderDashboard() {
     renderDashboard();
   });
   document.getElementById("metaSomaCancel")?.addEventListener("click", () => { metaSomaConfirm = null; renderDashboard(); });
+  // Video Quest's confirmed start: create the META quest with the typed
+  // topic, refresh state (the metaSomaConfirmBtn stale-appState lesson),
+  // then hand into the same videoQuizFlow a Today's Trial quest would use.
+  document.getElementById("metaVideoQuestStart")?.addEventListener("click", async () => {
+    const topic = String(document.getElementById("metaVideoQuestTopic")?.value || "").trim();
+    if (topic.length < 3) {
+      metaError = "Tulis topik yang mau kamu pelajari dulu.";
+      renderDashboard();
+      return;
+    }
+    root.innerHTML = spinnerHTML("Menyiapkan sesi...");
+    try {
+      const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "video-quest", topic } });
+      appState = await api("/api/state");
+      metaVideoQuestPicking = false;
+      startVideoQuiz(quest, "meta");
+      activeScreen = "home";
+    } catch (e) {
+      metaError = e.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("metaVideoQuestCancel")?.addEventListener("click", () => { metaVideoQuestPicking = false; renderDashboard(); });
   // LINGUA's Reading row starts the generic AI-quiz Practice Test flow with
   // the track PRESET (skips straight to practiceTestFlow's "track" step
   // instead of asking kind first). The Listening row now launches the round
@@ -6918,6 +7608,8 @@ function renderDashboard() {
   // Same intro-in-chrome wiring for the Reading Half Diagnostic - only
   // rdgStart/rdgCancel exist on that screen, the rest are safe no-ops.
   if (readingTestFlow?.step === "intro") wireReadingTestHandlers();
+  // And for the Video Quest intro - only vqStart/vqCancel exist there.
+  if (videoQuizFlow?.step === "intro") wireVideoQuizHandlers();
   // META target-recommendation follow-up: tapping an ACTIVE target card
   // opens that realm's tool list ("World Map shows Target, Realm page shows
   // Tools" - founder framing) instead of jumping straight into a flow.
@@ -6930,6 +7622,7 @@ function renderDashboard() {
     metaRealmOpen = null;
     metaBodyPicking = false;
     metaSomaConfirm = null;
+    metaVideoQuestPicking = false;
     renderDashboard();
   });
   // META target-recommendation follow-up: the founder explicitly wants a

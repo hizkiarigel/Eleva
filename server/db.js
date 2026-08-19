@@ -122,6 +122,17 @@ async function init() {
     ALTER TABLE days ADD COLUMN IF NOT EXISTS practice_test_payload JSONB;
   `);
 
+  // Video Quest (video-quiz): same answer-key isolation rule as
+  // practice_test_payload - the locked video's transcript, the candidate
+  // video under validation, and the generated 15-question set (with correct
+  // ids + explanations) live HERE, never inside `quest` (which ships to the
+  // browser verbatim via rowToQuest). Only the /api/video-quiz routes read
+  // this column; the client sees questions only through stripQuestions and
+  // the answer key only in the pass response (pembahasan).
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS video_quiz_payload JSONB;
+  `);
+
   // Reading Half Diagnostic (round 42): ONE reading sprint per Monday-start
   // week per track, shared GLOBALLY across users (founder decision - a
   // diagnostic stays comparable within the week; the Listening diagnostic
@@ -636,6 +647,17 @@ async function getPracticeTestPayload(userId, dayId) {
   return rows[0]?.practice_test_payload || null;
 }
 
+// Video Quest: candidate/locked video + transcript + generated question set
+// (with answer key). Full replace like setPracticeTestPayload - each save
+// writes the whole attempt state. See the column comment in init().
+async function setVideoQuizPayload(userId, dayId, payload) {
+  await pool.query(`UPDATE days SET video_quiz_payload = $3 WHERE user_id = $1 AND id = $2`, [userId, dayId, payload]);
+}
+async function getVideoQuizPayload(userId, dayId) {
+  const { rows } = await pool.query(`SELECT video_quiz_payload FROM days WHERE user_id = $1 AND id = $2`, [userId, dayId]);
+  return rows[0]?.video_quiz_payload || null;
+}
+
 // --- Reading Half Diagnostic: weekly global content cache ---
 
 async function getWeeklyReadingTest(weekKey, track) {
@@ -979,6 +1001,7 @@ module.exports = {
   getState, createState, updateState, setGoalTarget, activatePathway, resetUser,
   getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
+  setVideoQuizPayload, getVideoQuizPayload,
   getWeeklyReadingTest, insertWeeklyReadingTestIfAbsent, recentWeeklyReadingTitles,
   listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
   updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
