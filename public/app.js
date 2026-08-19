@@ -5299,20 +5299,38 @@ function mvDurasiMenit() {
 
 // Finish & Review. Cardio: mm:ss two-box duration + distance, pace derived
 // live (never NaN - paceLabel itself already returns null on anything
-// invalid, rendered as "—"), effort chips, notes required once Berat/
-// Terlalu berat is picked (mirrored server-side by structured.js's cardio
-// kind - the same rule, not a new one, see the reflection-submit comment
-// below). Strength shows a read-only recap instead of retyping - stage 7.
+// invalid, rendered as "—"). Strength: a READ-ONLY recap of what the
+// execution engine already captured (sets completed/target, actual kg,
+// RPE) - never make the user retype it. Both modes share the same effort
+// chips + conditional-required-notes rule below (mirrored server-side by
+// structured.js's cardio/strength-session kinds - see the reflection-
+// submit comment further down).
+function movementStrengthRecapHTML() {
+  const exs = movementFlow.attempt.strengthExercises;
+  return exs.map((ex) => {
+    const done = ex.sets.filter((s) => s.done);
+    return `
+    <div style="padding:10px 0;border-bottom:1px solid var(--hair)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:14.5px">${esc(ex.name)}</span>
+        <span class="mono" style="font-size:11.5px;color:${done.length === ex.sets.length ? "var(--growth)" : "var(--muted)"}">${done.length}/${ex.sets.length} SET</span>
+      </div>
+      ${done.length ? `<div style="color:var(--muted);font-size:12.5px;margin-top:4px">${done.map((s) => `${s.weightKg != null ? `${s.weightKg}kg×` : ""}${s.reps}`).join(", ")}${ex.rpe ? ` · RPE ${ex.rpe}` : ""}</div>` : ""}
+    </div>`;
+  }).join("");
+}
+
 function movementReviewHTML() {
   const quest = movementFlow.quest;
-  if (quest.executionMode !== "CARDIO") return `<p style="color:var(--muted)">Finish & Review — coming soon.</p>`;
+  const isStrength = quest.executionMode === "STRENGTH";
   const dr = movementFlow.attempt.draftReview;
   const heavy = ["Berat", "Terlalu berat"].includes(dr.effort);
   const notesMissing = heavy && !dr.notes.trim();
   return `
     <h2 class="fr" style="font-size:20px;margin:0 0 4px">Selesai! 🎉</h2>
-    <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Review hasil aktivitasmu.</p>
+    <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Review hasil ${isStrength ? "latihanmu" : "aktivitasmu"}.</p>
     <div class="quest-card">
+      ${isStrength ? movementStrengthRecapHTML() : `
       <div class="struct-grid">
         <div class="field">
           <label>Durasi</label>
@@ -5325,7 +5343,8 @@ function movementReviewHTML() {
         <div class="field"><label>Jarak (km)</label><input type="number" min="0" step="0.1" id="mvDistance" value="${esc(dr.distanceKm)}" placeholder="0" /></div>
       </div>
       <p class="mono" id="mvPaceDisplay" style="font-size:12px;color:var(--muted);margin:-6px 0 14px">${(() => { const p = paceLabel(mvDurasiMenit(), dr.distanceKm); return `Pace estimasi: ${p || "—"}`; })()}</p>
-      <div class="field">
+      `}
+      <div class="field" style="margin-top:${isStrength ? "14px" : "0"}">
         <label>Rasanya gimana?</label>
         <div class="status-row">
           ${["Ringan", "Cukup", "Berat", "Terlalu berat"].map((v) => `<button class="status-btn ${dr.effort === v ? "active" : ""}" data-mv-effort="${v}">${v}</button>`).join("")}
@@ -5345,30 +5364,33 @@ function movementReviewHTML() {
 }
 
 function wireMovementReviewHandlers() {
-  if (movementFlow?.screen !== "review" || movementFlow.quest.executionMode !== "CARDIO") return;
+  if (movementFlow?.screen !== "review") return;
+  const isCardio = movementFlow.quest.executionMode === "CARDIO";
   const dr = movementFlow.attempt.draftReview;
   // Plain typing never re-renders (would drop focus mid-keystroke, same
   // constraint as every other form in this app) - writes straight into
   // attempt state + a debounced save, pace/derived reads update the DOM
-  // directly instead.
-  document.getElementById("mvDurMin")?.addEventListener("input", (e) => {
-    dr.durationMin = e.target.value;
-    mvSaveAttempt({ draftReview: dr });
-    const el = document.getElementById("mvPaceDisplay");
-    if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
-  });
-  document.getElementById("mvDurSec")?.addEventListener("input", (e) => {
-    dr.durationSec = e.target.value;
-    mvSaveAttempt({ draftReview: dr });
-    const el = document.getElementById("mvPaceDisplay");
-    if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
-  });
-  document.getElementById("mvDistance")?.addEventListener("input", (e) => {
-    dr.distanceKm = e.target.value;
-    mvSaveAttempt({ draftReview: dr });
-    const el = document.getElementById("mvPaceDisplay");
-    if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
-  });
+  // directly instead. Cardio-only inputs (Strength shows a read-only recap).
+  if (isCardio) {
+    document.getElementById("mvDurMin")?.addEventListener("input", (e) => {
+      dr.durationMin = e.target.value;
+      mvSaveAttempt({ draftReview: dr });
+      const el = document.getElementById("mvPaceDisplay");
+      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+    });
+    document.getElementById("mvDurSec")?.addEventListener("input", (e) => {
+      dr.durationSec = e.target.value;
+      mvSaveAttempt({ draftReview: dr });
+      const el = document.getElementById("mvPaceDisplay");
+      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+    });
+    document.getElementById("mvDistance")?.addEventListener("input", (e) => {
+      dr.distanceKm = e.target.value;
+      mvSaveAttempt({ draftReview: dr });
+      const el = document.getElementById("mvPaceDisplay");
+      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+    });
+  }
   document.getElementById("mvNotes")?.addEventListener("input", (e) => {
     dr.notes = e.target.value;
     mvSaveAttempt({ draftReview: dr });
@@ -5393,11 +5415,21 @@ function wireMovementReviewHandlers() {
 // Evidence. Cardio: pick ONE primary source, inline error (not a modal -
 // modals reserved for destructive actions per the design handoff) if none
 // picked before submit. Strength shows a static confirmation instead - no
-// picker, system-recorded sets/reps/load already IS the evidence - stage 7.
+// picker, system-recorded sets/reps/load already IS the evidence.
 function movementEvidenceHTML() {
   const quest = movementFlow.quest;
-  if (quest.executionMode !== "CARDIO") return `<p style="color:var(--muted)">Evidence — coming soon.</p>`;
   const attempt = movementFlow.attempt;
+  if (quest.executionMode === "STRENGTH") {
+    return `
+      <h2 class="fr" style="font-size:20px;margin:0 0 4px">Kirim bukti latihan</h2>
+      <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Data set/reps/beban yang barusan kamu catat sudah cukup jadi bukti.</p>
+      <div class="quest-card" style="display:flex;align-items:center;gap:12px">
+        <span style="color:var(--growth);font-size:20px">✓</span>
+        <span style="font-size:13.5px">Sistem sudah mencatat sets, reps, dan beban dari sesi latihanmu — nggak perlu screenshot tambahan.</span>
+      </div>
+      ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
+      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>Kirim Bukti</button>`;
+  }
   const choices = [
     ["activity-data", "Data aktivitas", "Durasi + jarak yang sudah dicatat"],
     ["tracker-screenshot", "Screenshot tracker", "Dari Strava, Apple Fitness, dll"],
@@ -5417,14 +5449,16 @@ function movementEvidenceHTML() {
 }
 
 function wireMovementEvidenceHandlers() {
-  if (movementFlow?.screen !== "evidence" || movementFlow.quest.executionMode !== "CARDIO") return;
+  if (movementFlow?.screen !== "evidence") return;
   document.querySelectorAll("[data-mv-evidence]").forEach((b) => b.addEventListener("click", () => {
     movementFlow.attempt.evidenceChoice = b.dataset.mvEvidence;
     movementFlow.evidenceError = "";
     mvSaveAttempt({ evidenceChoice: b.dataset.mvEvidence }, true);
     renderDashboard();
   }));
-  document.getElementById("mvKirimBukti")?.addEventListener("click", mvSubmitCardio);
+  document.getElementById("mvKirimBukti")?.addEventListener("click", () => {
+    if (movementFlow.quest.executionMode === "STRENGTH") mvSubmitStrength(); else mvSubmitCardio();
+  });
 }
 
 // Cardio's structuredData shape is EXACTLY what the legacy cardio form
@@ -5452,6 +5486,44 @@ async function mvSubmitCardio() {
     ...(attempt.draftReview.distanceKm !== "" && attempt.draftReview.distanceKm != null ? { jarakKm: Number(attempt.draftReview.distanceKm) } : {}),
     titikBerat: attempt.draftReview.effort,
     ...(["Berat", "Terlalu berat"].includes(attempt.draftReview.effort) ? { titikBeratDetail: attempt.draftReview.notes.slice(0, 300) } : {}),
+  };
+  movementFlow.saving = true;
+  movementFlow.evidenceError = "";
+  renderDashboard();
+  try {
+    const resp = await api("/api/reflection", { method: "POST", body: { status: "COMPLETED", text: attempt.draftReview.notes, questId: movementFlow.questId, structuredData } });
+    movementFlow.submittedResult = resp;
+    movementFlow.screen = "submitted";
+    appState = await api("/api/state").catch(() => appState);
+  } catch (e) {
+    movementFlow.evidenceError = e.message;
+  }
+  movementFlow.saving = false;
+  renderDashboard();
+}
+
+// Strength's structuredData: the exact shape structured.js's new
+// "strength-session" kind validates - each planned exercise's name/sets as
+// actually logged during Active Session, matched by index server-side
+// against quest.plannedExercises (never a client-echoed target). No
+// evidence picker needed here (system-recorded data IS the evidence) - this
+// only fires from Evidence's "Kirim Bukti", same submit pipeline cardio
+// uses (POST /api/reflection), so growth-gate/deltas/Decay all apply
+// identically; the ADAPTED-vs-COMPLETED/PARTIAL decision itself happens
+// server-side off attempt.endedEarly, not anything sent here.
+async function mvSubmitStrength() {
+  if (!movementFlow || movementFlow.saving) return;
+  const attempt = movementFlow.attempt;
+  const structuredData = {
+    kind: "strength-session",
+    exercises: attempt.strengthExercises.map((ex) => ({
+      name: ex.name, rpe: ex.rpe,
+      sets: ex.sets.map((s) => ({
+        reps: s.reps === "" || s.reps == null ? null : Number(s.reps),
+        weightKg: s.weightKg === "" || s.weightKg == null ? null : Number(s.weightKg),
+        done: Boolean(s.done),
+      })),
+    })),
   };
   movementFlow.saving = true;
   movementFlow.evidenceError = "";

@@ -183,6 +183,55 @@ function validateStructuredData(kind, data) {
     return { ok: true, clean: { kind: "gym-session", exercises: cleanExercises, evaluation: evaluateGymSession(cleanExercises) } };
   }
 
+  // BODY · MOVEMENT execution flow (design handoff): Strength's Active
+  // Session submission - deliberately a DIFFERENT kind from "gym-session"
+  // above even though the shapes rhyme, because the source of truth
+  // differs: this is matched against the QUEST'S OWN plannedExercises by
+  // index (server/index.js's computeEvidenceStatus, not a client-echoed
+  // target - same "trust the quest, not the submission" posture cardio/gym
+  // already use), never a catalog lookup. No name/target fields are
+  // validated here for that reason - the client sends what it logged, the
+  // quest itself is what's compared against, in the caller. Same
+  // plausibility caps as gym's single-exercise kind (reps ≤500, kg 0-500).
+  if (kind === "strength-session") {
+    const rawExercises = Array.isArray(data.exercises) ? data.exercises : [];
+    if (rawExercises.length === 0) return { ok: false, error: "Data latihan kosong — nggak ada gerakan yang tercatat." };
+    if (rawExercises.length > 20) return { ok: false, error: "Lebih dari 20 gerakan dalam satu sesi tidak wajar." };
+
+    const cleanExercises = [];
+    for (const ex of rawExercises) {
+      const name = String(ex?.name || "").trim().slice(0, 100);
+      if (!name) return { ok: false, error: "Ada gerakan tanpa nama tercatat." };
+      const rawSets = Array.isArray(ex.sets) ? ex.sets : [];
+      if (rawSets.length === 0) return { ok: false, error: `${name}: tidak ada set yang tercatat.` };
+      if (rawSets.length > 50) return { ok: false, error: `${name}: lebih dari 50 set tidak wajar — cek lagi angkanya.` };
+      const cleanSets = [];
+      for (const s of rawSets) {
+        const reps = num(s?.reps);
+        const weight = s?.weightKg === "" || s?.weightKg == null ? null : num(s.weightKg);
+        const done = Boolean(s?.done);
+        if (done) {
+          if (reps == null || !Number.isInteger(reps) || reps <= 0) return { ok: false, error: `${name}: repetisi wajib angka bulat lebih dari 0 untuk set yang selesai.` };
+          if (reps > 500) return { ok: false, error: `${name}: lebih dari 500 repetisi per set tidak wajar — cek lagi angkanya.` };
+          if (weight != null && (weight < 0 || weight > 500)) return { ok: false, error: `${name}: beban di luar rentang wajar (0-500 kg) — cek lagi angkanya.` };
+        }
+        cleanSets.push({
+          ...(reps != null && Number.isInteger(reps) && reps > 0 ? { reps } : {}),
+          ...(weight != null && weight >= 0 ? { weightKg: weight } : {}),
+          done,
+        });
+      }
+      const rpe = Number.isInteger(ex?.rpe) && ex.rpe >= 5 && ex.rpe <= 10 ? ex.rpe : null;
+      cleanExercises.push({ name, sets: cleanSets, rpe });
+    }
+
+    if (!cleanExercises.some((ex) => ex.sets.some((s) => s.done))) {
+      return { ok: false, error: "Tandai minimal satu set sebagai selesai — belum ada yang bisa dicatat sebagai bukti." };
+    }
+
+    return { ok: true, clean: { kind: "strength-session", exercises: cleanExercises } };
+  }
+
   return { ok: false, error: "Jenis quest terstruktur tidak dikenal." };
 }
 

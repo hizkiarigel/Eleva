@@ -116,6 +116,27 @@ const KONDISI_LABELS = ["Capek/energi rendah", "Sakit/cedera", "Beban kerja ting
 // there's no usable target to compare against - a quest without a clean
 // numeric target can't be judged partial, so it isn't.
 function computeEvidenceStatus(quest, structuredClean) {
+  // BODY · MOVEMENT execution flow: Strength's multi-exercise submission is
+  // compared against the QUEST'S OWN plannedExercises (server truth, never
+  // a client-echoed target - same posture as cardio/gym's evidenceSchema
+  // compare below), matched by index since the client always submits every
+  // planned exercise in the same order it was seeded in (POST /attempt/
+  // start). Aggregate ratio across all exercises, not per-exercise
+  // all-or-nothing - consistent with cardio's own ratio-based approach.
+  if (structuredClean?.kind === "strength-session") {
+    const planned = quest?.plannedExercises || [];
+    let totalPlannedSets = 0, metSets = 0;
+    planned.forEach((pe, i) => {
+      totalPlannedSets += pe.targetSets;
+      const actualExercise = structuredClean.exercises[i];
+      if (!actualExercise) return;
+      actualExercise.sets.forEach((s) => {
+        if (s.done && s.reps >= pe.targetReps && (pe.targetLoadKg == null || (s.weightKg || 0) >= pe.targetLoadKg)) metSets++;
+      });
+    });
+    if (totalPlannedSets === 0) return "COMPLETED";
+    return metSets / totalPlannedSets >= 0.95 ? "COMPLETED" : "PARTIAL";
+  }
   const schema = quest?.evidenceSchema;
   if (!schema || schema.target == null || !structuredClean) return "COMPLETED";
   const actual = schema.metricType === "distance" ? structuredClean.jarakKm
@@ -772,8 +793,15 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     // evidenceSchema.target - the client no longer self-reports it (the old
     // "Gimana progressnya?" picker is gone for this quest type). Every
     // other quest type keeps trusting the client's status as before.
+    // BODY · MOVEMENT execution flow: "Akhiri & Simpan Progress" (Strength's
+    // Active Session exit sheet) marks the in-progress attempt endedEarly
+    // BEFORE submit - that user choice, not the evidence ratio, is what
+    // makes this ADAPTED rather than COMPLETED/PARTIAL (spec: partial
+    // evidence from an intentionally-shortened session still feeds the
+    // analysis and adapts the next quest, distinct from simply falling
+    // short of a full-length target).
     const effectiveStatus = isStructuredQuest && structuredClean
-      ? computeEvidenceStatus(day.quest, structuredClean)
+      ? (day.quest?.activeAttempt?.endedEarly ? "ADAPTED" : computeEvidenceStatus(day.quest, structuredClean))
       : status;
 
     let deltas = {};

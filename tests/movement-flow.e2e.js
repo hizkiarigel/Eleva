@@ -359,16 +359,62 @@ async function test(name, fn) {
     assert.ok(rows[0].quest.activeAttempt, "attempt must still exist after Lanjutkan Quest");
   });
 
-  await test("exit sheet: 'Akhiri & Simpan Progress' navigates to Review keeping partial evidence, marks endedEarly", async () => {
+  await test("exit sheet: 'Akhiri & Simpan Progress' navigates to a real read-only Review recap keeping partial evidence, marks endedEarly", async () => {
     await page.click("#mvActiveAbandon");
     await page.waitForSelector("#mvExitSave", { timeout: 5000 });
     await page.click("#mvExitSave");
-    await page.waitForSelector("text=coming soon", { timeout: 20000 }); // Strength's Review is a stage-7 stub for now
+    await page.waitForSelector("#mvReviewDone", { timeout: 20000 }); // real read-only Strength recap, stage 7
+    assert.ok(await page.locator("text=Squat").count(), "recap must show the exercise name");
+    assert.strictEqual(await page.locator('input[id^="mvDur"]').count(), 0, "Strength Review must be read-only, never retype captured data");
     const { rows } = await sql.query("SELECT quest FROM days WHERE id = $1", [strengthId2]);
     const a = rows[0].quest.activeAttempt;
     assert.strictEqual(a.currentScreen, "review");
     assert.strictEqual(a.endedEarly, true);
     assert.strictEqual(a.strengthExercises[0].sets[0].done, true, "logged evidence must be kept, not discarded");
+  });
+
+  await test("Strength Review requires an effort pick then proceeds to Evidence's no-picker confirmation", async () => {
+    await page.click("#mvReviewDone");
+    await page.waitForSelector("text=Pilih dulu rasanya gimana.", { timeout: 5000 });
+    await page.click('[data-mv-effort="Cukup"]');
+    await page.click("#mvReviewDone");
+    await page.waitForSelector("#mvKirimBukti", { timeout: 20000 });
+    assert.ok(await page.locator("text=nggak perlu screenshot tambahan").count(), "Strength Evidence must confirm system data is sufficient, no source picker");
+    assert.strictEqual(await page.locator("[data-mv-evidence]").count(), 0, "no evidence-source picker for Strength");
+  });
+
+  await test("submitting with an invalid set (marked done but missing reps, from the earlier RPE test) surfaces a clear inline error, writes nothing", async () => {
+    await page.click("#mvKirimBukti");
+    await page.waitForSelector("text=repetisi wajib angka bulat", { timeout: 20000 });
+    const { rows } = await sql.query("SELECT reflection FROM days WHERE id = $1", [strengthId2]);
+    assert.strictEqual(rows[0].reflection, null, "an invalid submission must never write a reflection");
+  });
+
+  await test("after fixing the invalid set server-side, resubmitting completes with outcome ADAPTED (endedEarly overrides the ratio) and persists strength-session structuredData", async () => {
+    // Set index 1 was marked done without ever getting reps filled in (a
+    // real gap the earlier RPE-reveal test exposed). Review/Evidence are a
+    // deliberate dead end once past Active Session (no path back to re-edit
+    // sets, matching the design's own "you've moved on" framing) - patch it
+    // directly the way an /attempt/save call already would, then resume and
+    // retry Kirim Bukti (persisted currentScreen is still "evidence").
+    const { rows: before } = await sql.query("SELECT quest FROM days WHERE id = $1", [strengthId2]);
+    const attempt = before[0].quest.activeAttempt;
+    attempt.strengthExercises[0].sets[1].reps = 10;
+    await sql.query("UPDATE days SET quest = jsonb_set(quest, '{activeAttempt}', $2::jsonb) WHERE id = $1", [strengthId2, JSON.stringify(attempt)]);
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click('.qhub-card:has-text("Sesi Kedua"):has-text("Strength")');
+    await page.waitForSelector(`[data-reflect-id="${strengthId2}"]`, { timeout: 20000 });
+    await page.click(`[data-reflect-id="${strengthId2}"]`);
+    await page.waitForSelector("#mvKirimBukti", { timeout: 20000 });
+    await page.click("#mvKirimBukti");
+    await page.waitForSelector("text=Bukti terkirim!", { timeout: 20000 });
+    const { rows } = await sql.query("SELECT quest, reflection FROM days WHERE id = $1", [strengthId2]);
+    assert.strictEqual(rows[0].quest.activeAttempt, null, "activeAttempt must be cleared on successful submit");
+    assert.strictEqual(rows[0].reflection.status, "ADAPTED", "endedEarly must force ADAPTED regardless of the completion ratio");
+    assert.strictEqual(rows[0].reflection.structuredData.kind, "strength-session");
+    assert.strictEqual(rows[0].reflection.structuredData.exercises.length, 2);
+    assert.ok(rows[0].reflection.structuredData.exercises[0].sets.some((s) => s.done), "at least one completed set must be persisted");
   });
 
   await test("exit sheet: 'Batalkan Quest' (on strengthId, still lingering mid-session from the Pre-Start test) discards the whole attempt, writes no reflection, quest stays retryable", async () => {
@@ -392,6 +438,44 @@ async function test(name, fn) {
     const { rows } = await sql.query("SELECT quest, reflection FROM days WHERE id = $1", [strengthId]);
     assert.strictEqual(rows[0].quest.activeAttempt, null, "activeAttempt must be cleared");
     assert.strictEqual(rows[0].reflection, null, "Batalkan Quest must never write a reflection");
+  });
+
+  console.log("E2E: full Strength completion (no early end) - ratio-based COMPLETED outcome");
+  await test("meeting every planned set's target reps across both exercises completes normally with outcome COMPLETED, not ADAPTED", async () => {
+    // strengthId was just abandoned above (retryable, no activeAttempt) -
+    // reopening it starts a brand-new attempt from Preview.
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click('.qhub-card:has-text("Lower Body Strength"):not(:has-text("Sesi"))');
+    await page.waitForSelector(`[data-reflect-id="${strengthId}"]`, { timeout: 20000 });
+    await page.click(`[data-reflect-id="${strengthId}"]`);
+    await page.waitForSelector("#mvPreviewStart", { timeout: 20000 });
+    await page.click("#mvPreviewStart");
+    await page.waitForSelector("#mvPreStartGo", { timeout: 20000 });
+    await page.click("#mvPreStartGo");
+    await page.waitForSelector("#mvActiveDone", { timeout: 20000 });
+    // Squat 3×10 and Calf Raise 3×12 (both targets from strengthQuest above)
+    // - hit every set at exactly its target rep count.
+    for (let j = 0; j < 3; j++) {
+      await page.fill(`[data-ms-r="0:${j}"]`, "10");
+      await page.click(`[data-ms-done="0:${j}"]`);
+    }
+    await page.click('[data-ms-collapse="1"]');
+    await page.waitForSelector('[data-ms-w="1:0"]', { timeout: 5000 });
+    for (let j = 0; j < 3; j++) {
+      await page.fill(`[data-ms-r="1:${j}"]`, "12");
+      await page.click(`[data-ms-done="1:${j}"]`);
+    }
+    await page.waitForTimeout(700);
+    await page.click("#mvActiveDone");
+    await page.waitForSelector("#mvReviewDone", { timeout: 20000 });
+    await page.click('[data-mv-effort="Ringan"]');
+    await page.click("#mvReviewDone");
+    await page.waitForSelector("#mvKirimBukti", { timeout: 20000 });
+    await page.click("#mvKirimBukti");
+    await page.waitForSelector("text=Bukti terkirim!", { timeout: 20000 });
+    const { rows } = await sql.query("SELECT reflection FROM days WHERE id = $1", [strengthId]);
+    assert.strictEqual(rows[0].reflection.status, "COMPLETED", "every set met its target reps -> COMPLETED, no endedEarly involved");
   });
 
   await browser.close();
