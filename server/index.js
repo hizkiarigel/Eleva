@@ -1153,14 +1153,43 @@ app.post("/api/practice-test/generate", requireAuth, async (req, res) => {
     const { tracks } = practiceTestLib.migrateState(day.goalIndex != null ? state.practiceTest?.[String(day.goalIndex)] : null);
     const trackState = tracks[kind];
     const nextDrill = trackState.nextDrill || null;
-    const result = await ai.generatePracticeTest({
-      kind, track, level: trackState.level || 1,
-      history: (trackState.history || []).slice(-5),
-      goalText: day.goalIndex != null ? state.goals?.[day.goalIndex] : undefined,
-      pathway: state.pathway,
-      drill: nextDrill ? { category: nextDrill.category } : null,
-    });
-    const payload = { kind, track, entryType: nextDrill ? "drill" : "sprint", ...(nextDrill ? { focusCategory: nextDrill.category } : {}), ...result };
+
+    let payload;
+    if (kind === "reading" && !nextDrill) {
+      // Reading Half Diagnostic (round 42): the 20-question reading sprint
+      // is weekly-GLOBAL content (founder decision) - one generated
+      // passage+question set per Monday-start week per track, shared by all
+      // users, cached in weekly_reading_tests. Drills stay per-attempt.
+      const weekKey = startOfWeekKey();
+      let content = await db.getWeeklyReadingTest(weekKey, track);
+      if (!content) {
+        try {
+          const avoidTitles = await db.recentWeeklyReadingTitles(track);
+          const fresh = await ai.generateReadingSprintContent({ track, avoidTitles });
+          // First insert wins under concurrency - everyone gets the winner.
+          content = await db.insertWeeklyReadingTestIfAbsent(weekKey, track, fresh);
+        } catch (e) {
+          // Generation failed (or keyless): serve the static fallback for
+          // THIS attempt only, never cache it as the week's content - a
+          // transient API blip must not pin all users to the same static
+          // passage for 7 days, and the fallback's fixed answer key would
+          // corrupt band evidence if it repeated week after week.
+          console.error("weekly reading sprint generation failed, serving uncached fallback:", e.message);
+          content = null;
+        }
+      }
+      const body = content || ai.fallbackPracticeTest({ kind, track, drill: null });
+      payload = { kind, track, entryType: "sprint", schemaVersion: 2, weekKey, ...body };
+    } else {
+      const result = await ai.generatePracticeTest({
+        kind, track, level: trackState.level || 1,
+        history: (trackState.history || []).slice(-5),
+        goalText: day.goalIndex != null ? state.goals?.[day.goalIndex] : undefined,
+        pathway: state.pathway,
+        drill: nextDrill ? { category: nextDrill.category } : null,
+      });
+      payload = { kind, track, entryType: nextDrill ? "drill" : "sprint", ...(nextDrill ? { focusCategory: nextDrill.category } : {}), ...result };
+    }
     // The answer key lives in days.practice_test_payload, NOT in the `quest`
     // jsonb - see the column comment in db.js's init() for why (that column
     // ships to the client verbatim on every GET /api/state, this one never

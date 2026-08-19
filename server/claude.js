@@ -26,7 +26,11 @@ function hasKey() {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
-async function callClaude(userContent) {
+// maxTokens: 1000 is enough for every conversational/JSON reply here EXCEPT
+// the Reading Half Diagnostic sprint (a 650-900-word passage + 20 questions
+// with options/explanations), which passes its own budget. A truncated
+// response fails JSON.parse below and surfaces as a normal generation error.
+async function callClaude(userContent, { maxTokens = 1000 } = {}) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -36,7 +40,7 @@ async function callClaude(userContent) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 1000,
+      max_tokens: maxTokens,
       // MENTOR_SYSTEM is identical on every call (onboarding and daily alike) -
       // cache_control lets repeated calls within the cache window pay ~10% for
       // this portion instead of full price. Below the model's minimum cacheable
@@ -523,31 +527,9 @@ function fallbackPracticeTest(ctx) {
       ],
     };
   } else {
-    payload = {
-      passage: `Paragraph A. Working from home has become common for many people since the early 2020s. It offers flexibility, since employees can arrange their own schedule around personal commitments, and it removes the daily commute, which surveys suggest saves the average worker close to an hour a day.\n\nParagraph B. However, the arrangement has clear drawbacks. Some workers report feeling isolated without daily contact with colleagues, and younger employees in particular say they miss the informal learning that happens in a shared office. A few studies also link long-term remote work with weaker professional networks.\n\nParagraph C. Companies have responded in practical ways. Many have introduced regular video meetings, occasional in-person gatherings, and shared online documents to keep teams connected. Others rotate teams through the office on fixed days, an approach usually called hybrid working.\n\nParagraph D. The long-term picture is still unsettled. Economists disagree about the effect of remote work on productivity, and governments are only beginning to study what widespread home working means for city centres, public transport, and the housing market.`,
-      questions: [
-        { id: "q1", type: "mc", text: "According to the passage, roughly how much time does removing the commute save per day?", options: ["Half an hour", "Close to an hour", "Two hours", "It is not mentioned"], correctAnswer: "Close to an hour", explanation: "Paragraf A menyebut hemat mendekati satu jam per hari.", category: "detail retrieval" },
-        { id: "q2", type: "mc", text: "Who especially misses informal learning in the office?", options: ["Managers", "Younger employees", "Economists", "Government workers"], correctAnswer: "Younger employees", explanation: "Paragraf B menyebut karyawan muda.", category: "detail retrieval" },
-        { id: "q3", type: "mc", text: "What is rotating teams through the office on fixed days called?", options: ["Flexible working", "Hybrid working", "Remote working", "Shift working"], correctAnswer: "Hybrid working", explanation: "Paragraf C menamainya hybrid working.", category: "detail retrieval" },
-        { id: "q4", type: "mc", text: "Which group disagrees about remote work's effect on productivity?", options: ["Employees", "Economists", "Companies", "City councils"], correctAnswer: "Economists", explanation: "Paragraf D menyebut ekonom belum sepakat.", category: "detail retrieval" },
-        { id: "q5", type: "mc", text: "What kind of professional effect do a few studies link to long-term remote work?", options: ["Stronger networks", "Weaker networks", "Higher salaries", "Faster promotion"], correctAnswer: "Weaker networks", explanation: "Paragraf B menyebut jejaring profesional melemah.", category: "detail retrieval" },
-        { id: "q6", type: "tf", text: "All workers prefer working from home, according to the passage.", options: ["True", "False", "Not Given"], correctAnswer: "False", explanation: "Sebagian pekerja melaporkan merasa terisolasi.", category: "true/false/not given" },
-        { id: "q7", type: "tf", text: "The passage says remote work began in the early 2020s for many people.", options: ["True", "False", "Not Given"], correctAnswer: "True", explanation: "Paragraf A menyebut sejak awal 2020-an.", category: "true/false/not given" },
-        { id: "q8", type: "tf", text: "The passage states that most companies have banned remote work.", options: ["True", "False", "Not Given"], correctAnswer: "False", explanation: "Yang disebut justru cara perusahaan beradaptasi.", category: "true/false/not given" },
-        { id: "q9", type: "tf", text: "The passage mentions how remote work affects school schedules.", options: ["True", "False", "Not Given"], correctAnswer: "Not Given", explanation: "Sekolah tidak pernah disinggung.", category: "true/false/not given" },
-        { id: "q10", type: "tf", text: "Governments have finished studying the effects of home working on cities.", options: ["True", "False", "Not Given"], correctAnswer: "False", explanation: "Paragraf D bilang baru mulai mempelajari.", category: "true/false/not given" },
-        { id: "q11", type: "matching", text: "Which paragraph describes the benefits of working from home?", options: ["Paragraph A", "Paragraph B", "Paragraph C", "Paragraph D"], correctAnswer: "Paragraph A", explanation: "Paragraf A berisi fleksibilitas dan hemat waktu.", category: "matching headings" },
-        { id: "q12", type: "matching", text: "Which paragraph focuses on the drawbacks of remote work?", options: ["Paragraph A", "Paragraph B", "Paragraph C", "Paragraph D"], correctAnswer: "Paragraph B", explanation: "Paragraf B berisi isolasi dan jejaring melemah.", category: "matching headings" },
-        { id: "q13", type: "matching", text: "Which paragraph explains how companies responded?", options: ["Paragraph A", "Paragraph B", "Paragraph C", "Paragraph D"], correctAnswer: "Paragraph C", explanation: "Paragraf C berisi rapat video dan pola hybrid.", category: "matching headings" },
-        { id: "q14", type: "matching", text: "Which paragraph discusses the uncertain long-term picture?", options: ["Paragraph A", "Paragraph B", "Paragraph C", "Paragraph D"], correctAnswer: "Paragraph D", explanation: "Paragraf D soal produktivitas dan dampak kota.", category: "matching headings" },
-        { id: "q15", type: "fill", text: "Companies introduced regular video ____ to keep teams connected.", correctAnswer: "meetings", explanation: "Paragraf C menyebut rapat video rutin.", category: "completion" },
-        { id: "q16", type: "fill", text: "Remote work removes the daily ____.", correctAnswer: "commute", explanation: "Paragraf A menyebut perjalanan harian hilang.", category: "completion" },
-        { id: "q17", type: "fill", text: "Some workers feel ____ without daily contact with colleagues.", correctAnswer: "isolated", explanation: "Paragraf B menyebut isolasi.", category: "completion" },
-        { id: "q18", type: "fill", text: "Teams also stay connected through shared online ____.", correctAnswer: "documents", explanation: "Paragraf C menyebut dokumen online bersama.", category: "completion" },
-        { id: "q19", type: "fill", text: "Governments are studying what home working means for public ____ and housing.", correctAnswer: "transport", explanation: "Paragraf D menyebut transportasi publik.", category: "completion" },
-        { id: "q20", type: "fill", text: "Surveys suggest the average worker saves close to an ____ a day.", correctAnswer: "hour", explanation: "Paragraf A menyebut hemat hampir satu jam.", category: "completion" },
-      ],
-    };
+    // Shallow-clone the module-level fixture so drill mode below can swap
+    // the questions array without corrupting the shared constant.
+    payload = { ...READING_FALLBACK_V2, questions: [...READING_FALLBACK_V2.questions] };
   }
   // Drill mode: focus on the requested category when the static set has it,
   // padding with other questions up to the drill size - honest about being
@@ -556,9 +538,58 @@ function fallbackPracticeTest(ctx) {
     const focused = payload.questions.filter((q) => q.category === drill.category);
     const rest = payload.questions.filter((q) => q.category !== drill.category);
     payload.questions = [...focused, ...rest].slice(0, practiceTest.DRILL_QUESTIONS);
+    // A 12-question drill no longer matches the 4x5 sprint blocks - drop
+    // them and let the client derive its own grouping.
+    delete payload.blocks;
   }
   return payload;
 }
+
+// Reading Half Diagnostic (round 42): the reading fallback is a v2 payload -
+// {title, paragraphs A-D} passage + the exact 5/5/5/5 block structure the
+// real generator produces, so keyless mode exercises the same shell/grading
+// path. Deliberately shorter than a real generated passage (honest keyless
+// artifact - validated with minPassageWords: 0). Built and validated ONCE at
+// module load, throwing on failure, same fail-fast guarantee as
+// listeningDiagnostic.js: a broken fixture edit can never deploy silently.
+const READING_FALLBACK_V2 = (() => {
+  const rawV2 = {
+      passage: {
+        title: "Working from Home",
+        paragraphs: [
+          { label: "A", text: "Working from home has become common for many people since the early 2020s. It offers flexibility, since employees can arrange their own schedule around personal commitments, and it removes the daily commute, which surveys suggest saves the average worker close to an hour a day." },
+          { label: "B", text: "However, the arrangement has clear drawbacks. Some workers report feeling isolated without daily contact with colleagues, and younger employees in particular say they miss the informal learning that happens in a shared office. A few studies also link long-term remote work with weaker professional networks." },
+          { label: "C", text: "Companies have responded in practical ways. Many have introduced regular video meetings, occasional in-person gatherings, and shared online documents to keep teams connected. Others rotate teams through the office on fixed days, an approach usually called hybrid working." },
+          { label: "D", text: "The long-term picture is still unsettled. Economists disagree about the effect of remote work on productivity, and governments are only beginning to study what widespread home working means for city centres, public transport, and the housing market." },
+        ],
+      },
+      questions: [
+        { id: "q1", text: "According to the passage, roughly how much time does removing the commute save per day?", options: ["Half an hour", "Close to an hour", "Two hours", "It is not mentioned"], correctAnswer: "Close to an hour", explanation: "Paragraf A menyebut hemat mendekati satu jam per hari." },
+        { id: "q2", text: "Who especially misses informal learning in the office?", options: ["Managers", "Younger employees", "Economists", "Government workers"], correctAnswer: "Younger employees", explanation: "Paragraf B menyebut karyawan muda." },
+        { id: "q3", text: "What is rotating teams through the office on fixed days called?", options: ["Flexible working", "Hybrid working", "Remote working", "Shift working"], correctAnswer: "Hybrid working", explanation: "Paragraf C menamainya hybrid working." },
+        { id: "q4", text: "Which group disagrees about remote work's effect on productivity?", options: ["Employees", "Economists", "Companies", "City councils"], correctAnswer: "Economists", explanation: "Paragraf D menyebut ekonom belum sepakat." },
+        { id: "q5", text: "What kind of professional effect do a few studies link to long-term remote work?", options: ["Stronger networks", "Weaker networks", "Higher salaries", "Faster promotion"], correctAnswer: "Weaker networks", explanation: "Paragraf B menyebut jejaring profesional melemah." },
+        { id: "q6", text: "All workers prefer working from home, according to the passage.", correctAnswer: "False", explanation: "Sebagian pekerja melaporkan merasa terisolasi." },
+        { id: "q7", text: "The passage says remote work became widespread for many people in the early 2020s.", correctAnswer: "True", explanation: "Paragraf A menyebut sejak awal 2020-an." },
+        { id: "q8", text: "The passage states that most companies have banned remote work.", correctAnswer: "False", explanation: "Yang disebut justru cara perusahaan beradaptasi." },
+        { id: "q9", text: "The passage mentions how remote work affects school schedules.", correctAnswer: "Not Given", explanation: "Sekolah tidak pernah disinggung." },
+        { id: "q10", text: "Governments have finished studying the effects of home working on cities.", correctAnswer: "False", explanation: "Paragraf D bilang baru mulai mempelajari." },
+        { id: "q11", text: "a mention of how much commuting time remote workers save each day", correctAnswer: "A", explanation: "Paragraf A menyebut penghematan hampir satu jam per hari." },
+        { id: "q12", text: "examples of practical measures companies use to keep teams connected", correctAnswer: "C", explanation: "Paragraf C berisi rapat video, pertemuan tatap muka, dan dokumen bersama." },
+        { id: "q13", text: "a claim linking long-term remote work with weaker professional networks", correctAnswer: "B", explanation: "Paragraf B menyebut beberapa studi soal jejaring yang melemah." },
+        { id: "q14", text: "a reference to disagreement among experts about productivity", correctAnswer: "D", explanation: "Paragraf D menyebut ekonom belum sepakat." },
+        { id: "q15", text: "a description of what younger employees feel they are missing", correctAnswer: "B", explanation: "Paragraf B menyebut pembelajaran informal yang hilang — satu paragraf boleh menjawab lebih dari satu soal." },
+        { id: "q16", text: "Companies introduced regular video ____ to keep teams connected.", correctAnswer: "meetings", explanation: "Paragraf C menyebut rapat video rutin." },
+        { id: "q17", text: "Remote work removes the daily ____.", correctAnswer: "commute", explanation: "Paragraf A menyebut perjalanan harian hilang." },
+        { id: "q18", text: "Some workers feel ____ without daily contact with colleagues.", correctAnswer: "isolated", explanation: "Paragraf B menyebut isolasi." },
+        { id: "q19", text: "Teams also stay connected through shared online ____.", correctAnswer: "documents", explanation: "Paragraf C menyebut dokumen online bersama." },
+        { id: "q20", text: "Governments are studying what home working means for public ____ and housing.", correctAnswer: "transport", explanation: "Paragraf D menyebut transportasi publik." },
+      ],
+    };
+  const cleaned = practiceTest.cleanReadingSprintPayload(rawV2, { minPassageWords: 0 });
+  if (!cleaned) throw new Error("READING_FALLBACK_V2 failed cleanReadingSprintPayload - fix the fixture before deploying");
+  return cleaned;
+})();
 
 async function generatePracticeTest(ctx) {
   if (!hasKey()) return fallbackPracticeTest(ctx);
@@ -585,6 +616,58 @@ async function generatePracticeTest(ctx) {
     console.error("generatePracticeTest failed, using fallback:", e.message);
     return fallbackPracticeTest(ctx);
   }
+}
+
+// Reading Half Diagnostic (round 42): generates ONE weekly 20-question
+// reading sprint in the exact 4-block IELTS structure. Unlike
+// generatePracticeTest this THROWS on failure instead of self-falling-back:
+// the caller (the generate route) caches successful content for the whole
+// week and must never cache the static fallback, so it needs to know the
+// difference. Content is weekly-GLOBAL (founder decision), so:
+// - no per-user level shaping (fixed mid difficulty; the level ratchet still
+//   runs for history/drills but no longer shapes sprint difficulty)
+// - topic dedup is global too: ctx.avoidTitles = recent weekly passage
+//   titles, not the per-user history note.
+async function generateReadingSprintContent(ctx) {
+  if (!hasKey()) throw new Error("no API key");
+  const blocksSpec = practiceTest.READING_SPRINT_BLOCKS;
+  const avoidNote = ctx.avoidTitles && ctx.avoidTitles.length
+    ? `\n\nTopik minggu-minggu sebelumnya (JANGAN pakai topik yang sama atau mirip): ${ctx.avoidTitles.map((t) => `"${t}"`).join(", ")}.`
+    : "";
+  const user = `Tugas: buatkan SATU paket "IELTS Academic Reading Half Diagnostic" - 1 bacaan + TEPAT 20 soal dalam 4 blok berurutan. Paket ini dipakai semua pengguna selama seminggu, jadi kualitas dan ketepatan format WAJIB tinggi.
+
+Balas JSON dengan bentuk PERSIS (tanpa teks lain):
+{"passage": {"title": string, "paragraphs": [{"label": "A", "text": string}, {"label": "B", "text": string}, {"label": "C", "text": string}, {"label": "D", "text": string}]}, "questions": [{"id": "q1", "text": string, "options": [string], "correctAnswer": string, "acceptableAnswers": [string], "explanation": string}]}
+
+BACAAN:
+- Gaya ${ctx.track === "general" ? "IELTS General Training (teks sehari-hari yang lebih panjang: artikel majalah/koran populer)" : "akademik IELTS Academic"}: prosa ekspositori/faktual dalam Bahasa Inggris, netral dan informatif - berisi perbandingan, sebab-akibat, dan ketidakpastian ("some researchers argue...", "the evidence remains mixed") supaya bisa dibuat soal inferensi dan Not Given. TANPA nada motivasional, TANPA bahasa kekanak-kanakan, JANGAN menyalin materi IELTS asli.
+- TEPAT 4 paragraf berlabel "A"-"D", total 650-900 kata (ideal 700-850). Tiap paragraf punya fokus ide sendiri tapi saling terhubung.
+- Topik: satu topik akademik netral yang menarik (sains, sejarah, teknologi, lingkungan, masyarakat, dsb).${avoidNote}
+
+SOAL - TEPAT 20, id "q1" sampai "q20" BERURUTAN, dalam 4 blok PERSIS:
+${blocksSpec.map((b, i) => `- q${i * 5 + 1}-q${i * 5 + 5}: ${b.label}`).join("\n")}
+- q1-q5 (Multiple Choice): "options" WAJIB 4 pilihan teks, "correctAnswer" persis salah satunya.
+- q6-q10 (True/False/Not Given): TANPA "options". "correctAnswer" persis "True", "False", atau "Not Given". Disiplin ketat: True = didukung bacaan; False = JELAS bertentangan dengan bacaan; Not Given = tidak dibahas bacaan TAPI pernyataannya masih satu topik dan menuntut pembacaan cermat - JANGAN Not Given yang topiknya jelas-jelas tidak nyambung.
+- q11-q15 (Matching Information): "text" berisi deskripsi informasi ("a mention of...", "an example of...", "a reason why..."), "correctAnswer" persis "A"/"B"/"C"/"D" (paragraf yang memuat informasinya). TANPA "options". Soal harus menuntut scanning/pencocokan ide, BUKAN sekadar mengulang topik utama paragraf. Satu paragraf BOLEH jadi jawaban lebih dari satu soal, dan boleh ada paragraf yang tidak terpakai.
+- q16-q20 (Sentence Completion): "text" kalimat rumpang dengan ____, "correctAnswer" kata-kata PERSIS dari bacaan, MAKSIMAL 2 kata (aturan "NO MORE THAN TWO WORDS" - divalidasi kode, jawaban 3+ kata DITOLAK). "acceptableAnswers" opsional berisi variasi wajar (mis. dengan/tanpa artikel) - juga maksimal 2 kata. TANPA "options".
+- SEMUA soal WAJIB parafrase dari bacaan (sinonim, transformasi gramatikal, inferensi terkontrol, resolusi referensi) - JANGAN mengutip kalimat bacaan kata-per-kata, tapi juga jangan inferensi terlalu jauh sampai jawabannya ambigu. Tiap soal punya TEPAT SATU jawaban benar yang tidak diperdebatkan.
+- Ramp kesulitan DI DALAM urutan blok: q1-q5 accessible→moderate, q6-q10 moderate, q11-q15 moderate→hard, q16-q20 hard. Jangan tiap soal mekanis lebih sulit dari sebelumnya - yang penting arah keseluruhan naik.
+- "explanation" WAJIB di semua soal: satu kalimat pendek Bahasa Indonesia kenapa itu jawabannya (menyebut paragraf mana).`;
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await callClaude(user, { maxTokens: 6000 });
+      const cleaned = practiceTest.cleanReadingSprintPayload(result);
+      if (cleaned) return cleaned;
+      lastError = new Error("reading sprint payload failed validation");
+      console.error(`generateReadingSprintContent attempt ${attempt + 1}: payload rejected by cleanReadingSprintPayload`);
+    } catch (e) {
+      lastError = e;
+      console.error(`generateReadingSprintContent attempt ${attempt + 1} failed:`, e.message);
+    }
+  }
+  throw lastError || new Error("reading sprint generation failed");
 }
 
 // Task 10b (Job Match Analysis): the only multimodal generate* function in
@@ -1134,7 +1217,7 @@ function fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks) {
 module.exports = {
   generateQuest, processReflection, hasKey,
   generateScenarioCard, generateChapterAnalysis,
-  generateTargetOptions, generatePracticeTest, generateJobMatchAnalysis,
+  generateTargetOptions, generatePracticeTest, generateReadingSprintContent, fallbackPracticeTest, generateJobMatchAnalysis,
   PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
   normalizeEvidenceSchema, generateSideQuest,
   normalizeCompletionType, fallbackReflection, looksRecoveryThemed, analyzeNutritionPhoto,
