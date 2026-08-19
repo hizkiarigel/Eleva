@@ -38,8 +38,56 @@ const MIN_QUESTIONS_DRILL = 8;
 const OBJECTIVE_TRACKS = ["reading", "listening"];
 const ALL_TRACKS = ["reading", "listening", "writing", "speaking"];
 
+// Reading Half Diagnostic (design handoff, round 42): the 20-question
+// reading sprint is no longer a flat mixed-type list but an exact 4-block
+// IELTS structure - 5 questions per block, in this order. Each block maps
+// onto an existing QUESTION_TYPES code so grading/band/drill selection stay
+// untouched; `section` and `blocks` are additive metadata on top of the
+// same flat `questions` array. The `category` per block is stamped
+// server-side (never trusted from the model) so the result screen's
+// per-block breakdown falls straight out of gradeAnswers' categories.
+const READING_SPRINT_BLOCKS = [
+  {
+    blockType: "multiple_choice", type: "mc", label: "Multiple Choice",
+    category: "multiple choice",
+    instruction: "Choose the correct letter, A, B, C or D.",
+  },
+  {
+    blockType: "true_false_not_given", type: "tf", label: "True / False / Not Given",
+    category: "true/false/not given",
+    instruction: "Do the following statements agree with the information in the passage? Write TRUE, FALSE or NOT GIVEN.",
+  },
+  {
+    blockType: "matching_information", type: "matching", label: "Matching Information",
+    category: "matching information",
+    instruction: "Which paragraph contains the following information? Choose the correct letter, A–D. NB You may use any letter more than once.",
+  },
+  {
+    blockType: "sentence_completion", type: "fill", label: "Sentence Completion",
+    category: "sentence completion",
+    instruction: "Complete the sentences below. Write NO MORE THAN TWO WORDS from the passage for each answer.",
+    maxWords: 2,
+  },
+];
+const READING_BLOCK_SIZE = 5;
+const PARAGRAPH_LABELS = ["A", "B", "C", "D"];
+// The prompt asks for 650-900 words; validation bounds are deliberately
+// looser because model word counts drift - a 620-word passage is still a
+// perfectly usable diagnostic, a 300-word one is not.
+const PASSAGE_MIN_WORDS = 550;
+const PASSAGE_MAX_WORDS = 1000;
+
 function norm(v) {
   return String(v ?? "").trim().toLowerCase();
+}
+
+// Word-limit check for sentence-completion answers ("NO MORE THAN TWO
+// WORDS"). Hand-copied from server/listeningDiagnostic.js (same repo
+// convention as KONDISI_LABELS - no shared-module layer). A numeral counts
+// as one word.
+function checkWordLimit(answer, maxWords) {
+  const words = String(answer || "").trim().split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.length <= maxWords;
 }
 
 // Defends against a malformed/incomplete AI response the same way
@@ -93,20 +141,124 @@ function cleanPayload(kind, raw, { minQuestions = MIN_QUESTIONS_SPRINT } = {}) {
   return { [bodyKey]: body, questions };
 }
 
+// Reading Half Diagnostic sprint validator - STRICT all-or-null, unlike
+// the lenient cleanPayload above. Rationale: sprint content is cached for a
+// whole week and served to every user (see weekly_reading_tests), so a
+// payload with one silently-dropped question would ship a broken diagnostic
+// to everyone for 7 days. Fail fast instead (same philosophy as
+// listeningDiagnostic.js's validateAssessment) and let the route fall back
+// without caching. Accepts the raw model JSON, returns a normalized
+// { passage, blocks, questions } or null.
+// opts.minPassageWords: 0 for the static fallback fixture (an honest
+// keyless artifact, deliberately shorter than real generated content).
+function cleanReadingSprintPayload(raw, { minPassageWords = PASSAGE_MIN_WORDS } = {}) {
+  if (!raw || typeof raw !== "object") return null;
+
+  // Passage: {title, paragraphs:[{label:"A", text}, ...]} - exactly 4
+  // paragraphs labelled A-D in order, total word count within bounds.
+  const p = raw.passage;
+  if (!p || typeof p !== "object") return null;
+  const title = String(p.title || "").trim();
+  if (!title) return null;
+  const rawParas = Array.isArray(p.paragraphs) ? p.paragraphs : [];
+  if (rawParas.length !== PARAGRAPH_LABELS.length) return null;
+  const paragraphs = [];
+  for (let i = 0; i < PARAGRAPH_LABELS.length; i++) {
+    const para = rawParas[i];
+    const label = String(para?.label || "").trim().toUpperCase();
+    const text = String(para?.text || "").trim();
+    if (label !== PARAGRAPH_LABELS[i] || !text) return null;
+    paragraphs.push({ label, text });
+  }
+  const wordCount = paragraphs.map((x) => x.text).join(" ").split(/\s+/).filter(Boolean).length;
+  if (wordCount < minPassageWords || wordCount > PASSAGE_MAX_WORDS) return null;
+
+  // Questions: exactly 20, ids q1-q20 in order, exact 5/5/5/5 block
+  // structure. Type/options/answer rules are per block, stricter than
+  // cleanPayload (correctAnswer must actually be answerable).
+  const rawQs = Array.isArray(raw.questions) ? raw.questions : [];
+  if (rawQs.length !== SPRINT_QUESTIONS) return null;
+  const questions = [];
+  for (let i = 0; i < SPRINT_QUESTIONS; i++) {
+    const q = rawQs[i];
+    if (!q || typeof q !== "object") return null;
+    const block = READING_SPRINT_BLOCKS[Math.floor(i / READING_BLOCK_SIZE)];
+    const id = `q${i + 1}`;
+    if (String(q.id ?? id).trim() !== id) return null;
+    const text = String(q.text || "").trim();
+    if (!text) return null;
+    const correctAnswer = String(q.correctAnswer ?? "").trim();
+    if (!correctAnswer) return null;
+    const out = {
+      id, type: block.type, section: block.blockType, text, correctAnswer,
+      explanation: String(q.explanation || "").trim().slice(0, 300),
+      category: block.category,
+    };
+    if (block.type === "mc") {
+      const options = Array.isArray(q.options) ? q.options.map((o) => String(o).trim()).filter(Boolean) : [];
+      if (options.length < 3 || options.length > 4) return null;
+      if (!options.some((o) => norm(o) === norm(correctAnswer))) return null;
+      out.options = options;
+    } else if (block.type === "tf") {
+      out.options = ["True", "False", "Not Given"];
+      if (!out.options.some((o) => norm(o) === norm(correctAnswer))) return null;
+    } else if (block.type === "matching") {
+      out.options = [...PARAGRAPH_LABELS];
+      if (!out.options.some((o) => norm(o) === norm(correctAnswer))) return null;
+    } else {
+      // sentence_completion: the key (and every acceptable variant) must
+      // itself respect the stated word limit - enforcing "NO MORE THAN TWO
+      // WORDS" server-side, not just in the prompt.
+      const maxWords = block.maxWords;
+      if (!checkWordLimit(correctAnswer, maxWords)) return null;
+      const acceptable = (Array.isArray(q.acceptableAnswers) ? q.acceptableAnswers : [])
+        .map((a) => String(a).trim()).filter(Boolean);
+      if (acceptable.some((a) => !checkWordLimit(a, maxWords))) return null;
+      out.maxWords = maxWords;
+      if (acceptable.length) out.acceptableAnswers = acceptable.slice(0, 4);
+    }
+    questions.push(out);
+  }
+
+  // blocks[] is always recomputed here (never trusted from the model):
+  // instruction defaults live in READING_SPRINT_BLOCKS.
+  const blocks = READING_SPRINT_BLOCKS.map((b, bi) => ({
+    blockType: b.blockType,
+    label: b.label,
+    range: `${bi * READING_BLOCK_SIZE + 1}-${(bi + 1) * READING_BLOCK_SIZE}`,
+    instruction: b.instruction,
+    ...(b.maxWords ? { maxWords: b.maxWords } : {}),
+    questionIds: questions.slice(bi * READING_BLOCK_SIZE, (bi + 1) * READING_BLOCK_SIZE).map((q) => q.id),
+  }));
+
+  return { passage: { title, paragraphs }, blocks, questions };
+}
+
 // What the client is allowed to see before submitting - the correctAnswer
 // and explanation stay server-side (in days.practice_test_payload) until
 // grading happens, so a curious look at the network tab can't just hand
 // over the answer key. entryType/focusCategory ride along so the UI can
 // label a DRILL differently from a SPRINT (Task 13).
 function stripAnswers(payload) {
-  const { questions, kind, track, passage, script, entryType, focusCategory } = payload;
+  const { questions, kind, track, passage, script, entryType, focusCategory, schemaVersion, weekKey, blocks } = payload;
   return {
     kind, track,
     ...(entryType ? { entryType } : {}),
     ...(focusCategory ? { focusCategory } : {}),
+    ...(schemaVersion ? { schemaVersion } : {}),
+    ...(weekKey ? { weekKey } : {}),
     ...(passage != null ? { passage } : {}),
     ...(script != null ? { script } : {}),
-    questions: questions.map(({ id, type, text, options }) => ({ id, type, text, ...(options ? { options } : {}) })),
+    ...(blocks ? { blocks } : {}),
+    // section/maxWords ride along (v2 sprints) so the client can render the
+    // block chip and the word-limit hint; correctAnswer/acceptableAnswers/
+    // explanation/category still never leave the server pre-grading.
+    questions: questions.map(({ id, type, text, options, section, maxWords }) => ({
+      id, type, text,
+      ...(options ? { options } : {}),
+      ...(section ? { section } : {}),
+      ...(maxWords ? { maxWords } : {}),
+    })),
   };
 }
 
@@ -124,12 +276,19 @@ function gradeAnswers(questions, answers) {
     const cat = q.category || TYPE_CATEGORY_FALLBACK[q.type] || "lainnya";
     if (!categories[cat]) categories[cat] = { correct: 0, total: 0 };
     categories[cat].total += 1;
-    if (norm(given) === norm(q.correctAnswer)) {
+    // v2 additions, both no-ops for payloads that don't carry the fields:
+    // acceptableAnswers widens the key (same convention as the listening
+    // diagnostic), maxWords enforces the stated word limit - an over-limit
+    // answer is wrong even if its words happen to contain the key.
+    const keys = [q.correctAnswer, ...(Array.isArray(q.acceptableAnswers) ? q.acceptableAnswers : [])].map(norm);
+    const withinLimit = !q.maxWords || checkWordLimit(given, q.maxWords);
+    if (norm(given) !== "" && withinLimit && keys.includes(norm(given))) {
       correct += 1;
       categories[cat].correct += 1;
     } else {
       wrong.push({
         id: q.id, text: q.text,
+        ...(q.section ? { section: q.section } : {}),
         yourAnswer: String(given || "").slice(0, 200),
         correctAnswer: q.correctAnswer,
         explanation: q.explanation || "",
@@ -339,7 +498,8 @@ function weakestCategory(categories) {
 }
 
 module.exports = {
-  cleanPayload, stripAnswers, gradeAnswers,
+  cleanPayload, cleanReadingSprintPayload, checkWordLimit, stripAnswers, gradeAnswers,
+  READING_SPRINT_BLOCKS, READING_BLOCK_SIZE, PARAGRAPH_LABELS,
   estimateBand, confidenceLabel, parseTargetBand,
   migrateState, trackStatus, currentTargetFor, categorySplit, weakestCategory,
   SPRINT_QUESTIONS, DRILL_QUESTIONS, MIN_QUESTIONS_SPRINT, MIN_QUESTIONS_DRILL,

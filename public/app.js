@@ -704,6 +704,30 @@ let jobApplicationFlow = null;
 //   submittedResult: null,       // { correct, total, answeredCount, wrong, byTaskType } | null - set by lstnDoSubmit() on success, read by lstnSubmittedHTML()
 // }
 let listeningDiagnosticFlow = null;
+// Round 42 (IELTS Reading Half Diagnostic): the Reading practice test's own
+// chrome-free test mode - replaces the old flat one-card quiz for EVERY
+// reading payload (sprint and drill alike, founder decision).
+// practiceTestFlow now only carries the META track-picker/error steps and
+// the unreachable listening-kind quiz (left in place per the "don't delete,
+// just unreachable" convention). Like listeningDiagnosticFlow, every step
+// except "intro" bypasses the normal .app-shell chrome entirely via
+// renderDashboard's early-return.
+// {
+//   questId, origin: "home" | "meta",   // where exit/finish returns to
+//   track: "academic" | "general",
+//   step: "intro" | "active" | "review" | "result",
+//   payload,                     // stripped payload from generate (v2 sprint: blocks + {title,paragraphs} passage; drill/legacy: flat questions, string passage)
+//   blocks,                      // rdgDeriveBlocks(payload) - always present client-side
+//   answers: {}, flags: {},      // flagged is a review marker, NEVER counts as unanswered; answers never erased (incl. timer expiry)
+//   activeTab: "passage" | "questions",
+//   blockIndex: 0,               // which block the Questions tab shows
+//   scrollMem: { passage: 0, questions: 0 },  // per-tab scroll memory, survives tab switches AND re-renders
+//   deadlineTs: null,            // set once by rdgStartCountdown (30min sprint / 20min drill)
+//   timerExpired: false,
+//   overviewOpen, exitConfirmOpen, submitConfirmOpen, timeUpOpen: false,
+//   error: "", result: null,     // result: {score,total,wrong,assessment,mentorReply} from submit
+// }
+let readingTestFlow = null;
 // Task 12 (META): true while the inline Cardio/Gym/Recovery picker for the
 // "Body" META box is showing (tapped but no kind chosen yet). Reset after
 // /api/meta/start succeeds or the user backs out.
@@ -3989,6 +4013,606 @@ function wireListeningDiagnosticHandlers() {
   });
 }
 
+// ==== Round 42: IELTS Reading Half Diagnostic ======================
+// Test-mode shell for the Reading practice test (sprint AND drill),
+// mirroring the listening diagnostic's architecture: chrome bypass via
+// renderDashboard early-return, direct-DOM timer, surgical answer updates
+// (no full re-render on taps - the .lstn-scroll scroll-reset lesson), and
+// .help-overlay confirm sheets. New here vs listening: Passage/Questions
+// tabs with independent scroll memory, one block at a time, per-question
+// flagging, an overview sheet, a Review screen before submit, and an
+// in-shell structured result (band range + per-block breakdown).
+
+const RDG_CATEGORY_LABEL = {
+  "multiple choice": "Multiple Choice",
+  "true/false/not given": "True / False / Not Given",
+  "matching information": "Matching Information",
+  "sentence completion": "Sentence Completion",
+};
+function rdgCategoryLabel(cat) {
+  return RDG_CATEGORY_LABEL[cat] || (cat ? cat.replace(/\b\w/g, (c) => c.toUpperCase()) : "Lainnya");
+}
+
+// v2 sprints ship server-built blocks; drills/legacy payloads are flat, so
+// derive 5-question groups client-side (a 12-question drill becomes 5/5/2)
+// with the drill category as the label.
+function rdgDeriveBlocks(payload) {
+  if (Array.isArray(payload.blocks) && payload.blocks.length) return payload.blocks;
+  const qs = payload.questions || [];
+  const label = payload.focusCategory ? rdgCategoryLabel(payload.focusCategory) : "Drill";
+  const blocks = [];
+  for (let i = 0; i < qs.length; i += 5) {
+    const group = qs.slice(i, i + 5);
+    blocks.push({
+      blockType: "drill", label,
+      range: `${i + 1}-${i + group.length}`,
+      instruction: "Jawab pertanyaan berikut berdasarkan bacaan.",
+      questionIds: group.map((q) => q.id),
+    });
+  }
+  return blocks;
+}
+
+// Single constructor for the flow - every reading payload (v2 sprint from
+// the weekly cache, per-attempt drill, keyless fallback) enters the shell
+// through here after a successful /api/practice-test/generate.
+function startReadingTest(questId, track, payload, origin) {
+  readingTestFlow = {
+    questId, origin: origin || "home", track,
+    step: "intro", payload,
+    blocks: rdgDeriveBlocks(payload),
+    answers: {}, flags: {},
+    activeTab: "passage", blockIndex: 0,
+    scrollMem: { passage: 0, questions: 0 },
+    deadlineTs: null, timerExpired: false,
+    overviewOpen: false, exitConfirmOpen: false, submitConfirmOpen: false, timeUpOpen: false,
+    error: "", result: null,
+  };
+}
+
+function rdgAnsweredCount(f) {
+  return f.payload.questions.filter((q) => String(f.answers[q.id] || "").trim()).length;
+}
+function rdgFlaggedCount(f) {
+  return f.payload.questions.filter((q) => f.flags[q.id]).length;
+}
+function rdgTotal(f) {
+  return f.payload.questions.length;
+}
+function rdgDurationMs(f) {
+  // 30:00 for the 20-question sprint (design spec); 20:00 for a 12-question
+  // drill (same ~1.5 min/question pacing).
+  return (f.payload.entryType === "drill" ? 20 : 30) * 60 * 1000;
+}
+
+// Same direct-DOM-write countdown pattern as lstnStartCountdown. At 0:00 the
+// timer NEVER erases answers and NEVER auto-submits (founder decision):
+// it stops, freezes at 00:00 and opens the "Time is up" sheet, whose only
+// action is Review & Submit.
+let rdgTimerInterval = null;
+function rdgStartCountdown() {
+  if (rdgTimerInterval || !readingTestFlow || readingTestFlow.timerExpired) return;
+  const f = readingTestFlow;
+  if (!f.deadlineTs) f.deadlineTs = Date.now() + rdgDurationMs(f);
+  rdgTimerInterval = setInterval(() => {
+    const el = document.getElementById("rdgTimer");
+    if (!el || !readingTestFlow) return rdgStopCountdown();
+    const remaining = Math.max(0, readingTestFlow.deadlineTs - Date.now());
+    el.textContent = lstnFormatMMSS(remaining);
+    el.classList.toggle("rdg-timer-red", remaining <= 5 * 60 * 1000);
+    if (remaining <= 0) {
+      rdgStopCountdown();
+      readingTestFlow.timerExpired = true;
+      readingTestFlow.timeUpOpen = true;
+      rdgSaveScroll();
+      renderDashboard();
+    }
+  }, 1000);
+}
+function rdgStopCountdown() {
+  clearInterval(rdgTimerInterval);
+  rdgTimerInterval = null;
+}
+
+// Scroll memory: both tab panes stay in the DOM (hidden via .rdg-hidden), so
+// a tab switch is a pure class toggle. Any handler that DOES re-render must
+// call rdgSaveScroll() first; renderReadingTest() restores from scrollMem.
+function rdgSaveScroll() {
+  const f = readingTestFlow;
+  if (!f) return;
+  const pp = document.getElementById("rdgPassagePane");
+  const qp = document.getElementById("rdgQuestionsPane");
+  // Only the visible pane has a real scrollTop - a display:none pane reads 0
+  // and would clobber the position saved when it was last visible.
+  if (pp && !pp.classList.contains("rdg-hidden")) f.scrollMem.passage = pp.scrollTop;
+  if (qp && !qp.classList.contains("rdg-hidden")) f.scrollMem.questions = qp.scrollTop;
+}
+
+// Intro - renders INSIDE the normal chrome (same as the listening intro).
+function readingTestIntroHTML() {
+  const f = readingTestFlow;
+  const p = f.payload;
+  const drill = p.entryType === "drill";
+  const total = rdgTotal(f);
+  const minutes = rdgDurationMs(f) / 60000;
+  return `
+    <div class="rdg-intro fadeUp">
+      <div class="eyebrow mono" style="color:#6EA8FF">META · LINGUA</div>
+      <h1 class="fr rdg-intro-title">${drill ? "Reading Drill" : `IELTS ${esc(PRACTICE_LABELS[f.track] || "Academic")} Reading`}</h1>
+      <p class="rdg-intro-subtitle">${drill ? `Drill Terfokus · ${total} Questions` : `Half Diagnostic · ${total} Questions`}</p>
+      ${drill && p.focusCategory ? `<p class="why" style="margin:6px 0 0">Latihan kategori terlemahmu dari attempt sebelumnya: ${esc(rdgCategoryLabel(p.focusCategory))}.</p>` : ""}
+      <div class="rdg-intro-stats">
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">${total}</div><div class="rdg-intro-stat-label">pertanyaan</div></div>
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">1</div><div class="rdg-intro-stat-label">passage</div></div>
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">${minutes}</div><div class="rdg-intro-stat-label">menit</div></div>
+      </div>
+      <div class="rdg-intro-instr-label mono">KAMU AKAN MENJAWAB</div>
+      <div class="rdg-intro-qlist">
+        ${f.blocks.map((b) => `<div class="rdg-intro-qrow"><span class="mono rdg-intro-qrange">Q${esc(b.range)}</span><span>${esc(b.label)}</span></div>`).join("")}
+      </div>
+      <button class="btn-primary full rdg-intro-cta" id="rdgStart">Start Test</button>
+      <button class="btn-ghost full" id="rdgCancel" style="margin-top:10px">← Batal</button>
+    </div>`;
+}
+
+function rdgTopBarHTML(f) {
+  return `
+    <div class="rdg-topbar">
+      <button class="rdg-back" id="rdgBack" aria-label="Keluar">‹</button>
+      <div class="rdg-topbar-title">Reading Practice</div>
+      <div class="rdg-timer mono" id="rdgTimer">${f.timerExpired ? "00:00" : lstnFormatMMSS(f.deadlineTs ? Math.max(0, f.deadlineTs - Date.now()) : rdgDurationMs(f))}</div>
+    </div>`;
+}
+
+function rdgTabsHTML(f) {
+  return `
+    <div class="rdg-tabs">
+      <button class="rdg-tab ${f.activeTab === "passage" ? "active" : ""}" data-rdg-tab="passage">Passage</button>
+      <button class="rdg-tab ${f.activeTab === "questions" ? "active" : ""}" data-rdg-tab="questions">Questions</button>
+    </div>`;
+}
+
+// Passage pane: paragraph-labelled long-form reading, no per-paragraph card
+// chrome (design spec). Handles both the v2 {title, paragraphs} object and
+// the flat string passages of drills/legacy payloads.
+function rdgPassagePaneHTML(f) {
+  const p = f.payload.passage;
+  let inner;
+  if (p && typeof p === "object" && Array.isArray(p.paragraphs)) {
+    inner = `
+      <div class="eyebrow mono rdg-passage-eyebrow">PASSAGE 1</div>
+      <h2 class="fr rdg-passage-title">${esc(p.title)}</h2>
+      ${p.paragraphs.map((par) => `
+        <div class="rdg-para-label">Paragraph ${esc(par.label)}</div>
+        <p class="rdg-para-text">${esc(par.text)}</p>`).join("")}`;
+  } else {
+    inner = `
+      <div class="eyebrow mono rdg-passage-eyebrow">PASSAGE</div>
+      <p class="rdg-para-text" style="white-space:pre-wrap">${esc(String(p || ""))}</p>`;
+  }
+  return `<div class="rdg-pane ${f.activeTab === "passage" ? "" : "rdg-hidden"}" id="rdgPassagePane">${inner}</div>`;
+}
+
+function rdgQuestionNumber(f, qid) {
+  return f.payload.questions.findIndex((q) => q.id === qid) + 1;
+}
+
+function rdgQuestionHTML(f, q) {
+  const num = rdgQuestionNumber(f, q.id);
+  const chosen = f.answers[q.id];
+  const flagged = !!f.flags[q.id];
+  let answerHTML;
+  if (q.type === "fill") {
+    answerHTML = `
+      <input type="text" class="rdg-input" data-rdg-fill="${esc(q.id)}" maxlength="60"
+        placeholder="${q.maxWords ? `Maks. ${q.maxWords} kata` : "Jawabanmu..."}" value="${esc(chosen || "")}" />`;
+  } else if (q.type === "matching") {
+    answerHTML = `
+      <div class="rdg-match-letters">
+        ${(q.options || []).map((o) => `<button class="rdg-letter-badge ${chosen === o ? "active" : ""}" data-rdg-opt="${esc(q.id)}" data-rdg-value="${esc(o)}">${esc(o)}</button>`).join("")}
+      </div>`;
+  } else {
+    const letters = ["A", "B", "C", "D", "E", "F"];
+    answerHTML = `
+      <div class="rdg-options">
+        ${(q.options || []).map((o, i) => `
+          <button class="rdg-option ${chosen === o ? "active" : ""}" data-rdg-opt="${esc(q.id)}" data-rdg-value="${esc(o)}">
+            <span class="rdg-letter-badge">${q.type === "tf" ? esc(o[0]) : letters[i]}</span><span class="rdg-option-text">${esc(o)}</span>
+          </button>`).join("")}
+      </div>`;
+  }
+  return `
+    <div class="rdg-question" id="rdgQ${num}">
+      <div class="rdg-question-head">
+        <span class="mono rdg-qnum">${num}</span>
+        <p class="rdg-question-text">${esc(q.text)}</p>
+        <button class="rdg-flag ${flagged ? "flagged" : ""}" data-rdg-flag="${esc(q.id)}" aria-label="Tandai untuk review">⚑</button>
+      </div>
+      ${answerHTML}
+    </div>`;
+}
+
+// Questions pane: ONE block at a time (instruction header + its questions),
+// "Question N of 20" + thin progress bar + overview icon at the top.
+function rdgQuestionsPaneHTML(f) {
+  const block = f.blocks[f.blockIndex];
+  const total = rdgTotal(f);
+  const answered = rdgAnsweredCount(f);
+  const qs = block.questionIds.map((id) => f.payload.questions.find((q) => q.id === id)).filter(Boolean);
+  const firstNum = rdgQuestionNumber(f, block.questionIds[0]);
+  return `
+    <div class="rdg-pane ${f.activeTab === "questions" ? "" : "rdg-hidden"}" id="rdgQuestionsPane">
+      <div class="rdg-progress-row">
+        <span class="rdg-progress-label">Question ${firstNum} of ${total}</span>
+        <div class="rdg-progress-track"><div class="rdg-progress-fill" id="rdgProgressFill" style="width:${Math.round((answered / total) * 100)}%"></div></div>
+        <button class="rdg-overview-btn" id="rdgOverviewBtn" aria-label="Ringkasan soal">▦</button>
+      </div>
+      <div class="rdg-block-head">
+        <span class="mono rdg-block-eyebrow">QUESTIONS ${esc(block.range).replace("-", "–")}</span>
+        <span class="rdg-block-chip">${esc(block.label)}</span>
+      </div>
+      <p class="rdg-instruction">${esc(block.instruction)}</p>
+      ${qs.map((q) => rdgQuestionHTML(f, q)).join("")}
+      ${f.error ? `<p class="rdg-error">${esc(f.error)}</p>` : ""}
+    </div>`;
+}
+
+function rdgFooterHTML(f) {
+  const total = rdgTotal(f);
+  const last = f.blockIndex >= f.blocks.length - 1;
+  return `
+    <div class="rdg-foot">
+      <span class="rdg-foot-count mono" id="rdgFootCount">${rdgAnsweredCount(f)}/${total} answered</span>
+      <button class="rdg-foot-next" id="rdgFootNext">${last ? "Review Answers" : "Next →"}</button>
+    </div>`;
+}
+
+// Overview sheet - compact per-block dot grid (answered/flagged/unanswered),
+// tap a block to jump back to it. A sheet, not a permanent 20-circle grid
+// (design spec).
+function rdgOverviewSheetHTML(f) {
+  return `
+    <div class="help-overlay" id="rdgOverviewOverlay">
+      <div class="help-sheet fadeUp rdg-sheet">
+        <div class="eyebrow mono" style="margin:0 0 10px">RINGKASAN SOAL</div>
+        ${f.blocks.map((b, bi) => `
+          <button class="rdg-ov-block" data-rdg-jump="${bi}">
+            <div class="rdg-ov-block-head">
+              <span><b>Q${esc(b.range).replace("-", "–")}</b> ${esc(b.label)}</span>
+              <span class="mono rdg-ov-count">${b.questionIds.filter((id) => String(f.answers[id] || "").trim()).length}/${b.questionIds.length}</span>
+            </div>
+            <div class="rdg-dots">
+              ${b.questionIds.map((id) => `<span class="rdg-dot ${String(f.answers[id] || "").trim() ? "answered" : ""} ${f.flags[id] ? "flagged" : ""}">${rdgQuestionNumber(f, id)}</span>`).join("")}
+            </div>
+          </button>`).join("")}
+        <p class="rdg-ov-legend mono">⚑ ${rdgFlaggedCount(f)} ditandai</p>
+        <button class="btn-ghost full" id="rdgOverviewClose">Tutup</button>
+      </div>
+    </div>`;
+}
+
+// Review screen - the pre-submit step (design spec): answered/unanswered/
+// flagged counts, per-block status dots, tap to jump back, then submit.
+function rdgReviewHTML(f) {
+  const total = rdgTotal(f);
+  const answered = rdgAnsweredCount(f);
+  const flagged = rdgFlaggedCount(f);
+  return `
+    <div class="rdg-review">
+      <h1 class="fr rdg-review-title">Review Answers</h1>
+      <p class="rdg-review-sub">Periksa sebelum submit. Kamu bisa kembali dan ubah jawaban.</p>
+      ${f.timerExpired ? `<p class="rdg-error" style="margin:0 0 12px">Waktu habis — jawabanmu tetap tersimpan, cek lalu submit.</p>` : ""}
+      <div class="rdg-review-stats">
+        <div class="rdg-review-stat"><div class="rdg-review-stat-num fr" style="color:#8fbf9f">${answered}</div><div class="rdg-review-stat-label">Answered</div></div>
+        <div class="rdg-review-stat"><div class="rdg-review-stat-num fr" style="color:#e8b768">${total - answered}</div><div class="rdg-review-stat-label">Unanswered</div></div>
+        <div class="rdg-review-stat"><div class="rdg-review-stat-num fr" style="color:#c9564f">${flagged}</div><div class="rdg-review-stat-label">Flagged</div></div>
+      </div>
+      ${f.blocks.map((b, bi) => `
+        <button class="rdg-ov-block" data-rdg-jump="${bi}">
+          <div class="rdg-ov-block-head">
+            <span><b>Q${esc(b.range).replace("-", "–")}</b> ${esc(b.label)}</span>
+            <span class="mono rdg-ov-count">${b.questionIds.filter((id) => String(f.answers[id] || "").trim()).length}/${b.questionIds.length} dijawab</span>
+          </div>
+          <div class="rdg-dots">
+            ${b.questionIds.map((id) => `<span class="rdg-dot ${String(f.answers[id] || "").trim() ? "answered" : ""} ${f.flags[id] ? "flagged" : ""}">${rdgQuestionNumber(f, id)}</span>`).join("")}
+          </div>
+        </button>`).join("")}
+      ${f.error ? `<p class="rdg-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="rdg-foot">
+      <button class="btn-ghost" id="rdgReviewBack" style="flex:0 0 auto">← Kembali</button>
+      <button class="rdg-foot-next" id="rdgReviewSubmit">Submit jawaban</button>
+    </div>`;
+}
+
+// In-shell structured result (design spec: score, band RANGE + confidence -
+// never a point score - per-block strong/weak, Eleva note, collapsible
+// wrong-answer review). Replaces the Home-chrome completedResult card for
+// reading tests; the server-side reflection/Task 13 pipeline already ran.
+function rdgResultHTML(f) {
+  const r = f.result || {};
+  const a = r.assessment || null;
+  const cats = a?.categories?.breakdown || {};
+  const catRow = (c) => {
+    const b = cats[c];
+    return `<div class="rdg-result-cat"><span>${esc(rdgCategoryLabel(c))}</span><span class="mono">${b ? `${b.correct}/${b.total}` : ""}</span></div>`;
+  };
+  const strong = a?.categories?.strong || [];
+  const unstable = a?.categories?.unstable || [];
+  const wrong = r.wrong || [];
+  const note = r.mentorReply || a?.decision?.currentTarget || "";
+  return `
+    <div class="rdg-result">
+      <div class="eyebrow mono rdg-result-eyebrow">READING RESULT</div>
+      <div class="rdg-result-score fr">${r.score ?? "–"} / ${r.total ?? rdgTotal(f)}</div>
+      ${a && a.band ? `
+        <p class="rdg-result-band">Estimated Reading: <b>${a.band.rangeLow}–${a.band.rangeHigh}</b></p>
+        <p class="rdg-result-band-meta mono">Confidence: ${esc(a.confidence || "Low")} · ${a.totalQuestions} questions observed</p>` : ""}
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label" style="color:#8fbf9f">WHAT YOU DID WELL</div>
+        ${strong.length ? strong.map(catRow).join("") : `<p class="rdg-result-neutral">Belum ada kategori yang menonjol di attempt ini.</p>`}
+      </div>
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label" style="color:#c9564f">NEEDS WORK</div>
+        ${unstable.length ? unstable.map(catRow).join("") : `<p class="rdg-result-neutral">Tidak ada kategori yang jatuh di attempt ini.</p>`}
+      </div>
+      ${note ? `
+      <div class="rdg-result-note">
+        <div class="eyebrow mono" style="color:#e8a33d">YANG ELEVA LIHAT</div>
+        <p>${esc(note)}</p>
+        ${a?.decision?.nextTrial ? `<p class="rdg-result-next mono">Next: ${esc(a.decision.nextTrial)}</p>` : ""}
+      </div>` : ""}
+      ${wrong.length ? `
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label">PEMBAHASAN SOAL YANG SALAH</div>
+        ${wrong.map((w) => `
+          <details class="rdg-wrong">
+            <summary><span class="mono rdg-qnum">${rdgQuestionNumber(f, w.id) || ""}</span> ${esc(w.text.length > 80 ? w.text.slice(0, 80) + "…" : w.text)}</summary>
+            <div class="rdg-wrong-body">
+              <p class="mono">Jawabanmu: ${esc(w.yourAnswer || "-")} · Benar: ${esc(w.correctAnswer)}</p>
+              ${w.explanation ? `<p>${esc(w.explanation)}</p>` : ""}
+            </div>
+          </details>`).join("")}
+      </div>` : `<p class="rdg-result-neutral" style="text-align:center">Semua benar — mantap.</p>`}
+      <button class="btn-primary full" id="rdgExit" style="margin-top:16px">Selesai</button>
+    </div>`;
+}
+
+// Confirm sheets - same .help-overlay reuse as the listening diagnostic,
+// with the same z-index override need (see styles.css #rdg*Overlay).
+function rdgExitConfirmSheetHTML() {
+  return `
+    <div class="help-overlay" id="rdgExitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p>Keluar dari tes? Progres sesi ini tidak akan dinilai.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="rdgExitStay" style="flex:1">Lanjutkan tes</button>
+          <button class="btn-primary" id="rdgExitConfirm" style="flex:1">Keluar</button>
+        </div>
+      </div>
+    </div>`;
+}
+function rdgSubmitConfirmSheetHTML(f) {
+  const unanswered = rdgTotal(f) - rdgAnsweredCount(f);
+  return `
+    <div class="help-overlay" id="rdgSubmitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p>${unanswered} soal belum dijawab. Kamu masih bisa kembali dan melengkapinya.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="rdgSubmitBack" style="flex:1">Kembali cek</button>
+          <button class="btn-primary" id="rdgSubmitAnyway" style="flex:1">Submit anyway</button>
+        </div>
+      </div>
+    </div>`;
+}
+function rdgTimeUpSheetHTML() {
+  return `
+    <div class="help-overlay" id="rdgTimeUpOverlay">
+      <div class="help-sheet fadeUp">
+        <p><b>Time is up.</b> Jawabanmu tetap tersimpan — lanjut ke review lalu submit.</p>
+        <button class="btn-primary full" id="rdgTimeUpReview">Review & Submit</button>
+      </div>
+    </div>`;
+}
+
+// Full chrome bypass, same pattern as renderListeningDiagnosticTest. Both
+// tab panes render together (hidden via .rdg-hidden) so tab switches are
+// pure class toggles that keep each pane's scrollTop; after any re-render,
+// scroll positions are restored from scrollMem.
+function renderReadingTest() {
+  const f = readingTestFlow;
+  let inner;
+  if (f.step === "result") inner = rdgResultHTML(f);
+  else if (f.step === "review") inner = rdgReviewHTML(f);
+  else inner = `${rdgTopBarHTML(f)}${rdgTabsHTML(f)}${rdgPassagePaneHTML(f)}${rdgQuestionsPaneHTML(f)}${rdgFooterHTML(f)}`;
+  root.innerHTML = `
+    <div class="rdg-shell">
+      ${f.step === "review" ? rdgTopBarHTML(f) : ""}
+      ${inner}
+    </div>
+    ${f.overviewOpen ? rdgOverviewSheetHTML(f) : ""}
+    ${f.exitConfirmOpen ? rdgExitConfirmSheetHTML() : ""}
+    ${f.submitConfirmOpen ? rdgSubmitConfirmSheetHTML(f) : ""}
+    ${f.timeUpOpen ? rdgTimeUpSheetHTML() : ""}`;
+  wireReadingTestHandlers();
+  if (f.step === "active") {
+    const pp = document.getElementById("rdgPassagePane");
+    const qp = document.getElementById("rdgQuestionsPane");
+    if (pp) pp.scrollTop = f.scrollMem.passage;
+    if (qp) qp.scrollTop = f.scrollMem.questions;
+    if (!f.timerExpired) rdgStartCountdown();
+  }
+}
+
+function rdgUpdateFooterCount() {
+  const f = readingTestFlow;
+  if (!f) return;
+  const el = document.getElementById("rdgFootCount");
+  if (el) el.textContent = `${rdgAnsweredCount(f)}/${rdgTotal(f)} answered`;
+  const fill = document.getElementById("rdgProgressFill");
+  if (fill) fill.style.width = `${Math.round((rdgAnsweredCount(f) / rdgTotal(f)) * 100)}%`;
+}
+
+async function rdgDoSubmit() {
+  const f = readingTestFlow;
+  if (!f) return;
+  rdgStopCountdown();
+  f.submitConfirmOpen = false;
+  f.error = "";
+  root.innerHTML = spinnerHTML("Menilai jawaban...");
+  try {
+    const resp = await api("/api/practice-test/submit", { method: "POST", body: { questId: f.questId, answers: f.answers } });
+    questCtaState.set(f.questId, "completed");
+    // The structured result renders IN the shell (design spec) - do NOT set
+    // completedResult, that would repeat the same data as a Home card. The
+    // server already saved the reflection + Task 13 state; the exit button
+    // refetches /api/state so Home/META reflect it.
+    f.result = { score: resp.score, total: resp.total, wrong: resp.wrong || [], assessment: resp.assessment || null, mentorReply: resp.mentorReply || "" };
+    f.step = "result";
+  } catch (e) {
+    f.error = e.message;
+    f.step = "review";
+  }
+  renderDashboard();
+}
+
+function wireReadingTestHandlers() {
+  const f = readingTestFlow;
+  if (!f) return;
+
+  // Intro (inside normal chrome)
+  document.getElementById("rdgStart")?.addEventListener("click", () => {
+    f.step = "active";
+    renderDashboard();
+  });
+  document.getElementById("rdgCancel")?.addEventListener("click", () => {
+    // Same convention as ptCancel/lstnCancel: client state only, the open
+    // quest row stays open and never blocks anything.
+    readingTestFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+
+  // Top bar
+  document.getElementById("rdgBack")?.addEventListener("click", () => {
+    rdgSaveScroll();
+    f.exitConfirmOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("rdgExitStay")?.addEventListener("click", () => {
+    f.exitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("rdgExitConfirm")?.addEventListener("click", () => {
+    rdgStopCountdown();
+    readingTestFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+
+  // Tabs: pure class toggle - saves the outgoing pane's scrollTop, restores
+  // the incoming one's. NO re-render, so neither pane loses its position.
+  document.querySelectorAll("[data-rdg-tab]").forEach((btn) => btn.addEventListener("click", () => {
+    const tab = btn.dataset.rdgTab;
+    if (tab === f.activeTab) return;
+    rdgSaveScroll();
+    f.activeTab = tab;
+    document.querySelectorAll("[data-rdg-tab]").forEach((b) => b.classList.toggle("active", b === btn));
+    const pp = document.getElementById("rdgPassagePane");
+    const qp = document.getElementById("rdgQuestionsPane");
+    if (pp) { pp.classList.toggle("rdg-hidden", tab !== "passage"); pp.scrollTop = f.scrollMem.passage; }
+    if (qp) { qp.classList.toggle("rdg-hidden", tab !== "questions"); qp.scrollTop = f.scrollMem.questions; }
+  }));
+
+  // Answers: surgical updates only (the listening scroll-reset lesson) -
+  // mutate state, toggle .active in the tapped group, refresh counters.
+  document.querySelectorAll("[data-rdg-opt]").forEach((btn) => btn.addEventListener("click", () => {
+    const qid = btn.dataset.rdgOpt;
+    f.answers[qid] = btn.dataset.rdgValue;
+    document.querySelectorAll(`[data-rdg-opt="${qid}"]`).forEach((b) => b.classList.toggle("active", b === btn));
+    rdgUpdateFooterCount();
+  }));
+  document.querySelectorAll("[data-rdg-fill]").forEach((input) => input.addEventListener("input", (e) => {
+    f.answers[input.dataset.rdgFill] = e.target.value;
+    rdgUpdateFooterCount();
+  }));
+  document.querySelectorAll("[data-rdg-flag]").forEach((btn) => btn.addEventListener("click", () => {
+    const qid = btn.dataset.rdgFlag;
+    f.flags[qid] = !f.flags[qid];
+    btn.classList.toggle("flagged", !!f.flags[qid]);
+  }));
+
+  // Footer: next block (Questions scroll resets to top, Passage keeps its
+  // position) or Review on the last block.
+  document.getElementById("rdgFootNext")?.addEventListener("click", () => {
+    rdgSaveScroll();
+    if (f.blockIndex < f.blocks.length - 1) {
+      f.blockIndex += 1;
+      f.activeTab = "questions";
+      f.scrollMem.questions = 0;
+    } else {
+      f.step = "review";
+    }
+    renderDashboard();
+  });
+
+  // Overview sheet
+  document.getElementById("rdgOverviewBtn")?.addEventListener("click", () => {
+    rdgSaveScroll();
+    f.overviewOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("rdgOverviewClose")?.addEventListener("click", () => {
+    f.overviewOpen = false;
+    renderDashboard();
+  });
+  document.querySelectorAll("[data-rdg-jump]").forEach((btn) => btn.addEventListener("click", () => {
+    rdgSaveScroll();
+    f.blockIndex = Number(btn.dataset.rdgJump) || 0;
+    f.activeTab = "questions";
+    f.scrollMem.questions = 0;
+    f.overviewOpen = false;
+    f.step = "active";
+    renderDashboard();
+  }));
+
+  // Review + submit
+  document.getElementById("rdgReviewBack")?.addEventListener("click", () => {
+    f.step = "active";
+    f.activeTab = "questions";
+    renderDashboard();
+  });
+  document.getElementById("rdgReviewSubmit")?.addEventListener("click", () => {
+    if (rdgTotal(f) - rdgAnsweredCount(f) > 0) {
+      f.submitConfirmOpen = true;
+      renderDashboard();
+      return;
+    }
+    rdgDoSubmit();
+  });
+  document.getElementById("rdgSubmitBack")?.addEventListener("click", () => {
+    f.submitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("rdgSubmitAnyway")?.addEventListener("click", () => rdgDoSubmit());
+
+  // Timer expiry sheet - single path: review, never auto-submit.
+  document.getElementById("rdgTimeUpReview")?.addEventListener("click", () => {
+    f.timeUpOpen = false;
+    f.step = "review";
+    renderDashboard();
+  });
+
+  // Result exit: refetch state so Home/META reflect the saved reflection.
+  document.getElementById("rdgExit")?.addEventListener("click", async () => {
+    readingTestFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state").catch(() => appState);
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+}
+
 // Task 9: score + per-wrong-answer explanation, folded into the same
 // completedResultCardHTML acknowledgment used for every other quest type -
 // same "Lanjut" dismiss/refetch flow, no separate results screen to build.
@@ -5783,6 +6407,12 @@ function renderDashboard() {
   if (listeningDiagnosticFlow?.step === "active" || listeningDiagnosticFlow?.step === "submitted") {
     return renderListeningDiagnosticTest();
   }
+  // Round 42: the Reading Half Diagnostic gets the same chrome bypass -
+  // every step except "intro" (which renders inside the normal chrome
+  // below, like the listening intro).
+  if (readingTestFlow && readingTestFlow.step !== "intro") {
+    return renderReadingTest();
+  }
   // BODY · MOVEMENT execution flow: its own state machine, own shell (no
   // bottom tab bar, minimal header), same "bypass renderDashboard's normal
   // assembly entirely" pattern as the listening diagnostic's test mode
@@ -5990,6 +6620,7 @@ function renderDashboard() {
   // treatment as artifactsSheetHTML below).
   const homeBodyHTML = completedResult ? completedResultCardHTML(completedResult)
     : listeningDiagnosticFlow ? listeningDiagnosticIntroHTML() // only reached for step==="intro" - "active"/"submitted" are already intercepted at the top of this function
+    : readingTestFlow ? readingTestIntroHTML() // same: only "intro" reaches here
     : practiceTestFlow ? practiceTestFlowHTML()
     : jobMatchFlow ? jobMatchFlowHTML()
     : jobApplicationFlow ? jobApplicationFlowHTML()
@@ -6068,14 +6699,22 @@ function renderDashboard() {
       const pts = quest.practiceTestSchema || {};
       const kind = pts.kind || "reading";
       const track = pts.track || "academic";
-      practiceTestFlow = { questId: id, kind, track, answers: {} };
+      practiceTestFlow = { questId: id, kind, track, answers: {}, origin: "home" };
       root.innerHTML = spinnerHTML("Menyusun soal...");
       try {
         const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: id, kind, track } });
-        practiceTestFlow.payload = resp;
-        practiceTestFlow.plays = 0;
-        practiceTestFlow.step = "test";
-        practiceTestFlow.error = "";
+        // Round 42: every reading payload (sprint AND drill) opens in the
+        // dedicated test-mode shell; the old flat quiz card only remains for
+        // the unreachable listening kind.
+        if (kind === "reading") {
+          startReadingTest(id, track, resp, "home");
+          practiceTestFlow = null;
+        } else {
+          practiceTestFlow.payload = resp;
+          practiceTestFlow.plays = 0;
+          practiceTestFlow.step = "test";
+          practiceTestFlow.error = "";
+        }
       } catch (e) {
         // Rare (generatePracticeTest already falls back to static content on
         // any AI failure - this only fires on a real server/network error).
@@ -6262,7 +6901,7 @@ function renderDashboard() {
         };
       } else {
         const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "practice-test" } });
-        practiceTestFlow = { questId: quest.id, step: "track", kind, answers: {} };
+        practiceTestFlow = { questId: quest.id, step: "track", kind, answers: {}, origin: "meta" };
       }
       activeScreen = "home";
     } catch (e) {
@@ -6276,6 +6915,9 @@ function renderDashboard() {
   // lstnReplay/etc., all safe no-ops here since those ids don't exist on
   // the intro screen, only lstnStart/lstnCancel do.
   if (listeningDiagnosticFlow?.step === "intro") wireListeningDiagnosticHandlers();
+  // Same intro-in-chrome wiring for the Reading Half Diagnostic - only
+  // rdgStart/rdgCancel exist on that screen, the rest are safe no-ops.
+  if (readingTestFlow?.step === "intro") wireReadingTestHandlers();
   // META target-recommendation follow-up: tapping an ACTIVE target card
   // opens that realm's tool list ("World Map shows Target, Realm page shows
   // Tools" - founder framing) instead of jumping straight into a flow.
@@ -6375,11 +7017,19 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyusun soal...");
     try {
       const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: practiceTestFlow.questId, kind: practiceTestFlow.kind, track: practiceTestFlow.track } });
-      practiceTestFlow.payload = resp;
-      practiceTestFlow.answers = {};
-      practiceTestFlow.plays = 0;
-      practiceTestFlow.step = "test";
-      practiceTestFlow.error = "";
+      // Round 42: reading goes to the dedicated test shell (see the quest
+      // handler above); only the unreachable listening kind still uses the
+      // flat quiz card.
+      if (practiceTestFlow.kind === "reading") {
+        startReadingTest(practiceTestFlow.questId, practiceTestFlow.track, resp, practiceTestFlow.origin || "meta");
+        practiceTestFlow = null;
+      } else {
+        practiceTestFlow.payload = resp;
+        practiceTestFlow.answers = {};
+        practiceTestFlow.plays = 0;
+        practiceTestFlow.step = "test";
+        practiceTestFlow.error = "";
+      }
     } catch (e) {
       practiceTestFlow.step = "track";
       practiceTestFlow.error = e.message;
@@ -6433,10 +7083,15 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyusun soal...");
     try {
       const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: f.questId, kind: f.kind, track: f.track } });
-      f.payload = resp;
-      f.plays = 0;
-      f.step = "test";
-      f.error = "";
+      if (f.kind === "reading") {
+        startReadingTest(f.questId, f.track, resp, f.origin || "home");
+        practiceTestFlow = null;
+      } else {
+        f.payload = resp;
+        f.plays = 0;
+        f.step = "test";
+        f.error = "";
+      }
     } catch (e) {
       f.step = "error";
       f.error = e.message;
