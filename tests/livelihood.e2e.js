@@ -98,7 +98,7 @@ async function test(name, fn) {
       matchScore: 85, qualified: true, verdict: "Siap apply sekarang", relevanceNote: "", nextStep: "n",
     };
     await sql.query(`UPDATE days SET reflection = $2 WHERE id = $1`, [
-      dayId, { status: "done", text: "", jobMatchResult, deltas: {}, timestamp: new Date().toISOString() },
+      dayId, { status: "COMPLETED", text: "", jobMatchResult, deltas: {}, timestamp: new Date().toISOString() },
     ]);
   }
 

@@ -239,7 +239,7 @@ async function apiTests() {
     };
     await sql.query(
       `UPDATE days SET reflection = $2 WHERE id = $1`,
-      [dayId, { status: "done", text: "", jobMatchResult, deltas: {}, timestamp: new Date().toISOString() }]
+      [dayId, { status: "COMPLETED", text: "", jobMatchResult, deltas: {}, timestamp: new Date().toISOString() }]
     );
     return dayId;
   }

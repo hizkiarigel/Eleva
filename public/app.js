@@ -629,7 +629,7 @@ let reflectOpen = false;
 // quests, one per active goal, can be open at once), so this is always
 // set explicitly when a card's own button is tapped, never defaulted.
 let reflectTarget = null;
-let reflectStatus = "done";
+let reflectStatus = "COMPLETED";
 let reflectText = "";
 // Task 7b: structured-physical quests complete via typed fields instead of
 // the free reflection box - values keyed by field name, kept across
@@ -4375,7 +4375,7 @@ function completedResultCardHTML(r) {
       ${r.practiceTest ? "" : elevaResponseHTML(r.interpretation)}
       ${r.safetyNote ? `<p class="safety-note">⚠ ${esc(r.safetyNote)}</p>` : ""}
       <div class="mono" style="font-size:11px;color:var(--growth);letter-spacing:1px;margin-bottom:6px">
-        ${r.status === "done" ? "SELESAI" : r.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
+        ${r.status === "COMPLETED" ? "SELESAI" : r.status === "PARTIAL" ? "SEBAGIAN" : "DILEWATI"}
       </div>
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
       ${r.structuredData?.kind === "gym-session" ? gymSessionEvalHTML(r.structuredData.evaluation) : ""}
@@ -4816,7 +4816,7 @@ function metaScreenHTML(s, allOpenQuests) {
 // the exact same evidenceSchema/structuredKind auto-detection instead of
 // duplicating it - the underlying Activity flow is completely unmodified.
 function beginStructuredOrReflectiveFlow(id, quest) {
-  reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
+  reflectTarget = id; reflectOpen = true; reflectStatus = "COMPLETED"; reflectText = "";
   structForm = {}; reflectError = ""; unableQuestId = null;
   gymSession = null;
   recordMode = quest?.completionType === "structured-physical" || quest?.statFocus === "body";
@@ -5041,7 +5041,7 @@ function renderDashboard() {
   // quests that predate tagging. Skipped = nothing to certify, so picker
   // and fields hide and no growth applies either way.
   const mustRecord = targetDay?.quest?.completionType === "structured-physical";
-  const showPicker = recordMode && reflectStatus !== "skipped";
+  const showPicker = recordMode && reflectStatus !== "ABANDONED";
   const showStructFields = showPicker && structKind != null;
   // No fields until a kind is picked - submitting a kindless record would
   // just bounce off validation with a confusing "missing field" message.
@@ -5152,7 +5152,7 @@ function renderDashboard() {
       <div class="field">
         <label>Gimana progressnya?</label>
         <div class="status-row">
-          ${[["done", "Selesai"], ["partial", "Sebagian"], ["skipped", "Nggak sempat"]].map(([k, l]) =>
+          ${[["COMPLETED", "Selesai"], ["PARTIAL", "Sebagian"], ["ABANDONED", "Nggak sempat"]].map(([k, l]) =>
             `<button class="status-btn ${reflectStatus === k ? "active" : ""}" data-status="${k}">${l}</button>`).join("")}
         </div>
       </div>`}
@@ -5169,7 +5169,7 @@ function renderDashboard() {
       </div>
       ${reflectError ? `<p style="color:var(--rust);font-size:13px;margin:0 0 12px">${esc(reflectError)}</p>` : ""}
       <button class="btn-primary full" id="submitReflect">${showStructFields ? "Simpan record & selesaikan quest" : "Simpan refleksi"}</button>` : ""}
-      ${!mustRecord && reflectStatus !== "skipped" ? `
+      ${!mustRecord && reflectStatus !== "ABANDONED" ? `
       <button class="btn-ghost" id="toggleRecord" style="margin-top:${formReady ? "10px" : "4px"}">${recordMode ? "← Balik ke refleksi teks aja" : "Aktivitas fisik? Catat sebagai record →"}</button>` : ""}
       ${mustRecord ? `<button class="btn-ghost" id="unableQuestBtn" data-unable-quest="${targetDay.id}" style="margin-top:${formReady ? "10px" : "4px"}">Aku nggak bisa quest ini →</button>` : ""}
     </div>` : "";
@@ -5417,7 +5417,7 @@ function renderDashboard() {
     try {
       if (mode === "recovery") {
         const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "body", kind: "recovery" } });
-        reflectTarget = quest.id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
+        reflectTarget = quest.id; reflectOpen = true; reflectStatus = "COMPLETED"; reflectText = "";
         structForm = {}; reflectError = ""; unableQuestId = null;
         recordMode = true; structKind = "recovery"; structKindAuto = true;
       } else {
@@ -5607,7 +5607,7 @@ function renderDashboard() {
       const qd = openQuests.find((q) => q.id === practiceTestFlow.questId);
       questCtaState.set(practiceTestFlow.questId, "completed");
       completedResult = {
-        questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
+        questTitle: qd?.quest?.title || "", status: "COMPLETED", goalIndex: qd?.goalIndex,
         mentorReply: resp.mentorReply, interpretation: resp.interpretation, deltas: resp.deltas,
         // Task 13: assessment carries the deterministic band/observed/decision
         // blocks the rebuilt practiceTestResultHTML renders.
@@ -5684,7 +5684,7 @@ function renderDashboard() {
         // resp.target is the Milestone progress line instead (reuses
         // targetPickerHTML, same component the structured-physical flow
         // uses for its own Target Berikutnya line).
-        questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
+        questTitle: qd?.quest?.title || "", status: "COMPLETED", goalIndex: qd?.goalIndex,
         mentorReply: "", deltas: {}, jobMatch: resp.result, target: resp.target,
       };
       jobMatchFlow = null;
@@ -5735,7 +5735,7 @@ function renderDashboard() {
       const qd = openQuests.find((q) => q.id === jobApplicationFlow.questId);
       questCtaState.set(jobApplicationFlow.questId, "completed");
       completedResult = {
-        questTitle: qd?.quest?.title || "", status: "done", goalIndex: qd?.goalIndex,
+        questTitle: qd?.quest?.title || "", status: "COMPLETED", goalIndex: qd?.goalIndex,
         mentorReply: resp.jobApplication ? `Lamaran ke ${resp.jobApplication.companyName} untuk ${resp.jobApplication.roleTitle} tercatat.` : "",
         deltas: {}, jobApplication: resp.jobApplication, target: resp.target,
       };
@@ -6117,7 +6117,7 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyimpan refleksi...");
     try {
       const body = { status: reflectStatus, text: reflectText, questId: targetDay.id };
-      if (recordMode && structKind && reflectStatus !== "skipped") {
+      if (recordMode && structKind && reflectStatus !== "ABANDONED") {
         // kind is the user's pick (both gym variants validate as "gym" -
         // they only differ in which fields rendered); a bodyweight session
         // never sends a weight, even one left over from switching variants.
@@ -6168,7 +6168,7 @@ function renderDashboard() {
         // Task 7c: server computes the real status for structured-physical
         // quests (evidence vs target) - resp.status is authoritative, not
         // the client's reflectStatus (which for those quests is just a
-        // fixed "done" now that the self-report picker is gone).
+        // fixed "COMPLETED" now that the self-report picker is gone).
         questTitle: targetDay.quest.title, status: resp.status, goalIndex: targetDay.goalIndex,
         questId: resp.questId, mentorReply: resp.mentorReply, interpretation: resp.interpretation,
         safetyNote: resp.safetyNote, deltas: resp.deltas, structuredData: resp.structuredData,

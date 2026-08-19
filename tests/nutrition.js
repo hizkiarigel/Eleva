@@ -271,7 +271,7 @@ async function apiTests() {
     assert.strictEqual(json.progressive.status, "COMPLETED");
     assert.ok(json.progressive.currentValue >= 60);
     assert.ok(json.resolved, "resolved must be present the instant both booleans go true");
-    assert.strictEqual(json.resolved.status, "done");
+    assert.strictEqual(json.resolved.status, "COMPLETED");
   });
 
   await atest("a COMPLETED quest drops out of openQuests", async () => {
@@ -314,7 +314,7 @@ async function apiTests() {
     assert.ok(!json.openQuests.some((q) => q.id === staleQuestId), "stale quest must resolve out of openQuests");
     const { rows: after } = await sql.query("SELECT reflection FROM days WHERE id = $1", [staleQuestId]);
     assert.strictEqual(after[0].reflection.nutritionResult.status, "INCOMPLETE");
-    assert.strictEqual(after[0].reflection.status, "skipped");
+    assert.strictEqual(after[0].reflection.status, "ABANDONED");
   });
 
   await atest("the resolved INCOMPLETE quest surfaces in pendingNutritionShortfalls", async () => {

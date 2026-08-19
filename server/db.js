@@ -631,8 +631,23 @@ async function resetUser(userId) {
 // day - a user can have up to one open quest per active goal open at once,
 // so several rows can legitimately share the same date) ---
 
+// BODY·MOVEMENT outcome-vocabulary migration: reflection.status moved from
+// lowercase done/partial/skipped/expired to COMPLETED/PARTIAL/ABANDONED/
+// EXPIRED app-wide. Historical rows written before this migration still
+// carry the old lowercase strings - translated here, the one choke point
+// every read path (getOpenQuests/getQuestById/recentDays/allHistory) already
+// funnels through via rowToQuest, so no call site needs its own translation.
+// New writes always use the new vocabulary directly; this only exists for
+// pre-migration data.
+const LEGACY_STATUS_MAP = { done: "COMPLETED", partial: "PARTIAL", skipped: "ABANDONED", expired: "EXPIRED" };
+function normalizeLegacyStatus(reflection) {
+  if (!reflection || typeof reflection.status !== "string") return reflection;
+  const mapped = LEGACY_STATUS_MAP[reflection.status];
+  return mapped ? { ...reflection, status: mapped } : reflection;
+}
+
 function rowToQuest(r) {
-  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: r.reflection, createdAt: r.created_at, isSideQuest: r.is_side_quest, isMeta: r.is_meta };
+  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: normalizeLegacyStatus(r.reflection), createdAt: r.created_at, isSideQuest: r.is_side_quest, isMeta: r.is_meta };
 }
 
 // Every quest still open (not yet marked done) across the user's goals -

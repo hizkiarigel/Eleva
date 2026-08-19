@@ -118,7 +118,7 @@ async function test(name, fn) {
     await page.waitForSelector("[data-qhub-idx]", { timeout: 20000 });
 
     const { rows: oldRows } = await sql.query("SELECT reflection FROM days WHERE id = $1", [oldId]);
-    assert.strictEqual(oldRows[0].reflection.status, "expired", "old quest must be closed with a neutral status='expired' reflection");
+    assert.strictEqual(oldRows[0].reflection.status, "EXPIRED", "old quest must be closed with a neutral status='EXPIRED' reflection");
     assert.deepStrictEqual(oldRows[0].reflection.deltas, {}, "resolution must apply zero stat deltas (neutral, no penalty)");
 
     const { rows: newRows } = await sql.query("SELECT id, created_at FROM days WHERE user_id = $1 AND goal_index = 0 AND reflection IS NULL", [userId]);
@@ -162,7 +162,7 @@ async function test(name, fn) {
     assert.strictEqual(r0[0].reflection, null, "goal 0's quest must be completely untouched");
     assert.strictEqual(r2[0].reflection, null, "goal 2's quest must be completely untouched");
     const { rows: rExp } = await sql.query("SELECT reflection FROM days WHERE id = $1", [idExpired]);
-    assert.strictEqual(rExp[0].reflection.status, "expired", "goal 1's quest must be closed");
+    assert.strictEqual(rExp[0].reflection.status, "EXPIRED", "goal 1's quest must be closed");
     const { rows: goal1Open } = await sql.query("SELECT id FROM days WHERE user_id = $1 AND goal_index = 1 AND reflection IS NULL", [userId]);
     assert.strictEqual(goal1Open.length, 1, "goal 1 must have exactly one fresh replacement quest");
     await context.close();
@@ -196,7 +196,7 @@ async function test(name, fn) {
     const { rows } = await sql.query("SELECT reflection FROM days WHERE id = $1", [nutId]);
     assert.ok(rows[0].reflection, "nutrition quest must have been resolved by its own lazy loop");
     assert.ok(rows[0].reflection.nutritionResult, "must carry nutritionResult (proves resolveNutritionQuest ran), not the generic expiry shape");
-    assert.notStrictEqual(rows[0].reflection.status, "expired", "must not be double-processed/clobbered by the new generic expiry loop");
+    assert.notStrictEqual(rows[0].reflection.status, "EXPIRED", "must not be double-processed/clobbered by the new generic expiry loop");
     await context.close();
   });
 

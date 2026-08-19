@@ -111,17 +111,17 @@ const KONDISI_LABELS = ["Capek/energi rendah", "Sakit/cedera", "Beban kerja ting
 // replacing the old client self-reported "Gimana progressnya?" picker -
 // "selesai" vs "sebagian" is now a fact derived from evidence vs the
 // quest's own evidenceSchema.target, not a self-report. Falls back to
-// "done" (submission = completion, the pre-Task-7c behavior) whenever
+// "COMPLETED" (submission = completion, the pre-Task-7c behavior) whenever
 // there's no usable target to compare against - a quest without a clean
 // numeric target can't be judged partial, so it isn't.
 function computeEvidenceStatus(quest, structuredClean) {
   const schema = quest?.evidenceSchema;
-  if (!schema || schema.target == null || !structuredClean) return "done";
+  if (!schema || schema.target == null || !structuredClean) return "COMPLETED";
   const actual = schema.metricType === "distance" ? structuredClean.jarakKm
     : schema.metricType === "reps" ? structuredClean.repetisi
     : null;
-  if (actual == null) return "done";
-  return actual / schema.target >= 0.95 ? "done" : "partial";
+  if (actual == null) return "COMPLETED";
+  return actual / schema.target >= 0.95 ? "COMPLETED" : "PARTIAL";
 }
 
 // Task 7d item 6: a separate shortfall-reason trigger, independent of the
@@ -170,7 +170,7 @@ function computeShortfallPrompt(quest, structuredClean) {
 // has rolled past and never hit both booleans while ACTIVE).
 async function resolveNutritionQuest(userId, dayId, quest, state) {
   const progressive = quest.progressive;
-  const effectiveStatus = progressive.status === "COMPLETED" ? "done" : progressive.status === "ATTEMPTED" ? "partial" : "skipped";
+  const effectiveStatus = progressive.status === "COMPLETED" ? "COMPLETED" : progressive.status === "ATTEMPTED" ? "PARTIAL" : "ABANDONED";
   const ctx = {
     profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
     quest, status: effectiveStatus, nutritionResult: progressive,
@@ -220,7 +220,7 @@ async function resolveNutritionQuest(userId, dayId, quest, state) {
 // enough that nothing reading old reflections elsewhere breaks - no reader
 // assumes mentorReply/interpretation/etc. are always present.
 async function resolveExpiredQuest(userId, id) {
-  const reflection = { status: "expired", text: "", deltas: {}, timestamp: new Date().toISOString() };
+  const reflection = { status: "EXPIRED", text: "", deltas: {}, timestamp: new Date().toISOString() };
   await db.saveReflection(userId, id, reflection);
 }
 
@@ -760,7 +760,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     // nothing (there is nothing to certify, and no growth either way).
     const isStructuredQuest = day.quest?.completionType === "structured-physical";
     let structuredClean = null;
-    if ((isStructuredQuest || structuredData) && (status === "done" || status === "partial") && !inCrisis) {
+    if ((isStructuredQuest || structuredData) && (status === "COMPLETED" || status === "PARTIAL") && !inCrisis) {
       const kind = (structuredData && structuredData.kind) || day.quest?.structuredKind;
       const check = structured.validateStructuredData(kind, structuredData);
       if (!check.ok) return res.status(400).json({ error: check.error });
@@ -793,7 +793,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     } else {
       const eligible = structuredClean
         ? true // completeness+plausibility already code-verified above
-        : (effectiveStatus === "done" || effectiveStatus === "partial") && wordCount(text) >= 12;
+        : (effectiveStatus === "COMPLETED" || effectiveStatus === "PARTIAL") && wordCount(text) >= 12;
       const ctx = {
         // originStory is v3; situation is the pre-v3 fallback for accounts
         // that onboarded before this field existed.
@@ -1076,7 +1076,7 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
     const ctx = {
       profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
       quest: day.quest,
-      status: "done",
+      status: "COMPLETED",
       // Distinct from structuredData - see processReflection's evaluationRules
       // branch in claude.js. Objective evidence, no growth-gate needed.
       practiceTestResult: { kind: payload.kind, track: payload.track, score: graded.correct, total: graded.total, entryType },
@@ -1097,7 +1097,7 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
     const allowAdvance = result.chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0 && Boolean(result.newChapterTitle && result.newChapterNarrative);
 
     const reflection = {
-      status: "done", text: "",
+      status: "COMPLETED", text: "",
       practiceTestResult: { kind: payload.kind, track: payload.track, score: graded.correct, total: graded.total, entryType },
       deltas, mentorReply: result.mentorReply, timestamp: new Date().toISOString(),
     };
@@ -1171,7 +1171,7 @@ app.post("/api/listening-diagnostic/submit", requireAuth, async (req, res) => {
     const answeredCount = Object.keys(answers || {}).filter((k) => String(answers[k] || "").trim()).length;
 
     const reflection = {
-      status: "done", text: "",
+      status: "COMPLETED", text: "",
       listeningDiagnosticResult: {
         answeredCount, totalQuestions: 20, correct: graded.correct, wrong: graded.wrong, byTaskType,
         runsCompleted: Math.max(0, Math.min(listeningDiagnostic.RUN_LIMIT, Number(runsCompleted) || 0)),
@@ -1277,7 +1277,7 @@ app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
     });
 
     const reflection = {
-      status: "done", text: "",
+      status: "COMPLETED", text: "",
       jobMatchResult: result,
       deltas: {}, timestamp: new Date().toISOString(),
     };
@@ -1352,7 +1352,7 @@ app.post("/api/job-application/submit", requireAuth, async (req, res) => {
 
     const jobApplicationSubmit = { ...validated.clean, cvArtifactId: cvArtifact.id };
     const reflection = {
-      status: "done", text: "",
+      status: "COMPLETED", text: "",
       jobApplicationSubmit,
       mentorReply: `Lamaran ke ${validated.clean.companyName} untuk ${validated.clean.roleTitle} tercatat.`,
       deltas: {}, timestamp: new Date().toISOString(),
