@@ -854,6 +854,16 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
       timestamp: new Date().toISOString(),
     };
     await db.saveReflection(req.userId, day.id, reflection);
+    // BODY · MOVEMENT execution flow: Evidence's "Kirim Bukti" submits
+    // through this SAME route (cardio's structured-physical validation
+    // already IS what Movement's Review/Evidence screens need - effort-
+    // gated required notes and all, see structured.js's cardio kind) - the
+    // one genuinely new thing on completion is clearing the now-finished
+    // in-progress attempt so a completed quest never carries stale attempt
+    // data forward.
+    if (day.quest?.primaryFeature === "MOVEMENT" && day.quest?.activeAttempt) {
+      await db.updateQuestProgress(req.userId, day.id, { activeAttempt: null });
+    }
     await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
     // Task 11e (Decay): record which stats just grew for real, so the decay
     // clock resets for exactly those - and only those - stats.

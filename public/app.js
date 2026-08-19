@@ -5117,24 +5117,225 @@ function wireMovementHandlers() {
     movementFlow.attempt.draftReview = { ...movementFlow.attempt.draftReview, kondisi: k };
     renderDashboard();
   }));
+  document.getElementById("mvBackHomeSubmitted")?.addEventListener("click", async () => {
+    movementFlow = null;
+    appState = await api("/api/state").catch(() => appState);
+    renderDashboard();
+  });
   wireMovementActiveHandlers();
   wireMovementReviewHandlers();
   wireMovementEvidenceHandlers();
 }
 
-// Active Session (Strength), Finish & Review, Evidence, Submitted, and the
-// exit-confirmation sheet are built out in full below (stages 5-7) - kept
-// as placeholders here only long enough for Preview/Pre-Start to be
-// smoke-testable in isolation; every one of these is replaced before this
-// feature ships, never left as a stub.
+// Active Session (Strength) and its exit sheet are built out in stage 6 -
+// kept as placeholders here, never left as a stub once that stage lands.
 function movementActiveSessionHTML() { return `<p style="color:var(--muted)">Active Session — coming soon.</p>`; }
-function movementReviewHTML() { return `<p style="color:var(--muted)">Finish & Review — coming soon.</p>`; }
-function movementEvidenceHTML() { return `<p style="color:var(--muted)">Evidence — coming soon.</p>`; }
-function movementSubmittedHTML() { return `<p style="color:var(--muted)">Submitted — coming soon.</p>`; }
 function movementExitSheetHTML() { return ""; }
 function wireMovementActiveHandlers() {}
-function wireMovementReviewHandlers() {}
-function wireMovementEvidenceHandlers() {}
+
+// Combines draftReview's separate Menit/Detik inputs to decimal minutes,
+// same edge (client leaves the server) durasiMenitFromFields already
+// converts at for the legacy cardio form - reused here via the same field-
+// name shape rather than duplicating the conversion.
+function mvDurasiMenit() {
+  return durasiMenitFromFields({ durasiMin: movementFlow.attempt.draftReview.durationMin, durasiSec: movementFlow.attempt.draftReview.durationSec });
+}
+
+// Finish & Review. Cardio: mm:ss two-box duration + distance, pace derived
+// live (never NaN - paceLabel itself already returns null on anything
+// invalid, rendered as "—"), effort chips, notes required once Berat/
+// Terlalu berat is picked (mirrored server-side by structured.js's cardio
+// kind - the same rule, not a new one, see the reflection-submit comment
+// below). Strength shows a read-only recap instead of retyping - stage 7.
+function movementReviewHTML() {
+  const quest = movementFlow.quest;
+  if (quest.executionMode !== "CARDIO") return `<p style="color:var(--muted)">Finish & Review — coming soon.</p>`;
+  const dr = movementFlow.attempt.draftReview;
+  const heavy = ["Berat", "Terlalu berat"].includes(dr.effort);
+  const notesMissing = heavy && !dr.notes.trim();
+  return `
+    <h2 class="fr" style="font-size:20px;margin:0 0 4px">Selesai! 🎉</h2>
+    <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Review hasil aktivitasmu.</p>
+    <div class="quest-card">
+      <div class="struct-grid">
+        <div class="field">
+          <label>Durasi</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" min="0" inputmode="numeric" id="mvDurMin" value="${esc(dr.durationMin)}" placeholder="0" style="text-align:center" />
+            <span class="mono" style="color:var(--muted)">:</span>
+            <input type="number" min="0" max="59" inputmode="numeric" id="mvDurSec" value="${esc(dr.durationSec)}" placeholder="00" style="text-align:center" />
+          </div>
+        </div>
+        <div class="field"><label>Jarak (km)</label><input type="number" min="0" step="0.1" id="mvDistance" value="${esc(dr.distanceKm)}" placeholder="0" /></div>
+      </div>
+      <p class="mono" id="mvPaceDisplay" style="font-size:12px;color:var(--muted);margin:-6px 0 14px">${(() => { const p = paceLabel(mvDurasiMenit(), dr.distanceKm); return `Pace estimasi: ${p || "—"}`; })()}</p>
+      <div class="field">
+        <label>Rasanya gimana?</label>
+        <div class="status-row">
+          ${["Ringan", "Cukup", "Berat", "Terlalu berat"].map((v) => `<button class="status-btn ${dr.effort === v ? "active" : ""}" data-mv-effort="${v}">${v}</button>`).join("")}
+        </div>
+      </div>
+      <div class="field">
+        <label>Catatan ${heavy ? "" : `<span class="opt-note">opsional</span>`}</label>
+        <textarea id="mvNotes" rows="2" placeholder="Ada yang terasa beda hari ini?">${esc(dr.notes)}</textarea>
+      </div>
+      ${notesMissing ? `<p style="color:var(--rust);font-size:13px;margin:0 0 12px">Ceritakan singkat apa yang bikin berat sebelum lanjut.</p>` : ""}
+    </div>
+    <div style="display:flex;gap:12px;margin-top:16px">
+      <button class="btn-ghost rust" id="mvReviewAbandon" style="flex:1">Batalkan Quest</button>
+      <button class="btn-primary" id="mvReviewDone" style="flex:1">Selesai</button>
+    </div>
+    ${movementFlow.reviewError ? `<p style="color:var(--rust);font-size:13px;margin-top:12px">${esc(movementFlow.reviewError)}</p>` : ""}`;
+}
+
+function wireMovementReviewHandlers() {
+  if (movementFlow?.screen !== "review" || movementFlow.quest.executionMode !== "CARDIO") return;
+  const dr = movementFlow.attempt.draftReview;
+  // Plain typing never re-renders (would drop focus mid-keystroke, same
+  // constraint as every other form in this app) - writes straight into
+  // attempt state + a debounced save, pace/derived reads update the DOM
+  // directly instead.
+  document.getElementById("mvDurMin")?.addEventListener("input", (e) => {
+    dr.durationMin = e.target.value;
+    mvSaveAttempt({ draftReview: dr });
+    const el = document.getElementById("mvPaceDisplay");
+    if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+  });
+  document.getElementById("mvDurSec")?.addEventListener("input", (e) => {
+    dr.durationSec = e.target.value;
+    mvSaveAttempt({ draftReview: dr });
+    const el = document.getElementById("mvPaceDisplay");
+    if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+  });
+  document.getElementById("mvDistance")?.addEventListener("input", (e) => {
+    dr.distanceKm = e.target.value;
+    mvSaveAttempt({ draftReview: dr });
+    const el = document.getElementById("mvPaceDisplay");
+    if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+  });
+  document.getElementById("mvNotes")?.addEventListener("input", (e) => {
+    dr.notes = e.target.value;
+    mvSaveAttempt({ draftReview: dr });
+  });
+  document.querySelectorAll("[data-mv-effort]").forEach((b) => b.addEventListener("click", () => {
+    dr.effort = b.dataset.mvEffort;
+    mvSaveAttempt({ draftReview: dr }, true);
+    renderDashboard();
+  }));
+  document.getElementById("mvReviewAbandon")?.addEventListener("click", mvAbandonAttempt);
+  document.getElementById("mvReviewDone")?.addEventListener("click", () => {
+    const heavy = ["Berat", "Terlalu berat"].includes(dr.effort);
+    if (!dr.effort) { movementFlow.reviewError = "Pilih dulu rasanya gimana."; renderDashboard(); return; }
+    if (heavy && !dr.notes.trim()) { movementFlow.reviewError = "Ceritakan singkat apa yang bikin berat sebelum lanjut."; renderDashboard(); return; }
+    movementFlow.reviewError = "";
+    mvSaveAttempt({ draftReview: dr, currentScreen: "evidence" }, true);
+    movementFlow.screen = "evidence";
+    renderDashboard();
+  });
+}
+
+// Evidence. Cardio: pick ONE primary source, inline error (not a modal -
+// modals reserved for destructive actions per the design handoff) if none
+// picked before submit. Strength shows a static confirmation instead - no
+// picker, system-recorded sets/reps/load already IS the evidence - stage 7.
+function movementEvidenceHTML() {
+  const quest = movementFlow.quest;
+  if (quest.executionMode !== "CARDIO") return `<p style="color:var(--muted)">Evidence — coming soon.</p>`;
+  const attempt = movementFlow.attempt;
+  const choices = [
+    ["activity-data", "Data aktivitas", "Durasi + jarak yang sudah dicatat"],
+    ["tracker-screenshot", "Screenshot tracker", "Dari Strava, Apple Fitness, dll"],
+    ["treadmill-photo", "Foto treadmill", "Jika lari di treadmill"],
+  ];
+  return `
+    <h2 class="fr" style="font-size:20px;margin:0 0 4px">Kirim bukti aktivitas</h2>
+    <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Pilih bukti yang ingin kamu kirim.</p>
+    <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:8px">BUKTI UTAMA (PILIH SALAH SATU)</div>
+    ${choices.map(([k, label, sub]) => `
+      <button class="mv-evidence-choice ${attempt.evidenceChoice === k ? "active" : ""}" data-mv-evidence="${k}">
+        <span class="mv-evidence-radio"></span>
+        <span><span class="mv-evidence-label">${label}</span><span class="mv-evidence-sub">${sub}</span></span>
+      </button>`).join("")}
+    ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
+    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>Kirim Bukti</button>`;
+}
+
+function wireMovementEvidenceHandlers() {
+  if (movementFlow?.screen !== "evidence" || movementFlow.quest.executionMode !== "CARDIO") return;
+  document.querySelectorAll("[data-mv-evidence]").forEach((b) => b.addEventListener("click", () => {
+    movementFlow.attempt.evidenceChoice = b.dataset.mvEvidence;
+    movementFlow.evidenceError = "";
+    mvSaveAttempt({ evidenceChoice: b.dataset.mvEvidence }, true);
+    renderDashboard();
+  }));
+  document.getElementById("mvKirimBukti")?.addEventListener("click", mvSubmitCardio);
+}
+
+// Cardio's structuredData shape is EXACTLY what the legacy cardio form
+// already sends (server/structured.js's "cardio" kind, unchanged) - jenis
+// aktivitas is implicit from the quest itself (evidenceSchema.activityType,
+// never re-asked in this flow, matching the design handoff's screens),
+// falling back to "Lainnya" only if the AI never set one, same "safe
+// default rather than fabricate" posture normalizeEvidenceSchema already
+// uses server-side.
+async function mvSubmitCardio() {
+  if (!movementFlow || movementFlow.saving) return;
+  const attempt = movementFlow.attempt;
+  if (!attempt.evidenceChoice) {
+    movementFlow.evidenceError = "Pilih bukti utama dulu.";
+    renderDashboard();
+    return;
+  }
+  const quest = movementFlow.quest;
+  const jenis = quest.evidenceSchema?.activityType || "Lainnya";
+  const structuredData = {
+    kind: "cardio",
+    jenisAktivitas: jenis,
+    ...(jenis === "Lainnya" ? { jenisLainnya: "Aktivitas fisik" } : {}),
+    durasiMenit: mvDurasiMenit(),
+    ...(attempt.draftReview.distanceKm !== "" && attempt.draftReview.distanceKm != null ? { jarakKm: Number(attempt.draftReview.distanceKm) } : {}),
+    titikBerat: attempt.draftReview.effort,
+    ...(["Berat", "Terlalu berat"].includes(attempt.draftReview.effort) ? { titikBeratDetail: attempt.draftReview.notes.slice(0, 300) } : {}),
+  };
+  movementFlow.saving = true;
+  movementFlow.evidenceError = "";
+  renderDashboard();
+  try {
+    const resp = await api("/api/reflection", { method: "POST", body: { status: "COMPLETED", text: attempt.draftReview.notes, questId: movementFlow.questId, structuredData } });
+    movementFlow.submittedResult = resp;
+    movementFlow.screen = "submitted";
+    appState = await api("/api/state").catch(() => appState);
+  } catch (e) {
+    movementFlow.evidenceError = e.message;
+  }
+  movementFlow.saving = false;
+  renderDashboard();
+}
+
+// Submitted. No raw LLM essay (design handoff's explicit rule) - a
+// confirmation state plus a static componentized list of what's coming;
+// the real mentorReply/interpretation still get stored on the reflection
+// and feed the next quest/Riwayat as usual, just not echoed verbatim here.
+function movementSubmittedHTML() {
+  return `
+    <div style="text-align:center;padding:20px 0 0">
+      <div style="width:56px;height:56px;border-radius:50%;border:1px solid var(--growth);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;color:var(--growth);font-size:24px">✓</div>
+      <h2 class="fr" style="font-size:19px;margin:0 0 6px">Bukti terkirim!</h2>
+      <p style="color:var(--muted);font-size:13.5px;margin:0 0 22px">Eleva sedang menganalisis progresmu.</p>
+    </div>
+    <div class="quest-card" style="text-align:left">
+      ${[
+        ["Analisis progres", "Menilai konsistensi dan effort"],
+        ["Insight & rekomendasi", "Tips agar kamu makin berkembang"],
+        ["Quest berikutnya", "Akan disesuaikan dengan kondisimu"],
+      ].map(([title, sub], i, arr) => `
+        <div style="padding:12px 0${i < arr.length - 1 ? ";border-bottom:1px solid var(--hair)" : ""}">
+          <div style="font-size:14.5px">${title}</div>
+          <div style="color:var(--muted);font-size:12.5px;margin-top:2px">${sub}</div>
+        </div>`).join("")}
+    </div>
+    <button class="btn-ghost full" id="mvBackHomeSubmitted" style="margin-top:18px">Kembali ke Home</button>`;
+}
 
 // SOMA Nutrition Part B: opens the Log Meal / Nutrition flow for a given
 // nutrition-log quest (fresh or resumed) - fetches today's entries for it

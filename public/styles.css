@@ -1681,3 +1681,19 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 }
 .mv-why-collapse.open { grid-template-rows: 1fr; }
 .mv-why-inner { overflow: hidden; min-height: 0; }
+
+/* Evidence screen's primary-source picker (BODY · MOVEMENT flow) - radio-
+   card rows, active state gets the gold accent border/fill like every
+   other selected-state control in this app (.status-btn.active etc.). */
+.mv-evidence-choice {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: var(--surface2); border: 1px solid var(--hair); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 10px; color: var(--text);
+}
+.mv-evidence-choice.active { border-color: var(--accent); background: #d8a35522; }
+.mv-evidence-radio {
+  width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--hair-strong); flex: none;
+}
+.mv-evidence-choice.active .mv-evidence-radio { border-color: var(--accent); background: var(--accent); }
+.mv-evidence-label { display: block; font-size: 14.5px; }
+.mv-evidence-sub { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }

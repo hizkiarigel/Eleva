@@ -172,7 +172,7 @@ async function test(name, fn) {
     await page.click("#mvPreviewStart");
     await page.waitForSelector("#mvPreStartGo", { timeout: 20000 });
     await page.click("#mvPreStartGo");
-    await page.waitForSelector("text=coming soon", { timeout: 20000 }); // Review is a stage-5 stub for now
+    await page.waitForSelector("#mvReviewDone", { timeout: 20000 }); // real Finish & Review, stage 5
     const { rows } = await sql.query("SELECT quest FROM days WHERE id = $1", [cardioId]);
     assert.ok(rows[0].quest.activeAttempt, "attempt must be created");
     assert.strictEqual(rows[0].quest.activeAttempt.currentScreen, "review");
@@ -205,6 +205,88 @@ async function test(name, fn) {
     assert.strictEqual(a.currentScreen, "active");
     assert.strictEqual(a.strengthExercises.length, 2);
     assert.strictEqual(a.strengthExercises[0].sets.length, 3);
+  });
+
+  console.log("E2E: Cardio's short path - Finish & Review -> Evidence -> Submitted");
+  // A distinct goalIndex (out of range - goalLabel falls back to the quest's
+  // own title, see movementPreviewHTML) and a distinct title keep this card
+  // unambiguous from the first cardio quest above, which is still sitting
+  // open with a lingering "review"-stage attempt from the earlier test.
+  const cardioId2 = await seedQuest(2, { ...cardioQuest, title: "Lari 3.2 km — Sesi Kedua" });
+
+  await test("pace shows '—' until both duration and distance are valid, then derives live", async () => {
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    // Three open quests now (the first cardio + strength attempts from
+    // above are still lingering, unfinished, per the persistence design) -
+    // select this one's own card by its distinct title before its
+    // [data-reflect-id] button exists in the detail panel.
+    await page.click('.qhub-card:has-text("Sesi Kedua")');
+    await page.waitForSelector(`[data-reflect-id="${cardioId2}"]`, { timeout: 20000 });
+    await page.click(`[data-reflect-id="${cardioId2}"]`);
+    await page.waitForSelector("#mvPreviewStart", { timeout: 20000 });
+    await page.click("#mvPreviewStart");
+    await page.waitForSelector("#mvPreStartGo", { timeout: 20000 });
+    await page.click("#mvPreStartGo");
+    await page.waitForSelector("#mvReviewDone", { timeout: 20000 });
+    assert.ok(await page.locator("text=Pace estimasi: —").count(), "pace must show — with no duration/distance entered");
+    await page.fill("#mvDurMin", "21");
+    await page.fill("#mvDurSec", "0");
+    await page.fill("#mvDistance", "3.2");
+    // 21:00 / 3.2km = 6.5625 min/km -> 6:34 (mmss rounds the seconds).
+    await page.waitForSelector("text=Pace estimasi: 6:34", { timeout: 5000 });
+  });
+
+  await test("Selesai blocks with an inline error until an effort chip is picked", async () => {
+    await page.click("#mvReviewDone");
+    await page.waitForSelector("text=Pilih dulu rasanya gimana.", { timeout: 5000 });
+  });
+
+  await test("picking Berat makes notes required - Selesai blocks until a reason is typed, then proceeds to Evidence", async () => {
+    await page.click('[data-mv-effort="Berat"]');
+    await page.click("#mvReviewDone");
+    await page.waitForSelector("text=Ceritakan singkat apa yang bikin berat", { timeout: 5000 });
+    await page.fill("#mvNotes", "Lutut kanan kerasa agak nyeri di km terakhir.");
+    await page.click("#mvReviewDone");
+    await page.waitForSelector("#mvKirimBukti", { timeout: 20000 });
+  });
+
+  await test("refresh mid-Evidence resumes at the same screen with attempt data intact", async () => {
+    await page.reload();
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click('.qhub-card:has-text("Sesi Kedua")');
+    await page.waitForSelector(`[data-reflect-id="${cardioId2}"]`, { timeout: 20000 });
+    await page.click(`[data-reflect-id="${cardioId2}"]`);
+    await page.waitForSelector("#mvKirimBukti", { timeout: 20000 });
+    assert.strictEqual(await page.locator("#mvPreviewStart").count(), 0, "a refresh mid-Evidence must resume directly at Evidence, not restart from Preview");
+  });
+
+  await test("Kirim Bukti without picking a source shows an inline error, not a modal", async () => {
+    await page.click("#mvKirimBukti");
+    await page.waitForSelector("text=Pilih bukti utama dulu.", { timeout: 5000 });
+    assert.strictEqual(await page.locator(".help-overlay").count(), 0, "must be an inline error, never a blocking modal");
+  });
+
+  await test("picking a source and submitting completes the quest, clears activeAttempt, lands on Submitted", async () => {
+    await page.click('[data-mv-evidence="activity-data"]');
+    await page.click("#mvKirimBukti");
+    await page.waitForSelector("text=Bukti terkirim!", { timeout: 20000 });
+    assert.ok(await page.locator("text=Analisis progres").count());
+    assert.ok(await page.locator("text=Insight & rekomendasi").count());
+    assert.ok(await page.locator("text=Quest berikutnya").count());
+    const { rows } = await sql.query("SELECT quest, reflection FROM days WHERE id = $1", [cardioId2]);
+    assert.strictEqual(rows[0].quest.activeAttempt, null, "activeAttempt must be cleared on successful submit");
+    assert.ok(rows[0].reflection, "a reflection must be written");
+    assert.strictEqual(rows[0].reflection.status, "COMPLETED", "3.2km >= 3.2km target -> COMPLETED");
+    assert.strictEqual(rows[0].reflection.structuredData.kind, "cardio");
+    assert.strictEqual(rows[0].reflection.structuredData.jenisAktivitas, "Lari", "activity type comes from evidenceSchema, never re-asked");
+    assert.strictEqual(rows[0].reflection.structuredData.titikBerat, "Berat");
+  });
+
+  await test("'Kembali ke Home' returns to the dashboard and the completed quest no longer shows an open card for it", async () => {
+    await page.click("#mvBackHomeSubmitted");
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    assert.strictEqual(await page.locator(`[data-reflect-id="${cardioId2}"]`).count(), 0, "a completed quest must not still show as open");
   });
 
   await browser.close();
