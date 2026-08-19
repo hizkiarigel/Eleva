@@ -4902,7 +4902,7 @@ function beginMovementFlow(id, quest, goalIndex) {
     screen: quest.activeAttempt ? quest.activeAttempt.currentScreen : "preview",
     attempt: quest.activeAttempt || null,
     exitSheetOpen: false, whyOpen: false, reviewError: "", evidenceError: "",
-    submittedResult: null, saving: false,
+    submittedResult: null, saving: false, rpeInfoOpen: new Set(),
   };
 }
 
@@ -5127,11 +5127,167 @@ function wireMovementHandlers() {
   wireMovementEvidenceHandlers();
 }
 
-// Active Session (Strength) and its exit sheet are built out in stage 6 -
-// kept as placeholders here, never left as a stub once that stage lands.
-function movementActiveSessionHTML() { return `<p style="color:var(--muted)">Active Session — coming soon.</p>`; }
-function movementExitSheetHTML() { return ""; }
-function wireMovementActiveHandlers() {}
+// ---- Active Session (Strength) -------------------------------------
+// A real execution engine, not a generic timer: all exercises on one page
+// as expand/collapse accordion cards (first expanded, rest collapsed by
+// default - collapse state is client-only UI, reset on every fresh entry,
+// never meaningfully persisted), directly-editable kg/reps per set, "+
+// Tambah set", and a per-exercise RPE picker revealed once every set is
+// checked. Visually reuses the .gs-* accordion/sets-grid classes META's
+// Training gym-session already established (design handoff's own "Eleva's
+// visual language, not the reference app's" rule, kept consistent across
+// both features) - new data-ms-* attributes keep the handlers separate
+// from gymSession's data-gs-* ones (different state object entirely).
+const RPE_SCALE_INFO = "RPE = Rate of Perceived Exertion, seberapa berat set itu terasa. 5-6 ringan, 7-8 berat tapi terkontrol, 9 hampir gagal di rep terakhir, 10 gagal/nggak sanggup nambah rep.";
+
+function mvEnsureCollapsedState() {
+  const exs = movementFlow?.attempt?.strengthExercises;
+  if (!exs) return;
+  exs.forEach((e, i) => { if (e.collapsed == null) e.collapsed = i !== 0; });
+}
+
+function movementActiveSessionHTML() {
+  mvEnsureCollapsedState();
+  const quest = movementFlow.quest;
+  const exs = movementFlow.attempt.strengthExercises;
+  const cardsHTML = exs.map((ex, i) => {
+    const doneSets = ex.sets.filter((s) => s.done).length;
+    const allDone = doneSets === ex.sets.length;
+    return `
+    <div class="gs-ex-card">
+      <div class="gs-ex-head">
+        <button class="gs-ex-toggle" data-ms-collapse="${i}" aria-label="${ex.collapsed ? "Buka" : "Tutup"}">${ex.collapsed ? "▸" : "▾"}</button>
+        <div class="gs-ex-titles" data-ms-collapse="${i}">
+          <div class="gs-ex-name">${esc(ex.name)}</div>
+          <div class="gs-ex-sub mono" style="${allDone ? "color:var(--growth)" : ""}">${doneSets}/${ex.sets.length} SET SELESAI</div>
+        </div>
+      </div>
+      ${ex.collapsed ? "" : `
+      <div class="gs-set-row gs-set-headrow mono"><span>SET</span><span>KG</span><span>REPS</span><span>✓</span></div>
+      ${ex.sets.map((s, j) => `
+      <div class="gs-set-row">
+        <span class="mono gs-set-num">${j + 1}</span>
+        <input type="number" min="0" step="0.5" inputmode="decimal" data-ms-w="${i}:${j}" value="${esc(s.weightKg)}" placeholder="${ex.targetLoadKg ?? 0}" />
+        <input type="number" min="1" inputmode="numeric" data-ms-r="${i}:${j}" value="${esc(s.reps)}" placeholder="${ex.targetReps}" />
+        <button class="gs-done-btn ${s.done ? "active" : ""}" data-ms-done="${i}:${j}" aria-label="Tandai set selesai">✓</button>
+      </div>`).join("")}
+      <button class="btn-ghost gs-addset" data-ms-addset="${i}">+ Tambah set</button>
+      ${allDone ? `
+      <div class="mv-rpe-block">
+        <div class="mv-rpe-label">RPE <button class="mv-rpe-info" data-ms-rpe-info="${i}" aria-label="Apa itu RPE?">i</button></div>
+        <div class="status-row">
+          ${[5, 6, 7, 8, 9, 10].map((v) => `<button class="status-btn ${ex.rpe === v ? "active" : ""}" data-ms-rpe="${i}:${v}">${v}</button>`).join("")}
+        </div>
+        ${movementFlow.rpeInfoOpen?.has(i) ? `<p class="mv-rpe-explainer">${RPE_SCALE_INFO}</p>` : ""}
+      </div>` : ""}
+      `}
+    </div>`;
+  }).join("");
+  return `
+      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:4px">${esc(movementLabel(quest, true))}</div>
+      <h2 class="fr" style="font-size:19px;margin:0 0 16px">${esc(quest.title)}</h2>
+      ${cardsHTML}
+      <div style="display:flex;gap:12px;margin-top:18px">
+        <button class="btn-ghost rust" id="mvActiveAbandon" style="flex:1">Batalkan Quest</button>
+        <button class="btn-primary" id="mvActiveDone" style="flex:1">Selesai Latihan</button>
+      </div>`;
+}
+
+// Exit confirmation - a real decision (design handoff's own framing), not
+// an overloaded Cancel: three distinct outcomes, three distinct code paths.
+function movementExitSheetHTML() {
+  return `
+    <div class="help-overlay" id="mvExitOverlay">
+      <div class="help-sheet fadeUp" style="text-align:left">
+        <p style="margin:0 0 16px;font-size:14.5px">Mau apa dengan sesi ini?</p>
+        <button class="btn-primary full" id="mvExitResume" style="margin-bottom:10px">Lanjutkan Quest</button>
+        <button class="btn-ghost full" id="mvExitSave" style="margin-bottom:10px;border:1px solid var(--hair)">Akhiri &amp; Simpan Progress</button>
+        <button class="btn-ghost rust full" id="mvExitAbandon" style="border:1px solid var(--rust)">Batalkan Quest</button>
+      </div>
+    </div>`;
+}
+
+function wireMovementActiveHandlers() {
+  if (movementFlow?.screen !== "active") return;
+  const setAt = (ref) => {
+    const [i, j] = String(ref).split(":").map(Number);
+    return movementFlow.attempt.strengthExercises[i]?.sets[j];
+  };
+  document.querySelectorAll("[data-ms-collapse]").forEach((b) => b.addEventListener("click", () => {
+    const ex = movementFlow.attempt.strengthExercises[Number(b.dataset.msCollapse)];
+    if (ex) ex.collapsed = !ex.collapsed;
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-ms-w]").forEach((el) => el.addEventListener("input", (e) => {
+    const s = setAt(el.dataset.msW);
+    if (s) { s.weightKg = e.target.value; mvSaveAttempt({ strengthExercises: movementFlow.attempt.strengthExercises }); }
+  }));
+  document.querySelectorAll("[data-ms-r]").forEach((el) => el.addEventListener("input", (e) => {
+    const s = setAt(el.dataset.msR);
+    if (s) { s.reps = e.target.value; mvSaveAttempt({ strengthExercises: movementFlow.attempt.strengthExercises }); }
+  }));
+  document.querySelectorAll("[data-ms-done]").forEach((b) => b.addEventListener("click", () => {
+    const s = setAt(b.dataset.msDone);
+    if (s) s.done = !s.done;
+    mvSaveAttempt({ strengthExercises: movementFlow.attempt.strengthExercises }, true);
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-ms-addset]").forEach((b) => b.addEventListener("click", () => {
+    const ex = movementFlow.attempt.strengthExercises[Number(b.dataset.msAddset)];
+    if (ex) {
+      // Seeded from the previous set's own numbers, not the plan's target -
+      // the common case is repeating what you just actually did.
+      const last = ex.sets[ex.sets.length - 1];
+      ex.sets.push({ weightKg: last?.weightKg ?? "", reps: last?.reps ?? "", done: false });
+    }
+    mvSaveAttempt({ strengthExercises: movementFlow.attempt.strengthExercises }, true);
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-ms-rpe]").forEach((b) => b.addEventListener("click", () => {
+    const [i, v] = b.dataset.msRpe.split(":").map(Number);
+    const ex = movementFlow.attempt.strengthExercises[i];
+    if (ex) ex.rpe = v;
+    mvSaveAttempt({ strengthExercises: movementFlow.attempt.strengthExercises }, true);
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-ms-rpe-info]").forEach((b) => b.addEventListener("click", () => {
+    const i = Number(b.dataset.msRpeInfo);
+    if (!movementFlow.rpeInfoOpen) movementFlow.rpeInfoOpen = new Set();
+    if (movementFlow.rpeInfoOpen.has(i)) movementFlow.rpeInfoOpen.delete(i); else movementFlow.rpeInfoOpen.add(i);
+    renderDashboard();
+  }));
+  document.getElementById("mvActiveDone")?.addEventListener("click", () => {
+    mvSaveAttempt({ currentScreen: "review" }, true);
+    movementFlow.screen = "review";
+    renderDashboard();
+  });
+  document.getElementById("mvActiveAbandon")?.addEventListener("click", () => {
+    movementFlow.exitSheetOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("mvExitOverlay")?.addEventListener("click", (e) => {
+    if (e.target.id === "mvExitOverlay") { movementFlow.exitSheetOpen = false; renderDashboard(); }
+  });
+  document.getElementById("mvExitResume")?.addEventListener("click", () => {
+    movementFlow.exitSheetOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("mvExitSave")?.addEventListener("click", () => {
+    // "Akhiri & Simpan Progress" - the attempt keeps living with whatever's
+    // logged so far, just navigated forward to Review; endedEarly survives
+    // to submit time (stage 7) to force the ADAPTED outcome regardless of
+    // the usual ratio-based COMPLETED/PARTIAL computation.
+    movementFlow.exitSheetOpen = false;
+    movementFlow.attempt.endedEarly = true;
+    mvSaveAttempt({ endedEarly: true, currentScreen: "review" }, true);
+    movementFlow.screen = "review";
+    renderDashboard();
+  });
+  document.getElementById("mvExitAbandon")?.addEventListener("click", () => {
+    movementFlow.exitSheetOpen = false;
+    mvAbandonAttempt();
+  });
+}
 
 // Combines draftReview's separate Menit/Detik inputs to decimal minutes,
 // same edge (client leaves the server) durasiMenitFromFields already

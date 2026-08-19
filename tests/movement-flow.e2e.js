@@ -199,7 +199,7 @@ async function test(name, fn) {
     assert.ok(await page.locator("text=3×10").count());
     assert.strictEqual((await page.locator("text=Mulai Latihan").count()) > 0, true);
     await page.click("#mvPreStartGo");
-    await page.waitForSelector("text=coming soon", { timeout: 20000 }); // Active Session is a stage-6 stub for now
+    await page.waitForSelector("#mvActiveDone", { timeout: 20000 }); // real Active Session, stage 6
     const { rows } = await sql.query("SELECT quest FROM days WHERE id = $1", [strengthId]);
     const a = rows[0].quest.activeAttempt;
     assert.strictEqual(a.currentScreen, "active");
@@ -287,6 +287,111 @@ async function test(name, fn) {
     await page.click("#mvBackHomeSubmitted");
     await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
     assert.strictEqual(await page.locator(`[data-reflect-id="${cardioId2}"]`).count(), 0, "a completed quest must not still show as open");
+  });
+
+  console.log("E2E: Strength Active Session execution engine");
+  // A fresh, distinctly-titled quest - the earlier strengthId is still
+  // sitting mid-session from the Stage 4 test, and text-based card
+  // selection needs an unambiguous title.
+  const strengthId2 = await seedQuest(3, { ...strengthQuest, title: "Lower Body Strength — Sesi Kedua" });
+
+  async function openStrengthActive(id, cardText) {
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click(`.qhub-card:has-text("${cardText}"):has-text("Strength")`);
+    await page.waitForSelector(`[data-reflect-id="${id}"]`, { timeout: 20000 });
+    await page.click(`[data-reflect-id="${id}"]`);
+    await page.waitForSelector("#mvPreviewStart", { timeout: 20000 });
+    await page.click("#mvPreviewStart");
+    await page.waitForSelector("#mvPreStartGo", { timeout: 20000 });
+    await page.click("#mvPreStartGo");
+    await page.waitForSelector("#mvActiveDone", { timeout: 20000 });
+  }
+
+  await test("first exercise starts expanded, the second collapsed - accordion default", async () => {
+    await openStrengthActive(strengthId2, "Sesi Kedua");
+    assert.ok(await page.locator('[data-ms-w="0:0"]').isVisible(), "first exercise's sets must be visible by default");
+    assert.strictEqual(await page.locator('[data-ms-w="1:0"]').count(), 0, "second exercise's sets must be collapsed by default");
+    await page.click('[data-ms-collapse="1"]');
+    await page.waitForSelector('[data-ms-w="1:0"]', { timeout: 5000 });
+  });
+
+  await test("editing kg/reps and checking a set persists via debounced save, survives a refresh", async () => {
+    await page.fill('[data-ms-w="0:0"]', "40");
+    await page.fill('[data-ms-r="0:0"]', "10");
+    await page.click('[data-ms-done="0:0"]');
+    await page.waitForFunction(() => document.querySelector('[data-ms-done="0:0"]')?.classList.contains("active"));
+    await page.waitForTimeout(700); // clear the 500ms debounce window
+    const { rows } = await sql.query("SELECT quest FROM days WHERE id = $1", [strengthId2]);
+    const s0 = rows[0].quest.activeAttempt.strengthExercises[0].sets[0];
+    assert.strictEqual(Number(s0.weightKg), 40);
+    assert.strictEqual(Number(s0.reps), 10);
+    assert.strictEqual(s0.done, true);
+  });
+
+  await test("'+ Tambah set' seeds a new row from the LAST set's own numbers (not set 0, which is only edited above)", async () => {
+    await page.fill('[data-ms-w="0:2"]', "45");
+    await page.fill('[data-ms-r="0:2"]', "8");
+    await page.click('[data-ms-addset="0"]');
+    await page.waitForSelector('[data-ms-w="0:3"]', { timeout: 5000 });
+    assert.strictEqual(await page.inputValue('[data-ms-w="0:3"]'), "45");
+    assert.strictEqual(await page.inputValue('[data-ms-r="0:3"]'), "8");
+  });
+
+  await test("RPE picker only reveals once every set in that exercise is checked, 'i' shows the plain-language explainer", async () => {
+    assert.strictEqual(await page.locator('[data-ms-rpe="0:7"]').count(), 0, "RPE must stay hidden until all sets are done");
+    for (const j of [1, 2, 3]) {
+      await page.click(`[data-ms-done="0:${j}"]`);
+    }
+    await page.waitForSelector('[data-ms-rpe="0:7"]', { timeout: 5000 });
+    await page.click('[data-ms-rpe-info="0"]');
+    await page.waitForSelector("text=Rate of Perceived Exertion", { timeout: 5000 });
+    await page.click('[data-ms-rpe="0:7"]');
+    await page.waitForFunction(() => document.querySelector('[data-ms-rpe="0:7"]')?.classList.contains("active"));
+  });
+
+  await test("exit sheet: 'Lanjutkan Quest' just closes the sheet, no network call, nothing changes", async () => {
+    await page.click("#mvActiveAbandon");
+    await page.waitForSelector("#mvExitResume", { timeout: 5000 });
+    await page.click("#mvExitResume");
+    await page.waitForSelector("#mvExitResume", { state: "hidden", timeout: 5000 });
+    const { rows } = await sql.query("SELECT quest FROM days WHERE id = $1", [strengthId2]);
+    assert.ok(rows[0].quest.activeAttempt, "attempt must still exist after Lanjutkan Quest");
+  });
+
+  await test("exit sheet: 'Akhiri & Simpan Progress' navigates to Review keeping partial evidence, marks endedEarly", async () => {
+    await page.click("#mvActiveAbandon");
+    await page.waitForSelector("#mvExitSave", { timeout: 5000 });
+    await page.click("#mvExitSave");
+    await page.waitForSelector("text=coming soon", { timeout: 20000 }); // Strength's Review is a stage-7 stub for now
+    const { rows } = await sql.query("SELECT quest FROM days WHERE id = $1", [strengthId2]);
+    const a = rows[0].quest.activeAttempt;
+    assert.strictEqual(a.currentScreen, "review");
+    assert.strictEqual(a.endedEarly, true);
+    assert.strictEqual(a.strengthExercises[0].sets[0].done, true, "logged evidence must be kept, not discarded");
+  });
+
+  await test("exit sheet: 'Batalkan Quest' (on strengthId, still lingering mid-session from the Pre-Start test) discards the whole attempt, writes no reflection, quest stays retryable", async () => {
+    // Reuses strengthId rather than seeding a new quest - the home hub caps
+    // display at 3 open quests, and cardioId/strengthId/strengthId2 already
+    // fill that (a 4th, freshly-seeded quest would never appear in the DOM).
+    // strengthId's own attempt has sat untouched at currentScreen "active"
+    // since the Pre-Start test far above, so reopening it resumes directly
+    // there (no distinct card text needed - "Lower Body Strength" with no
+    // "Sesi" suffix, unambiguous against strengthId2's "... — Sesi Kedua").
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click('.qhub-card:has-text("Lower Body Strength"):not(:has-text("Sesi"))');
+    await page.waitForSelector(`[data-reflect-id="${strengthId}"]`, { timeout: 20000 });
+    await page.click(`[data-reflect-id="${strengthId}"]`);
+    await page.waitForSelector("#mvActiveAbandon", { timeout: 20000 });
+    await page.click("#mvActiveAbandon");
+    await page.waitForSelector("#mvExitAbandon", { timeout: 5000 });
+    await page.click("#mvExitAbandon");
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    const { rows } = await sql.query("SELECT quest, reflection FROM days WHERE id = $1", [strengthId]);
+    assert.strictEqual(rows[0].quest.activeAttempt, null, "activeAttempt must be cleared");
+    assert.strictEqual(rows[0].reflection, null, "Batalkan Quest must never write a reflection");
   });
 
   await browser.close();
