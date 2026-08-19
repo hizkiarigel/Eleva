@@ -707,6 +707,26 @@ let listeningDiagnosticFlow = null;
 // "Body" META box is showing (tapped but no kind chosen yet). Reset after
 // /api/meta/start succeeds or the user backs out.
 let metaBodyPicking = false;
+// Movement→Training spec item 2: Recovery (and fresh-start Nutrition) get
+// the same confirm-before-create step Movement's kind picker already gives -
+// "recovery" | "nutrition" while the inline confirm card is showing, null
+// otherwise. Reset after /api/meta/start succeeds or the user backs out -
+// deliberately the same lifecycle pattern as metaBodyPicking above, not a
+// new mechanism.
+let metaSomaConfirm = null;
+// Training spec: the fixed exercise catalog ({ exercises, muscleGroups,
+// muscleGroupLabels } from GET /api/exercise-catalog), fetched lazily the
+// first time a multi-exercise Training session form opens and cached for
+// the rest of the page lifetime - static server data, no reason to refetch.
+let exerciseCatalog = null;
+// Training spec: in-progress multi-exercise workout log (client-side draft
+// until the single submit persists it as reflection structuredData). null
+// when no gym-session form is active. exercises[i].sets[j] keeps raw input
+// strings while typing (same reason structForm does) - converted to numbers
+// only at the submit edge.
+// { exercises: [{ exerciseId, name, muscleGroup, collapsed, sets: [{ weightKg, reps, done }] }],
+//   pickerOpen, pickerQuery, pickerGroup }
+let gymSession = null;
 let metaError = "";
 // Hint-card dismissal persistence: this app has no localStorage precedent
 // anywhere else (help sheets are pure in-memory, reset on reload) - the
@@ -3104,6 +3124,15 @@ function paceLabel(durasiMenit, jarakKm) {
 
 function structSummary(sd) {
   if (!sd) return "";
+  // Training multi-exercise session - compact one-liner for history rows;
+  // the result screen adds the full evaluation block (gymSessionEvalHTML)
+  // on top of this.
+  if (sd.kind === "gym-session") {
+    const exs = sd.exercises || [];
+    const doneSets = exs.reduce((n, ex) => n + (ex.sets || []).filter((s) => s.done).length, 0);
+    const names = exs.map((ex) => ex.name).slice(0, 3).join(", ");
+    return `${exs.length} gerakan · ${doneSets} set selesai${names ? ` · ${names}${exs.length > 3 ? ", ..." : ""}` : ""}`;
+  }
   if (sd.kind === "gym") {
     return `${sd.gerakan} · ${sd.set}×${sd.repetisi}${sd.bebanKg != null ? ` @ ${sd.bebanKg}kg` : ""} · titik gagal di ${sd.titikGagal}`;
   }
@@ -4349,6 +4378,7 @@ function completedResultCardHTML(r) {
         ${r.status === "done" ? "SELESAI" : r.status === "partial" ? "SEBAGIAN" : "DILEWATI"}
       </div>
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
+      ${r.structuredData?.kind === "gym-session" ? gymSessionEvalHTML(r.structuredData.evaluation) : ""}
       ${r.jobApplication ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(jobApplicationSummary(r.jobApplication))}</div>` : ""}
       ${r.practiceTest ? practiceTestResultHTML(r.practiceTest) : ""}
       ${r.jobMatch ? jobMatchResultHTML(r.jobMatch) : ""}
@@ -4648,7 +4678,7 @@ function metaRealmToolsHTML(realm, s) {
   const counts = s.metaSessionCounts || { lingua: 0, somaActivity: 0, somaNutrition: 0, labora: 0 };
   if (realm === "soma") {
     return [
-      realmProgressCardHTML("#63E38B", "soma", 24, "Movement", `Cardio & gym · ${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="activity"`),
+      realmProgressCardHTML("#63E38B", "soma", 24, "Training", `Cardio & gym · ${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="activity"`),
       realmProgressCardHTML("#63E38B", "soma", 24, "Recovery", `Tidur, hidrasi, pemulihan · ${counts.somaActivity} sesi minggu ini`, metaSessionPct(counts.somaActivity), `data-soma-mode="recovery"`),
       realmProgressCardHTML("#63E38B", "soma", 24, "Nutrition", `${counts.somaNutrition} sesi minggu ini`, metaSessionPct(counts.somaNutrition), `data-soma-mode="nutrition"`),
     ].join("");
@@ -4708,6 +4738,17 @@ function metaRealmDetailHTML(realm, s) {
           </div>
         </div>
         <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
+      </div>` : ""}
+      ${metaSomaConfirm ? `
+      <div class="quest-card fadeUp" style="margin-top:16px">
+        <div class="field">
+          <label>${metaSomaConfirm === "recovery" ? "Mulai sesi Recovery?" : "Mulai tracking Nutrition?"}</label>
+          <p style="color:var(--muted);font-size:13px;margin:6px 0 0">${metaSomaConfirm === "recovery"
+            ? "Catat tidur, hidrasi, dan pemulihanmu hari ini — sesi bebas, tidak terikat goal manapun."
+            : "Catat makanmu hari ini — sesi bebas, tidak terikat goal manapun."}</p>
+        </div>
+        <button class="btn-primary full" id="metaSomaConfirmBtn">${metaSomaConfirm === "recovery" ? "Mulai sesi Recovery" : "Mulai tracking Nutrition"}</button>
+        <button class="btn-ghost" id="metaSomaCancel" style="margin-top:10px">← Batal</button>
       </div>` : ""}
     </div>`;
 }
@@ -4777,8 +4818,21 @@ function metaScreenHTML(s, allOpenQuests) {
 function beginStructuredOrReflectiveFlow(id, quest) {
   reflectTarget = id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
   structForm = {}; reflectError = ""; unableQuestId = null;
+  gymSession = null;
   recordMode = quest?.completionType === "structured-physical" || quest?.statFocus === "body";
   const schema = quest?.evidenceSchema;
+  // Training spec: quests created with the gymSession flag (new META gym
+  // sessions, see /api/meta/start) get the multi-exercise workout log.
+  // Checked before every schema/structuredKind fallback so a flagged quest
+  // can never drop into the legacy single-exercise form - while legacy
+  // in-flight gym quests (no flag) keep taking the cascade below untouched.
+  if (quest?.gymSession) {
+    structKind = "gym-session";
+    structKindAuto = true;
+    gymSession = { exercises: [], pickerOpen: false, pickerQuery: "", pickerGroup: null };
+    ensureExerciseCatalog();
+    return;
+  }
   if (schema?.metricType === "distance") {
     structKind = "cardio";
     structKindAuto = true;
@@ -4803,6 +4857,19 @@ function beginStructuredOrReflectiveFlow(id, quest) {
   }
 }
 
+// Training spec: lazy one-time fetch of the fixed exercise catalog. Fire-
+// and-forget from the sync flow-setup path - the workout log's picker shows
+// a loading line until this lands, then the re-render picks the data up.
+// Failure is non-fatal (retried on the next picker open), never blocks the
+// session form itself.
+async function ensureExerciseCatalog() {
+  if (exerciseCatalog) return;
+  try {
+    exerciseCatalog = await api("/api/exercise-catalog");
+    renderDashboard();
+  } catch (e) { /* picker keeps showing the loading line; next open retries */ }
+}
+
 // SOMA Nutrition Part B: opens the Log Meal / Nutrition flow for a given
 // nutrition-log quest (fresh or resumed) - fetches today's entries for it
 // so a resumed session shows real prior progress, not an empty slate.
@@ -4822,6 +4889,115 @@ async function openNutritionFlow(day) {
     const { entries } = await api(`/api/nutrition/entries?questId=${day.id}`);
     nutritionFlow.entries = entries;
   } catch (e) { /* non-critical - resume with an empty list rather than block the flow */ }
+}
+
+// ---- Training multi-exercise session (Movement→Training spec) ----------
+// The workout-log form: multiple exercises per session, each with its own
+// sets grid, one primary submit for the whole session (reflectFormHTML's
+// existing #submitReflect - no per-exercise submit). Rendered through the
+// same structFieldsHTML slot the single-exercise gym form uses, in Eleva's
+// own visual language (the reference app is a flow reference, not a style
+// reference - same rule as Nutrition/Yazio).
+const MUSCLE_LABELS_FALLBACK = { chest: "Dada", back: "Punggung", legs: "Kaki", shoulders: "Bahu", arms: "Lengan", core: "Core" };
+function muscleLabel(g) {
+  return exerciseCatalog?.muscleGroupLabels?.[g] || MUSCLE_LABELS_FALLBACK[g] || g;
+}
+const EQUIPMENT_LABELS = { barbell: "Barbell", dumbbell: "Dumbbell", machine: "Mesin", bodyweight: "Tanpa alat" };
+
+function gymPickListHTML() {
+  if (!exerciseCatalog) return `<p style="color:var(--muted);font-size:13px;margin:8px 0 0">Memuat katalog gerakan...</p>`;
+  const q = (gymSession.pickerQuery || "").trim().toLowerCase();
+  const list = exerciseCatalog.exercises.filter((e) =>
+    (!gymSession.pickerGroup || e.primaryMuscleGroup === gymSession.pickerGroup) &&
+    (!q || e.name.toLowerCase().includes(q)));
+  if (!list.length) return `<p style="color:var(--muted);font-size:13px;margin:8px 0 0">Tidak ada gerakan yang cocok.</p>`;
+  return list.map((e) => `
+    <button class="gs-pick-row" data-gs-pick="${esc(e.id)}">
+      <span class="gs-pick-name">${esc(e.name)}</span>
+      <span class="gs-pick-sub mono">${esc(muscleLabel(e.primaryMuscleGroup))} · ${esc(EQUIPMENT_LABELS[e.equipment] || e.equipment)}</span>
+    </button>`).join("");
+}
+
+function addGymExercise(exerciseId) {
+  const entry = exerciseCatalog?.exercises.find((e) => e.id === exerciseId);
+  if (!entry || !gymSession) return;
+  gymSession.exercises.push({
+    exerciseId: entry.id, name: entry.name, muscleGroup: entry.primaryMuscleGroup,
+    collapsed: false, sets: [{ weightKg: "", reps: "", done: false }],
+  });
+  gymSession.pickerOpen = false;
+  gymSession.pickerQuery = "";
+  gymSession.pickerGroup = null;
+}
+
+// The picker's search input filters without a full re-render (a re-render
+// would drop keyboard focus mid-word - same constraint the data-sf inputs
+// document) - only the list container is rewritten, then its fresh pick
+// buttons are re-bound here. renderDashboard's own wiring uses this too so
+// the binding logic exists exactly once.
+function wireGymPickButtons() {
+  document.querySelectorAll("[data-gs-pick]").forEach((b) => b.addEventListener("click", () => {
+    addGymExercise(b.dataset.gsPick);
+    renderDashboard();
+  }));
+}
+
+function gymSessionCardsHTML() {
+  const doneSets = (ex) => ex.sets.filter((s) => s.done).length;
+  const cardsHTML = gymSession.exercises.map((ex, i) => `
+    <div class="gs-ex-card">
+      <div class="gs-ex-head">
+        <button class="gs-ex-toggle" data-gs-collapse="${i}" aria-label="${ex.collapsed ? "Buka" : "Tutup"}">${ex.collapsed ? "▸" : "▾"}</button>
+        <div class="gs-ex-titles" data-gs-collapse="${i}">
+          <div class="gs-ex-name">${esc(ex.name)}</div>
+          <div class="gs-ex-sub mono">${esc(muscleLabel(ex.muscleGroup).toUpperCase())} · ${doneSets(ex)}/${ex.sets.length} SET SELESAI</div>
+        </div>
+        <button class="gs-ex-remove" data-gs-remove="${i}" aria-label="Hapus gerakan">×</button>
+      </div>
+      ${ex.collapsed ? "" : `
+      <div class="gs-set-row gs-set-headrow mono"><span>SET</span><span>KG</span><span>REPS</span><span>✓</span></div>
+      ${ex.sets.map((s, j) => `
+      <div class="gs-set-row">
+        <span class="mono gs-set-num">${j + 1}</span>
+        <input type="number" min="0" step="0.5" inputmode="decimal" data-gs-w="${i}:${j}" value="${esc(s.weightKg)}" placeholder="0" />
+        <input type="number" min="1" inputmode="numeric" data-gs-r="${i}:${j}" value="${esc(s.reps)}" placeholder="12" />
+        <button class="gs-done-btn ${s.done ? "active" : ""}" data-gs-done="${i}:${j}" aria-label="Tandai set selesai">✓</button>
+      </div>`).join("")}
+      <button class="btn-ghost gs-addset" data-gs-addset="${i}">+ Tambah set</button>`}
+    </div>`).join("");
+
+  const pickerHTML = !gymSession.pickerOpen ? "" : `
+    <div class="gs-picker">
+      <input type="text" id="gsSearch" placeholder="Cari gerakan..." value="${esc(gymSession.pickerQuery)}" maxlength="60" />
+      <div class="gs-group-chips">
+        <button class="kondisi-chip ${!gymSession.pickerGroup ? "selected" : ""}" data-gs-group="">Semua</button>
+        ${(exerciseCatalog?.muscleGroups || Object.keys(MUSCLE_LABELS_FALLBACK)).map((g) =>
+          `<button class="kondisi-chip ${gymSession.pickerGroup === g ? "selected" : ""}" data-gs-group="${esc(g)}">${esc(muscleLabel(g))}</button>`).join("")}
+      </div>
+      <div class="gs-pick-list" id="gsPickList">${gymPickListHTML()}</div>
+      <button class="btn-ghost" id="gsPickerCancel">← Batal</button>
+    </div>`;
+
+  return `
+      ${gymSession.exercises.length === 0 && !gymSession.pickerOpen
+        ? `<p style="color:var(--muted);font-size:13px;margin:0 0 10px">Susun sesi latihanmu — tambah gerakan dari katalog, lalu catat set demi set.</p>` : ""}
+      ${cardsHTML}
+      ${pickerHTML}
+      ${gymSession.pickerOpen ? "" : `<button class="btn-ghost gs-add-exercise" id="gsAddExercise">+ Tambah gerakan</button>`}`;
+}
+
+// End-of-session evaluation block for the result screen - the three
+// numbers the server computed from the fixed catalog (structured.js's
+// evaluateGymSession): total volume, estimated calories, dominant muscle
+// group(s) (ties list both, per the spec - never forced to one winner).
+function gymSessionEvalHTML(ev) {
+  if (!ev) return "";
+  return `
+    <div class="gs-eval">
+      <div class="gs-eval-item"><div class="gs-eval-num">${esc(ev.totalVolumeKg)}</div><div class="gs-eval-label mono">VOLUME (KG)</div></div>
+      <div class="gs-eval-item"><div class="gs-eval-num">${esc(ev.estimatedCalories)}</div><div class="gs-eval-label mono">± KALORI</div></div>
+      <div class="gs-eval-item"><div class="gs-eval-num gs-eval-muscle">${esc((ev.dominantMuscleGroups || []).map(muscleLabel).join(" + ") || "—")}</div><div class="gs-eval-label mono">OTOT DOMINAN</div></div>
+    </div>`;
 }
 
 function renderDashboard() {
@@ -4944,7 +5120,7 @@ function renderDashboard() {
           ${["Tidak ada", "Ringan", "Sedang", "Berat"].map((v) => `<button class="status-btn ${structForm.levelNyeri === v ? "active" : ""}" data-nyeri="${v}">${v}</button>`).join("")}
         </div>
       </div>`;
-  const structFieldsHTML = !showStructFields ? "" : structKind === "cardio" ? cardioFieldsHTML : structKind === "recovery" ? recoveryFieldsHTML : gymFieldsHTML;
+  const structFieldsHTML = !showStructFields ? "" : structKind === "cardio" ? cardioFieldsHTML : structKind === "recovery" ? recoveryFieldsHTML : structKind === "gym-session" && gymSession ? gymSessionCardsHTML() : gymFieldsHTML;
 
   // Task 7d DoD is about structured-physical quests specifically: since
   // normalizeEvidenceSchema now guarantees every such quest carries a usable
@@ -5216,9 +5392,27 @@ function renderDashboard() {
     }
     if (mode === "activity") {
       metaBodyPicking = true;
+      metaSomaConfirm = null;
       renderDashboard();
       return;
     }
+    // Movement→Training spec item 2: Recovery (and fresh-start Nutrition)
+    // used to POST /api/meta/start right here on the first tap - a quest
+    // existed server-side before the user saw any screen at all. Now they
+    // get the same interstitial Movement's kind picker already provides:
+    // show a confirm card first, create nothing until #metaSomaConfirmBtn.
+    metaSomaConfirm = mode === "recovery" ? "recovery" : "nutrition";
+    metaBodyPicking = false;
+    renderDashboard();
+  }));
+  // The confirmed start - this is where the old [data-soma-mode] immediate-
+  // start logic moved, unchanged except for the /api/state refresh (the
+  // same stale-appState bug the gym kind picker had: renderDashboard()
+  // without a refresh means the reflect form's allOpenQuests lookup misses
+  // the just-created quest and silently renders nothing).
+  document.getElementById("metaSomaConfirmBtn")?.addEventListener("click", async () => {
+    const mode = metaSomaConfirm;
+    if (!mode) return;
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
       if (mode === "recovery") {
@@ -5230,12 +5424,16 @@ function renderDashboard() {
         const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "nutrition" } });
         await openNutritionFlow(quest);
       }
+      appState = await api("/api/state");
+      metaSomaConfirm = null;
       activeScreen = "home";
     } catch (e) {
+      metaSomaConfirm = null;
       metaError = e.message;
     }
     renderDashboard();
-  }));
+  });
+  document.getElementById("metaSomaCancel")?.addEventListener("click", () => { metaSomaConfirm = null; renderDashboard(); });
   // LINGUA's Reading row starts the generic AI-quiz Practice Test flow with
   // the track PRESET (skips straight to practiceTestFlow's "track" step
   // instead of asking kind first). The Listening row now launches the round
@@ -5283,6 +5481,7 @@ function renderDashboard() {
   document.getElementById("metaRealmBack")?.addEventListener("click", () => {
     metaRealmOpen = null;
     metaBodyPicking = false;
+    metaSomaConfirm = null;
     renderDashboard();
   });
   // META target-recommendation follow-up: the founder explicitly wants a
@@ -5340,12 +5539,16 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
       const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "body", kind } });
-      reflectTarget = quest.id; reflectOpen = true; reflectStatus = "done"; reflectText = "";
-      structForm = {}; reflectError = ""; unableQuestId = null;
-      recordMode = true;
-      // Mirrors the [data-reflect-id] handler's structuredKind fallback cascade.
-      structKind = kind === "gym" ? "gym-alat" : kind;
-      structKindAuto = true;
+      // The reflect form looks the quest up in appState.openQuests
+      // (targetDay/reflectTarget) - without this refresh the just-created
+      // quest isn't there yet, targetDay comes back null, and the record
+      // form silently fails to render (looked like "selecting Gym drops
+      // back to Home"). Same pattern data-meta-goal-submit already uses.
+      appState = await api("/api/state");
+      // beginStructuredOrReflectiveFlow reads quest.gymSession to route new
+      // gym quests into the multi-exercise Training log (Training spec) -
+      // cardio and legacy quests take the same single-form cascade as before.
+      beginStructuredOrReflectiveFlow(quest.id, quest.quest);
       metaBodyPicking = false;
       activeScreen = "home";
     } catch (e) {
@@ -5846,6 +6049,70 @@ function renderDashboard() {
       }
     });
   });
+  // Training multi-exercise session wiring. Weight/reps inputs write straight
+  // into gymSession state with NO re-render (focus would be lost mid-typing,
+  // same constraint as the data-sf inputs above); structural taps (add/remove/
+  // done/collapse/picker) re-render normally.
+  if (gymSession) {
+    const setAt = (ref) => {
+      const [i, j] = String(ref).split(":").map(Number);
+      return gymSession.exercises[i]?.sets[j];
+    };
+    document.getElementById("gsAddExercise")?.addEventListener("click", () => {
+      gymSession.pickerOpen = true;
+      ensureExerciseCatalog();
+      renderDashboard();
+    });
+    document.getElementById("gsPickerCancel")?.addEventListener("click", () => {
+      gymSession.pickerOpen = false;
+      renderDashboard();
+    });
+    document.getElementById("gsSearch")?.addEventListener("input", (e) => {
+      gymSession.pickerQuery = e.target.value;
+      const listEl = document.getElementById("gsPickList");
+      if (listEl) {
+        listEl.innerHTML = gymPickListHTML();
+        wireGymPickButtons();
+      }
+    });
+    document.querySelectorAll("[data-gs-group]").forEach((b) => b.addEventListener("click", () => {
+      gymSession.pickerGroup = b.dataset.gsGroup || null;
+      renderDashboard();
+    }));
+    wireGymPickButtons();
+    document.querySelectorAll("[data-gs-collapse]").forEach((b) => b.addEventListener("click", () => {
+      const ex = gymSession.exercises[Number(b.dataset.gsCollapse)];
+      if (ex) ex.collapsed = !ex.collapsed;
+      renderDashboard();
+    }));
+    document.querySelectorAll("[data-gs-remove]").forEach((b) => b.addEventListener("click", () => {
+      gymSession.exercises.splice(Number(b.dataset.gsRemove), 1);
+      renderDashboard();
+    }));
+    document.querySelectorAll("[data-gs-addset]").forEach((b) => b.addEventListener("click", () => {
+      const ex = gymSession.exercises[Number(b.dataset.gsAddset)];
+      // A new set starts prefilled from the previous row - the common case
+      // is same weight, same target reps (how the reference apps behave too).
+      if (ex) {
+        const last = ex.sets[ex.sets.length - 1];
+        ex.sets.push({ weightKg: last?.weightKg ?? "", reps: last?.reps ?? "", done: false });
+      }
+      renderDashboard();
+    }));
+    document.querySelectorAll("[data-gs-done]").forEach((b) => b.addEventListener("click", () => {
+      const s = setAt(b.dataset.gsDone);
+      if (s) s.done = !s.done;
+      renderDashboard();
+    }));
+    document.querySelectorAll("[data-gs-w]").forEach((el) => el.addEventListener("input", (e) => {
+      const s = setAt(el.dataset.gsW);
+      if (s) s.weightKg = e.target.value;
+    }));
+    document.querySelectorAll("[data-gs-r]").forEach((el) => el.addEventListener("input", (e) => {
+      const s = setAt(el.dataset.gsR);
+      if (s) s.reps = e.target.value;
+    }));
+  }
   document.getElementById("submitReflect")?.addEventListener("click", async () => {
     root.innerHTML = spinnerHTML("Menyimpan refleksi...");
     try {
@@ -5856,8 +6123,28 @@ function renderDashboard() {
         // never sends a weight, even one left over from switching variants.
         // Task 7d: "recovery" is its own third kind (rest/hydration/nutrition
         // fields, see structFieldsHTML) - not a gym variant.
-        const kind = structKind === "cardio" ? "cardio" : structKind === "recovery" ? "recovery" : "gym";
-        body.structuredData = { ...structForm, kind };
+        // Training spec: "gym-session" carries the multi-exercise log from
+        // gymSession state instead of structForm - raw input strings become
+        // numbers here, at the one edge where they leave the client (same
+        // convention as cardio's Menit/Detik combine below). Only ids and
+        // raw set numbers are sent - names/muscle groups/calories all come
+        // from the server's own catalog.
+        const kind = structKind === "cardio" ? "cardio" : structKind === "recovery" ? "recovery" : structKind === "gym-session" ? "gym-session" : "gym";
+        if (structKind === "gym-session") {
+          body.structuredData = {
+            kind,
+            exercises: (gymSession?.exercises || []).map((ex) => ({
+              exerciseId: ex.exerciseId,
+              sets: ex.sets.map((s) => ({
+                weightKg: s.weightKg === "" || s.weightKg == null ? null : Number(s.weightKg),
+                reps: s.reps === "" || s.reps == null ? null : Number(s.reps),
+                done: Boolean(s.done),
+              })),
+            })),
+          };
+        } else {
+          body.structuredData = { ...structForm, kind };
+        }
         if (structKind === "gym-badan") delete body.structuredData.bebanKg;
         // Task 7c: durasi is typed as separate Menit/Detik fields - combined
         // to decimal minutes here, at the one edge where it leaves the
@@ -5889,7 +6176,7 @@ function renderDashboard() {
       };
       shortfallReasonPicked = null;
       reflectOpen = false; reflectTarget = null; reflectText = ""; structForm = {}; reflectError = "";
-      recordMode = false; structKind = null; structKindAuto = false;
+      recordMode = false; structKind = null; structKindAuto = false; gymSession = null;
       targetChoice = null; targetManualForm = {}; targetError = "";
       renderDashboard();
     } catch (e) {
