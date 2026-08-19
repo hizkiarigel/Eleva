@@ -107,5 +107,6 @@ function cleanJobMatchResult(raw) {
 
 module.exports = {
   MATCH_STATUSES, ACCEPTED_CV_MIMES, ACCEPTED_IMAGE_MIMES, DOCX_MIME, QUALIFIED_THRESHOLD,
+  MAX_FILE_BASE64_CHARS,
   prepareArtifactContent, buildCvContentBlocks, buildImageBlocks, cleanJobMatchResult,
 };

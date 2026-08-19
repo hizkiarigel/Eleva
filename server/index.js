@@ -763,7 +763,7 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     // been open.
     const day = await db.getQuestById(req.userId, questId);
     if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
-    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah direfleksikan." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah direfleksikan.", alreadyReflected: true });
 
     const trimmedText = (text || "").trim();
     const inCrisis = safety.detectCrisis(trimmedText);

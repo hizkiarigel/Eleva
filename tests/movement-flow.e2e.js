@@ -486,6 +486,64 @@ async function test(name, fn) {
     assert.strictEqual(rows[0].reflection.status, "COMPLETED", "every set met its target reps -> COMPLETED, no endedEarly involved");
   });
 
+  console.log("E2E: bug fix - photo required for Screenshot tracker/Foto treadmill (bugreportkirimbuktiaktivitas.pdf, issues 1+2)");
+  const cardioId3 = await seedQuest(2, { ...cardioQuest, title: "Lari 3.2 km — Sesi Ketiga" });
+  await test("picking 'Screenshot tracker' shows a file input; Kirim Bukti blocks until a file is attached, then submit succeeds without persisting the photo bytes", async () => {
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click('.qhub-card:has-text("Sesi Ketiga")');
+    await page.waitForSelector(`[data-reflect-id="${cardioId3}"]`, { timeout: 20000 });
+    await page.click(`[data-reflect-id="${cardioId3}"]`);
+    await page.waitForSelector("#mvPreviewStart", { timeout: 20000 });
+    await page.click("#mvPreviewStart");
+    await page.waitForSelector("#mvPreStartGo", { timeout: 20000 });
+    await page.click("#mvPreStartGo");
+    await page.waitForSelector("#mvReviewDone", { timeout: 20000 });
+    await page.fill("#mvDurMin", "20");
+    await page.fill("#mvDurSec", "00");
+    await page.fill("#mvDistance", "3.5");
+    await page.click('[data-mv-effort="Ringan"]');
+    await page.click("#mvReviewDone");
+    await page.waitForSelector("#mvKirimBukti", { timeout: 20000 });
+    await page.click('[data-mv-evidence="tracker-screenshot"]');
+    await page.waitForSelector("#mvEvidencePhoto", { timeout: 5000 });
+    await page.click("#mvKirimBukti");
+    await page.waitForSelector("text=Lampirkan foto/screenshot dulu.", { timeout: 5000 });
+    await page.setInputFiles("#mvEvidencePhoto", {
+      name: "tracker.png", mimeType: "image/png",
+      buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+    });
+    await page.waitForSelector("text=tracker.png", { timeout: 5000 });
+    await page.click("#mvKirimBukti");
+    await page.waitForSelector("text=Bukti terkirim!", { timeout: 20000 });
+    const { rows } = await sql.query("SELECT reflection FROM days WHERE id = $1", [cardioId3]);
+    assert.strictEqual(rows[0].reflection.structuredData.evidenceChoice, "tracker-screenshot");
+    assert.strictEqual(rows[0].reflection.structuredData.evidencePhoto, undefined, "photo bytes must never be persisted (buang setelah submit)");
+    assert.ok(!JSON.stringify(rows[0].reflection).includes("iVBORw0KGgo"), "raw image base64 must never land in the DB");
+  });
+
+  console.log("E2E: bug fix - proactive already-reflected check (bugreportkirimbuktiaktivitas.pdf, issue 3)");
+  const cardioId4 = await seedQuest(2, { ...cardioQuest, title: "Lari 3.2 km — Sesi Keempat" });
+  await test("opening a quest that was reflected elsewhere (e.g. another tab) shows a graceful 'sudah selesai' state, not a dead-end error", async () => {
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click('.qhub-card:has-text("Sesi Keempat")');
+    await page.waitForSelector(`[data-reflect-id="${cardioId4}"]`, { timeout: 20000 });
+    // Simulate the quest finishing on another device/tab between page load
+    // and the tap - a direct DB write, exactly like a second session's own
+    // POST /api/reflection would leave behind.
+    await sql.query(
+      `UPDATE days SET reflection = $2 WHERE id = $1`,
+      [cardioId4, { status: "COMPLETED", text: "", structuredData: { kind: "cardio" } }]
+    );
+    await page.click(`[data-reflect-id="${cardioId4}"]`);
+    await page.waitForSelector("text=Quest ini sudah selesai", { timeout: 20000 });
+    assert.strictEqual(await page.locator("#mvPreviewStart").count(), 0, "must never open Preview on an already-reflected quest");
+    await page.click("#mvBackHomeSubmitted");
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    assert.strictEqual(await page.locator(`[data-reflect-id="${cardioId4}"]`).count(), 0, "the now-reflected quest must not still show as an open card");
+  });
+
   await browser.close();
   await sql.end();
   server.kill();

@@ -889,6 +889,7 @@ async function api(path, opts) {
   if (!res.ok) {
     const err = new Error(data.error || "Request gagal");
     err.status = res.status;
+    err.data = data;
     throw err;
   }
   return data;
@@ -4910,6 +4911,33 @@ function beginMovementFlow(id, quest, goalIndex) {
   };
 }
 
+// Bug fix (bugreportkirimbuktiaktivitas.pdf, issue 3): a graceful terminal
+// state for a Movement quest that turns out to already be reflected - either
+// caught proactively (the [data-reflect-id] handler's fresh-state check) or
+// reactively (mvSubmitCardio/mvSubmitStrength's catch block, when the
+// server's alreadyReflected flag comes back). No attempt/screens built, just
+// enough of movementFlow's shape for renderMovementFlow to dispatch it.
+function mvShowAlreadyReflected(id, quest) {
+  movementFlow = {
+    questId: id, quest, goalIndex: null,
+    screen: "already-reflected",
+    attempt: null,
+    exitSheetOpen: false, whyOpen: false, reviewError: "", evidenceError: "",
+    submittedResult: null, saving: false, rpeInfoOpen: new Set(),
+    preStartKondisi: null,
+  };
+}
+
+function movementAlreadyReflectedHTML() {
+  return `
+    <div style="text-align:center;padding:20px 0 0">
+      <div style="width:56px;height:56px;border-radius:50%;border:1px solid var(--hair-strong);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;color:var(--muted);font-size:24px">✓</div>
+      <h2 class="fr" style="font-size:19px;margin:0 0 6px">Quest ini sudah selesai</h2>
+      <p style="color:var(--muted);font-size:13.5px;margin:0 0 22px">Sepertinya kamu sudah menyelesaikan quest ini sebelumnya.</p>
+    </div>
+    <button class="btn-primary full" id="mvBackHomeSubmitted">Kembali ke Home</button>`;
+}
+
 // Debounced incremental save (design handoff's persistence requirement) -
 // mirrors the onboarding draft's save/saveNow split (see its own comment
 // near saveOnboardingDraft): plain typing debounces, screen-transition
@@ -5064,13 +5092,14 @@ function movementScreenBodyHTML() {
   if (screen === "review") return movementReviewHTML();
   if (screen === "evidence") return movementEvidenceHTML();
   if (screen === "submitted") return movementSubmittedHTML();
+  if (screen === "already-reflected") return movementAlreadyReflectedHTML();
   return "";
 }
 
 function renderMovementFlow() {
   const screen = movementFlow.screen;
-  // Submitted is a terminal ack, same "no back arrow" posture as every
-  // other completedResult-style screen in this app.
+  // Submitted/already-reflected are terminal acks, same "no back arrow"
+  // posture as every other completedResult-style screen in this app.
   const showBack = screen === "preview" || screen === "prestart" || screen === "review" || screen === "evidence";
   const backId = screen === "preview" ? "mvBackToHome" : "mvBackScreen";
   root.innerHTML = `
@@ -5450,6 +5479,11 @@ function movementEvidenceHTML() {
         <span class="mv-evidence-radio"></span>
         <span><span class="mv-evidence-label">${label}</span><span class="mv-evidence-sub">${sub}</span></span>
       </button>`).join("")}
+    ${["tracker-screenshot", "treadmill-photo"].includes(attempt.evidenceChoice) ? `
+      <div class="field" style="margin-top:10px">
+        <input type="file" accept="image/*" id="mvEvidencePhoto">
+        ${attempt.evidencePhotoName ? `<p style="color:var(--muted);font-size:12px;margin:6px 0 0">✓ ${esc(attempt.evidencePhotoName)}</p>` : ""}
+      </div>` : ""}
     ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
     <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>Kirim Bukti</button>`;
 }
@@ -5458,10 +5492,35 @@ function wireMovementEvidenceHandlers() {
   if (movementFlow?.screen !== "evidence") return;
   document.querySelectorAll("[data-mv-evidence]").forEach((b) => b.addEventListener("click", () => {
     movementFlow.attempt.evidenceChoice = b.dataset.mvEvidence;
+    // Switching away from a photo-based choice drops any previously
+    // attached photo - it's client-only state (never saved via
+    // /attempt/save) so there's nothing server-side to clean up.
+    if (!["tracker-screenshot", "treadmill-photo"].includes(b.dataset.mvEvidence)) {
+      movementFlow.attempt.evidencePhoto = null;
+      movementFlow.attempt.evidencePhotoName = null;
+    }
     movementFlow.evidenceError = "";
     mvSaveAttempt({ evidenceChoice: b.dataset.mvEvidence }, true);
     renderDashboard();
   }));
+  document.getElementById("mvEvidencePhoto")?.addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      movementFlow.evidenceError = "Pilih file gambar (PNG/JPEG/WebP).";
+      renderDashboard();
+      return;
+    }
+    try {
+      const photo = await fileToBase64(file);
+      movementFlow.attempt.evidencePhoto = photo;
+      movementFlow.attempt.evidencePhotoName = file.name;
+      movementFlow.evidenceError = "";
+    } catch (err) {
+      movementFlow.evidenceError = err.message;
+    }
+    renderDashboard();
+  });
   document.getElementById("mvKirimBukti")?.addEventListener("click", () => {
     if (movementFlow.quest.executionMode === "STRENGTH") mvSubmitStrength(); else mvSubmitCardio();
   });
@@ -5482,6 +5541,11 @@ async function mvSubmitCardio() {
     renderDashboard();
     return;
   }
+  if (["tracker-screenshot", "treadmill-photo"].includes(attempt.evidenceChoice) && !attempt.evidencePhoto) {
+    movementFlow.evidenceError = "Lampirkan foto/screenshot dulu.";
+    renderDashboard();
+    return;
+  }
   const quest = movementFlow.quest;
   const jenis = quest.evidenceSchema?.activityType || "Lainnya";
   const structuredData = {
@@ -5492,6 +5556,8 @@ async function mvSubmitCardio() {
     ...(attempt.draftReview.distanceKm !== "" && attempt.draftReview.distanceKm != null ? { jarakKm: Number(attempt.draftReview.distanceKm) } : {}),
     titikBerat: attempt.draftReview.effort,
     ...(["Berat", "Terlalu berat"].includes(attempt.draftReview.effort) ? { titikBeratDetail: attempt.draftReview.notes.slice(0, 300) } : {}),
+    evidenceChoice: attempt.evidenceChoice,
+    ...(attempt.evidencePhoto ? { evidencePhoto: attempt.evidencePhoto } : {}),
   };
   movementFlow.saving = true;
   movementFlow.evidenceError = "";
@@ -5502,7 +5568,12 @@ async function mvSubmitCardio() {
     movementFlow.screen = "submitted";
     appState = await api("/api/state").catch(() => appState);
   } catch (e) {
-    movementFlow.evidenceError = e.message;
+    // Bug fix (issue 3): "already reflected" is not a normal validation
+    // error to show inline - it means the quest finished elsewhere while
+    // this session was mid-flow (another device/tab, or the 28h expiry
+    // sweep). Route to the graceful terminal state instead of a dead end.
+    if (e.data?.alreadyReflected) mvShowAlreadyReflected(movementFlow.questId, movementFlow.quest);
+    else movementFlow.evidenceError = e.message;
   }
   movementFlow.saving = false;
   renderDashboard();
@@ -5540,7 +5611,8 @@ async function mvSubmitStrength() {
     movementFlow.screen = "submitted";
     appState = await api("/api/state").catch(() => appState);
   } catch (e) {
-    movementFlow.evidenceError = e.message;
+    if (e.data?.alreadyReflected) mvShowAlreadyReflected(movementFlow.questId, movementFlow.quest);
+    else movementFlow.evidenceError = e.message;
   }
   movementFlow.saving = false;
   renderDashboard();
@@ -6058,8 +6130,22 @@ function renderDashboard() {
     // the legacy single-form reflect flow - checked before the fallthrough
     // below, which stays exactly as-is for recovery and every other quest.
     if (quest?.primaryFeature === "MOVEMENT") {
-      const goalIndex = allOpenQuests.find((q) => q.id === id)?.goalIndex;
-      beginMovementFlow(id, quest, goalIndex);
+      // Bug report (bugreportkirimbuktiaktivitas.pdf, issue 3): allOpenQuests
+      // can be stale (quest already reflected on another device/tab, or
+      // closed out by the 28h expiry sweep since the last GET /api/state) -
+      // opening straight into Preview on a dead quest is what dead-ends the
+      // user at submit time instead of here. One fresh refresh first, so the
+      // graceful "sudah selesai" state (see mvShowAlreadyReflected) catches
+      // it proactively rather than only in the /api/reflection catch block.
+      root.innerHTML = spinnerHTML("Memuat quest...");
+      appState = await api("/api/state").catch(() => appState);
+      const fresh = (appState.openQuests || []).find((q) => q.id === id);
+      if (!fresh) {
+        mvShowAlreadyReflected(id, quest);
+        renderDashboard();
+        return;
+      }
+      beginMovementFlow(id, fresh.quest, fresh.goalIndex);
       renderDashboard();
       return;
     }

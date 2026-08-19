@@ -9,6 +9,7 @@
 const CARDIO_ACTIVITIES = ["Lari", "Jalan cepat", "Sepeda", "Lompat tali", "Lainnya"];
 
 const exerciseCatalog = require("./exerciseCatalog");
+const { ACCEPTED_IMAGE_MIMES, MAX_FILE_BASE64_CHARS } = require("./jobMatch");
 
 // Per-activity plausible top speeds (km/h). The PRD's own example of an
 // impossible combo - 15 km in 20 minutes "running" (45 km/h) - falls to the
@@ -59,6 +60,26 @@ function validateStructuredData(kind, data) {
       }
     }
 
+    // BODY·MOVEMENT Evidence screen: "Screenshot tracker"/"Foto treadmill"
+    // choices attach a photo (server/index.js's Evidence route, not asked
+    // elsewhere). Validated here (mime/size, same caps jobMatch.js already
+    // uses for job-match's CV/image uploads) then deliberately dropped from
+    // `clean` - the founder chose "buang setelah submit" over persisting the
+    // bytes, so a valid photo only ever proves it existed at submit time.
+    let evidenceChoice;
+    if (data.evidenceChoice != null) {
+      evidenceChoice = String(data.evidenceChoice);
+      if (!["activity-data", "tracker-screenshot", "treadmill-photo"].includes(evidenceChoice)) {
+        return { ok: false, error: "Pilih bukti utama dulu." };
+      }
+      if (["tracker-screenshot", "treadmill-photo"].includes(evidenceChoice)) {
+        const photo = data.evidencePhoto;
+        if (!photo || typeof photo !== "object") return { ok: false, error: "Lampirkan foto/screenshot dulu." };
+        if (!ACCEPTED_IMAGE_MIMES.includes(photo.mimeType)) return { ok: false, error: "Format foto tidak didukung — pakai PNG, JPEG, atau WebP." };
+        if (!photo.dataBase64 || photo.dataBase64.length > MAX_FILE_BASE64_CHARS) return { ok: false, error: "File foto terlalu besar atau kosong." };
+      }
+    }
+
     return {
       ok: true,
       clean: {
@@ -69,6 +90,7 @@ function validateStructuredData(kind, data) {
         ...(jarak != null ? { jarakKm: jarak } : {}),
         titikBerat,
         ...(["Berat", "Terlalu berat"].includes(titikBerat) ? { titikBeratDetail: titikBeratDetail.slice(0, 300) } : {}),
+        ...(evidenceChoice ? { evidenceChoice } : {}),
       },
     };
   }
