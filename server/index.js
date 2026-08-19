@@ -10,6 +10,8 @@ const structured = require("./structured");
 const targets = require("./targets");
 const practiceTestLib = require("./practiceTest");
 const listeningDiagnostic = require("./listeningDiagnostic");
+const videoQuizLib = require("./videoQuiz");
+const youtube = require("./youtube");
 const jobMatch = require("./jobMatch");
 const jobApplication = require("./jobApplication");
 const nutrition = require("./nutrition");
@@ -658,7 +660,10 @@ app.get("/api/state", requireAuth, async (req, res) => {
           + (await db.countSessionsSince(req.userId, "listening-diagnostic", startOfMonthKey())),
         somaActivity: await db.countSessionsSince(req.userId, "structured-physical", startOfWeekKey()),
         somaNutrition: await db.countSessionsSince(req.userId, "nutrition-log", startOfWeekKey()),
-        labora: await db.countSessionsSince(req.userId, "job-match-analysis", startOfMonthKey()),
+        // Video Quest: LABORA now has two session-producing tools (Job
+        // Match + Video Quest) - sum both, same reasoning as lingua above.
+        labora: (await db.countSessionsSince(req.userId, "job-match-analysis", startOfMonthKey()))
+          + (await db.countSessionsSince(req.userId, "video-quiz", startOfMonthKey())),
       },
       // META Inner Realm target-recommendation flow (12 Agustus follow-up):
       // "World Map shows Target, Realm page shows Tools" - each realm's card
@@ -1325,6 +1330,221 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
   }
 });
 
+// --- Video Quest (video-quiz) routes. Flow doc: docs/video-quiz-flow.md ---
+// Step 1 of the flow: "Periksa Materi". Fetches the pasted video's
+// transcript server-side, asks the AI whether it substantively teaches the
+// quest's fixed topic, and stores the result as the CANDIDATE video. The
+// user can re-run this with different URLs freely - swapping only becomes
+// impossible once /start promotes a candidate to the locked video.
+app.post("/api/video-quiz/validate", requireAuth, async (req, res) => {
+  try {
+    const { questId, videoUrl } = req.body;
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    if (day.quest?.videoQuizState?.lockedVideoUrl) {
+      return res.status(400).json({ error: "Materi untuk quest ini sudah dikunci — selesaikan assessment dari video itu dulu." });
+    }
+    if (!youtube.parseVideoId(videoUrl)) {
+      return res.status(400).json({ error: "Link YouTube tidak valid. Tempel link video YouTube (youtube.com atau youtu.be)." });
+    }
+    let video;
+    try {
+      video = await youtube.fetchVideoData(videoUrl);
+    } catch (e) {
+      if (e.code === "NO_CAPTIONS") {
+        return res.status(422).json({ error: "Video ini nggak punya subtitle/transkrip yang bisa dibaca. Pilih video lain yang menyediakan subtitle (kebanyakan video edukasi punya)." });
+      }
+      console.error("video-quiz fetchVideoData failed:", e.message);
+      return res.status(502).json({ error: "Gagal mengambil data video. Coba lagi." });
+    }
+    const topic = day.quest.videoQuiz?.topic || day.quest.title;
+    const { relevant, rationale } = await ai.judgeVideoRelevance({
+      topic, videoTitle: video.videoMeta.title, transcriptExcerpt: video.transcript.slice(0, 6000),
+    });
+    // Full replace: a re-check overwrites any previous candidate. There is
+    // no lock yet (guarded above), so nothing here is worth preserving.
+    await db.setVideoQuizPayload(req.userId, day.id, {
+      candidate: {
+        videoId: video.videoId, videoUrl: String(videoUrl).trim(), videoMeta: video.videoMeta,
+        transcript: video.transcript, relevant, rationale, checkedAt: new Date().toISOString(),
+      },
+    });
+    res.json({ relevant, rationale, videoMeta: { ...video.videoMeta, videoId: video.videoId } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal memeriksa materi. Coba lagi." });
+  }
+});
+
+// Step 2: "Mulai Assessment". Three cases, in order:
+// - RESUME: a locked video with a generated set already exists (page
+//   reload / re-entry) - idempotent, returns the same stripped set without
+//   regenerating or re-validating anything.
+// - RETRY ({retry:true}, the fail screen's "Ulang Assessment"): fresh
+//   question set from the SAME locked transcript, attempt counter +1.
+// - FIRST START: promotes the validated candidate to the locked video.
+//   Questions are generated BEFORE the lock is persisted, so a generation
+//   failure leaves the video still swappable.
+// The lock itself lives in quest.videoQuizState (client-visible via
+// GET /api/state); transcript + answer key stay in video_quiz_payload.
+app.post("/api/video-quiz/start", requireAuth, async (req, res) => {
+  try {
+    const { questId, retry } = req.body;
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    const topic = day.quest.videoQuiz?.topic || day.quest.title;
+    const passThreshold = day.quest.videoQuiz?.passThreshold ?? videoQuizLib.DEFAULT_PASS_THRESHOLD;
+    const payload = await db.getVideoQuizPayload(req.userId, day.id);
+
+    const respond = (p) => res.json({
+      locked: { videoUrl: p.locked.videoUrl, videoMeta: p.locked.videoMeta, videoId: p.locked.videoId },
+      attempt: p.attempt, passThreshold,
+      questions: videoQuizLib.stripQuestions(p.questions),
+    });
+
+    if (payload?.locked && payload.questions && !retry) return respond(payload);
+
+    if (retry) {
+      if (!payload?.locked) return res.status(400).json({ error: "Belum ada materi terkunci untuk diulang — mulai assessment dulu." });
+      const attempt = (payload.attempt || 1) + 1;
+      const { questions } = await ai.generateVideoQuizQuestions({ topic, transcript: payload.locked.transcript, attempt });
+      const next = { locked: payload.locked, attempt, questions };
+      await db.setVideoQuizPayload(req.userId, day.id, next);
+      await db.updateQuestProgress(req.userId, day.id, {
+        videoQuizState: { ...(day.quest.videoQuizState || {}), attempt, lastResult: null },
+      });
+      return respond(next);
+    }
+
+    if (!payload?.candidate?.relevant) {
+      return res.status(400).json({ error: "Periksa materi dulu sebelum mulai assessment." });
+    }
+    const { candidate } = payload;
+    const { questions } = await ai.generateVideoQuizQuestions({ topic, transcript: candidate.transcript, attempt: 1 });
+    const locked = { videoId: candidate.videoId, videoUrl: candidate.videoUrl, videoMeta: candidate.videoMeta, transcript: candidate.transcript };
+    const next = { locked, attempt: 1, questions };
+    await db.setVideoQuizPayload(req.userId, day.id, next);
+    // THE source lock: from here on /validate rejects new URLs and every
+    // re-entry reuses this video until the quest is passed.
+    await db.updateQuestProgress(req.userId, day.id, {
+      videoQuizState: {
+        phase: "locked", lockedVideoUrl: locked.videoUrl, lockedVideoId: locked.videoId,
+        lockedVideoMeta: locked.videoMeta, attempt: 1, lastResult: null,
+      },
+    });
+    return respond(next);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyusun soal dari materi ini. Coba lagi." });
+  }
+});
+
+// Step 3: "Kirim Jawaban". Grading is fully deterministic (videoQuiz.js).
+// FAIL (< passThreshold): quest stays open, lock carries over, NO answer
+// key/explanations in the response (keeps "Ulang Assessment" honest) and no
+// growth. PASS: the same completion pipeline as practice-test's submit -
+// objective evidence, no specificity gate - plus the full pembahasan
+// (per-question review), which only ever leaves the server here.
+app.post("/api/video-quiz/submit", requireAuth, async (req, res) => {
+  try {
+    const { questId, answers } = req.body;
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    const payload = await db.getVideoQuizPayload(req.userId, day.id);
+    if (!payload?.locked || !payload.questions) return res.status(400).json({ error: "Belum ada soal — mulai assessment dulu." });
+
+    const topic = day.quest.videoQuiz?.topic || day.quest.title;
+    const passThreshold = day.quest.videoQuiz?.passThreshold ?? videoQuizLib.DEFAULT_PASS_THRESHOLD;
+    const graded = videoQuizLib.gradeAnswers(payload.questions, answers || {});
+    const { strongConcepts, weakConcepts } = videoQuizLib.conceptSplit(graded.perQuestion);
+    const passed = graded.score >= passThreshold;
+    const lastResult = {
+      score: graded.score, total: graded.total, passed,
+      strongConcepts, weakConcepts, ts: new Date().toISOString(),
+    };
+    await db.updateQuestProgress(req.userId, day.id, {
+      videoQuizState: { ...(day.quest.videoQuizState || {}), lastResult },
+    });
+
+    if (!passed) {
+      return res.json({ passed: false, score: graded.score, total: graded.total, passThreshold, strongConcepts, weakConcepts });
+    }
+
+    const videoQuizResult = {
+      topic, videoTitle: payload.locked.videoMeta?.title || "",
+      score: graded.score, total: graded.total, passThreshold,
+      attempt: payload.attempt || 1, strongConcepts, weakConcepts,
+    };
+    const recentGoalDays = day.goalIndex != null ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined;
+    const ctx = {
+      profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
+      quest: day.quest,
+      status: "COMPLETED",
+      videoQuizResult,
+      recentDays: recentGoalDays,
+      stats: state.stats,
+      growthSessions: state.growthSessions,
+    };
+    const result = await ai.processReflection(ctx);
+    const deltas = result.statDeltas || {}; // objective code-graded evidence - no specificity gate
+
+    const newStats = { ...state.stats };
+    Object.entries(deltas).forEach(([k, v]) => {
+      if (newStats[k] !== undefined && typeof v === "number") {
+        newStats[k] = Math.max(0, Math.min(100, newStats[k] + Math.max(0, Math.min(5, Math.round(v)))));
+      }
+    });
+    const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+    const allowAdvance = result.chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0 && Boolean(result.newChapterTitle && result.newChapterNarrative);
+
+    const reflection = {
+      status: "COMPLETED", text: "",
+      videoQuizResult,
+      deltas, mentorReply: result.mentorReply, timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+    await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
+    await db.touchStatActivity(req.userId, Object.keys(deltas));
+    await db.updateState(req.userId, {
+      stats: newStats,
+      chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
+      chapterTitle: allowAdvance ? result.newChapterTitle : state.chapterTitle,
+      chapterNarrative: allowAdvance ? result.newChapterNarrative : undefined,
+      growthSessions: newGrowthSessions,
+      pathwayNoun: state.pathwayNoun,
+    });
+
+    // Pembahasan: the only place the answer key ever reaches the client,
+    // and only after a pass.
+    const answerLookup = answers || {};
+    const review = payload.questions.map((q) => {
+      const yourAnswer = (Array.isArray(answerLookup[q.id]) ? answerLookup[q.id] : []).map((a) => String(a || "").trim().toLowerCase());
+      return {
+        id: q.id, format: q.format, concept: q.concept, prompt: q.prompt, options: q.options,
+        yourAnswer, correct: q.correct,
+        isCorrect: graded.perQuestion.find((p) => p.id === q.id)?.correct || false,
+        explanation: q.explanation,
+      };
+    });
+    res.json({
+      passed: true, score: graded.score, total: graded.total, passThreshold,
+      strongConcepts, weakConcepts, mentorReply: result.mentorReply, deltas, review,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan hasil assessment." });
+  }
+});
+
 // IELTS Listening Half Diagnostic (round 41): unlike practice-test's submit
 // above, this content is fixed/server-code-defined (listeningDiagnostic.js),
 // not per-attempt AI-generated - no band ladder, no per-track state, no AI
@@ -1628,6 +1848,22 @@ app.post("/api/meta/start", requireAuth, async (req, res) => {
         statFocus: "growth",
         title: "IELTS Listening Half Diagnostic",
         description: "Diagnostik Listening 20 soal dari META, di luar rotasi goal harian.",
+        why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
+      };
+    } else if (tool === "video-quest") {
+      // Video Quest from LABORA: the user types the topic themselves (a
+      // META free session picks its own subject, same spirit as META Body's
+      // kind picker). Once created the topic is STATIC for this quest -
+      // that rule is what the source lock hangs off (the topic decides
+      // which video is allowed).
+      const topic = String(req.body?.topic || "").trim().slice(0, 160);
+      if (topic.length < 3) return res.status(400).json({ error: "Tulis topik yang mau kamu pelajari dulu." });
+      quest = {
+        completionType: "video-quiz",
+        statFocus: "growth",
+        videoQuiz: { topic, passThreshold: videoQuizLib.DEFAULT_PASS_THRESHOLD, estimatedMinutes: 25 },
+        title: `Video Quest: ${topic}`,
+        description: `Pelajari "${topic}" dari satu video YouTube pilihanmu, lalu buktikan lewat 15 soal dari materi video itu.`,
         why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
       };
     } else if (tool === "nutrition") {
