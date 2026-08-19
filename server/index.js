@@ -1048,6 +1048,11 @@ app.post("/api/quest/:id/attempt/start", requireAuth, async (req, res) => {
       return res.json({ ok: true, activeAttempt: day.quest.activeAttempt });
     }
     const executionMode = day.quest.executionMode;
+    // Kondisi (cardio's optional "Kondisi sekarang?" chips) is picked on
+    // Pre-Start, before an attempt exists to hold it - the client sends
+    // whatever was picked (or null) along with this call so it lands
+    // straight in the new attempt's draftReview instead of being lost.
+    const kondisi = ["Segar", "Cukup", "Capek", "Nyeri"].includes(req.body?.kondisi) ? req.body.kondisi : null;
     const activeAttempt = {
       attemptId: crypto.randomUUID(),
       startedAt: new Date().toISOString(),
@@ -1056,7 +1061,7 @@ app.post("/api/quest/:id/attempt/start", requireAuth, async (req, res) => {
       // evidence-only posture) - Pre-Start's "Mulai" goes straight to Review.
       // Strength's real execution engine gets "active" instead.
       currentScreen: executionMode === "STRENGTH" ? "active" : "review",
-      draftReview: { durationMin: "", durationSec: "", distanceKm: "", effort: null, notes: "", kondisi: null },
+      draftReview: { durationMin: "", durationSec: "", distanceKm: "", effort: null, notes: "", kondisi },
       strengthExercises: executionMode === "STRENGTH"
         ? (day.quest.plannedExercises || []).map((e) => ({
             ...e, sets: Array.from({ length: e.targetSets }, () => ({ reps: "", weightKg: "", done: false })), rpe: null,

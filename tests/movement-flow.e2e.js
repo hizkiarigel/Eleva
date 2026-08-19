@@ -168,14 +168,22 @@ async function test(name, fn) {
     assert.ok(!rows[0].quest.activeAttempt, "Batal must never create an attempt");
   });
 
-  await test("Cardio 'Mulai' creates the attempt server-side and goes straight to Review (no Active Session)", async () => {
+  await test("Kondisi chip is tappable BEFORE the attempt exists (regression: was a silent no-op) and seeds into the attempt once Mulai is tapped", async () => {
     await page.click("#mvPreviewStart");
     await page.waitForSelector("#mvPreStartGo", { timeout: 20000 });
+    await page.click('[data-mv-kondisi="Capek"]');
+    await page.waitForSelector('[data-mv-kondisi="Capek"].active', { timeout: 5000 });
+    // Tapping again deselects (kondisi is optional, per the design handoff).
+    await page.click('[data-mv-kondisi="Capek"]');
+    await page.waitForSelector('[data-mv-kondisi="Capek"]:not(.active)', { timeout: 5000 });
+    await page.click('[data-mv-kondisi="Capek"]');
+    await page.waitForSelector('[data-mv-kondisi="Capek"].active', { timeout: 5000 });
     await page.click("#mvPreStartGo");
-    await page.waitForSelector("#mvReviewDone", { timeout: 20000 }); // real Finish & Review, stage 5
+    await page.waitForSelector("#mvReviewDone", { timeout: 20000 });
     const { rows } = await sql.query("SELECT quest FROM days WHERE id = $1", [cardioId]);
     assert.ok(rows[0].quest.activeAttempt, "attempt must be created");
     assert.strictEqual(rows[0].quest.activeAttempt.currentScreen, "review");
+    assert.strictEqual(rows[0].quest.activeAttempt.draftReview.kondisi, "Capek", "the Pre-Start Kondisi pick must survive into the new attempt");
   });
 
   console.log("E2E: Pre-Start (Strength)");

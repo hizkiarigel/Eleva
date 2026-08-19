@@ -4903,6 +4903,10 @@ function beginMovementFlow(id, quest, goalIndex) {
     attempt: quest.activeAttempt || null,
     exitSheetOpen: false, whyOpen: false, reviewError: "", evidenceError: "",
     submittedResult: null, saving: false, rpeInfoOpen: new Set(),
+    // Picked on Pre-Start, before any attempt exists to hold it - see
+    // mvStartAttempt, which sends this along with /attempt/start so the
+    // server seeds it straight into the new attempt's draftReview.
+    preStartKondisi: null,
   };
 }
 
@@ -4932,7 +4936,7 @@ async function mvStartAttempt() {
   movementFlow.saving = true;
   renderDashboard();
   try {
-    const { activeAttempt } = await api(`/api/quest/${movementFlow.questId}/attempt/start`, { method: "POST", body: {} });
+    const { activeAttempt } = await api(`/api/quest/${movementFlow.questId}/attempt/start`, { method: "POST", body: { kondisi: movementFlow.preStartKondisi } });
     movementFlow.attempt = activeAttempt;
     movementFlow.screen = activeAttempt.currentScreen;
   } catch (e) {
@@ -5042,7 +5046,7 @@ function movementPreStartHTML() {
     <div class="field" style="margin-top:16px">
       <label>Kondisi sekarang? <span class="opt-note">opsional</span></label>
       <div class="status-row">
-        ${["Segar", "Cukup", "Capek", "Nyeri"].map((k) => `<button class="status-btn ${movementFlow.attempt?.draftReview?.kondisi === k ? "active" : ""}" data-mv-kondisi="${k}">${k}</button>`).join("")}
+        ${["Segar", "Cukup", "Capek", "Nyeri"].map((k) => `<button class="status-btn ${movementFlow.preStartKondisi === k ? "active" : ""}" data-mv-kondisi="${k}">${k}</button>`).join("")}
       </div>
     </div>` : ""}
     <div style="display:flex;gap:12px;margin-top:18px">
@@ -5112,9 +5116,11 @@ function wireMovementHandlers() {
   });
   document.getElementById("mvPreStartGo")?.addEventListener("click", mvStartAttempt);
   document.querySelectorAll("[data-mv-kondisi]").forEach((b) => b.addEventListener("click", () => {
-    const k = b.dataset.mvKondisi;
-    if (!movementFlow.attempt) return; // attempt only exists post-start; pre-start taps just preview the pick
-    movementFlow.attempt.draftReview = { ...movementFlow.attempt.draftReview, kondisi: k };
+    // Kondisi is picked on Pre-Start, BEFORE the attempt exists (it's only
+    // created once "Mulai" is tapped, see mvStartAttempt) - held on
+    // movementFlow itself until then, sent along with the /attempt/start
+    // call so the server seeds it straight into the new attempt.
+    movementFlow.preStartKondisi = movementFlow.preStartKondisi === b.dataset.mvKondisi ? null : b.dataset.mvKondisi;
     renderDashboard();
   }));
   document.getElementById("mvBackHomeSubmitted")?.addEventListener("click", async () => {
