@@ -1669,3 +1669,15 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .gs-eval-num { font-size: 17px; color: var(--accent-bright); }
 .gs-eval-muscle { font-size: 13px; line-height: 1.3; padding-top: 3px; }
 .gs-eval-label { font-size: 9.5px; color: var(--muted-dim); letter-spacing: 1px; margin-top: 4px; }
+
+/* BODY · MOVEMENT execution flow (design handoff) - minimal own header
+   reuses .qhub-header/.qhub-wordmark/.qhub-icon-btn (no new header system).
+   "Kenapa Eleva kasih quest ini?" expand/collapse uses a grid-rows trick
+   (not display:none toggling, which recomputes scroll position above the
+   element and causes a visible jump) - a 0fr->1fr transition on the grid
+   track animates height without ever changing layout flow synchronously. */
+.mv-why-collapse {
+  display: grid; grid-template-rows: 0fr; transition: grid-template-rows .25s ease;
+}
+.mv-why-collapse.open { grid-template-rows: 1fr; }
+.mv-why-inner { overflow: hidden; min-height: 0; }

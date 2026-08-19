@@ -305,6 +305,7 @@ const HELP_TEXT = {
   goals: "Goal utama wajib, dua lainnya opsional. Tulis, lalu tap Set Goal — Eleva bakal cek apakah goal-mu cukup jelas dan terukur. Kalau belum, kamu dapat saran perbaikan; kalau sudah pas, goal-nya disetujui dan siap jadi fondasi First Trial-mu.",
   dashboard: "Quest hari ini dari Eleva, disesuaikan sama fokusmu. Kerjakan, lalu tap Mulai — aktivitas fisik dicatat sebagai record singkat (pilih jenisnya: cardio atau gym), sisanya lewat refleksi teks.",
   meta: "Latihan mandiri, kapan aja — nggak perlu nunggu Eleva kasih quest-nya. Sesi di sini tetap dihitung sebagai bukti pertumbuhan, tapi nggak menggerakkan Milestone goal manapun.",
+  movement: "Ikuti alurnya langkah demi langkah — progresmu kesimpan otomatis, jadi kalau ke-refresh atau ke-tab lain nggak hilang. Bukti aktivitasnya jujur aja, nggak perlu sempurna.",
 };
 // Founder feedback (10 Agustus, live screenshot dari layar radar): "orang
 // awam" nggak otomatis tahu apa arti nama sumbu ini secara istilah - butuh
@@ -727,6 +728,19 @@ let exerciseCatalog = null;
 // { exercises: [{ exerciseId, name, muscleGroup, collapsed, sets: [{ weightKg, reps, done }] }],
 //   pickerOpen, pickerQuery, pickerGroup }
 let gymSession = null;
+// BODY · MOVEMENT execution flow (design handoff): the real multi-screen
+// flow for Today's Trial cardio/gym quests (quest.primaryFeature ===
+// "MOVEMENT") - Quest Preview -> Pre-Start -> (Strength: Active Session) ->
+// Finish & Review -> Evidence -> Submitted. Deliberately isolated from
+// gymSession/structKind/structForm/reflectOpen above - recovery and every
+// other completionType keep calling beginStructuredOrReflectiveFlow
+// untouched, this state machine is Movement's alone. `attempt` mirrors
+// quest.activeAttempt (server/index.js's /api/quest/:id/attempt/* routes) -
+// resumed directly from it on open/refresh, never reconstructed client-side.
+// null when no Movement flow is active.
+// { questId, quest, screen: "preview"|"prestart"|"active"|"review"|"evidence"|"submitted",
+//   attempt, exitSheetOpen, whyOpen, reviewError, evidenceError, submittedResult, saving }
+let movementFlow = null;
 let metaError = "";
 // Hint-card dismissal persistence: this app has no localStorage precedent
 // anywhere else (help sheets are pure in-memory, reset on reload) - the
@@ -4870,6 +4884,258 @@ async function ensureExerciseCatalog() {
   } catch (e) { /* picker keeps showing the loading line; next open retries */ }
 }
 
+// ---- BODY · MOVEMENT execution flow (design handoff) --------------------
+// Quest Preview -> Pre-Start -> (Strength: Active Session) -> Finish &
+// Review -> Evidence -> Submitted, for Today's Trial cardio/gym quests
+// (quest.primaryFeature === "MOVEMENT"). Entirely separate state machine
+// from beginStructuredOrReflectiveFlow/structForm/gymSession above - see
+// movementFlow's own declaration comment for why.
+
+// Resumes an in-progress attempt directly from quest.activeAttempt (already
+// round-tripped by GET /api/state - a refresh/reopen never loses it) or
+// starts fresh at "preview" when none exists yet. No network call here -
+// "preview"/"prestart" are pure client state until the user actually
+// commits to starting (POST /attempt/start, see mvStartAttempt below).
+function beginMovementFlow(id, quest, goalIndex) {
+  movementFlow = {
+    questId: id, quest, goalIndex,
+    screen: quest.activeAttempt ? quest.activeAttempt.currentScreen : "preview",
+    attempt: quest.activeAttempt || null,
+    exitSheetOpen: false, whyOpen: false, reviewError: "", evidenceError: "",
+    submittedResult: null, saving: false,
+  };
+}
+
+// Debounced incremental save (design handoff's persistence requirement) -
+// mirrors the onboarding draft's save/saveNow split (see its own comment
+// near saveOnboardingDraft): plain typing debounces, screen-transition
+// boundaries flush immediately so a refresh right after a boundary never
+// loses it. A failed save is non-fatal - the next successful save or the
+// next boundary flush catches up; the attempt already reflects the change
+// client-side regardless.
+let mvSaveTimer = null;
+function mvSaveAttempt(patch, immediate) {
+  if (!movementFlow) return;
+  Object.assign(movementFlow.attempt, patch);
+  const fire = async () => {
+    try {
+      await api(`/api/quest/${movementFlow.questId}/attempt/save`, { method: "POST", body: { patch } });
+    } catch (e) { /* non-fatal - next save/boundary flush catches up */ }
+  };
+  if (mvSaveTimer) clearTimeout(mvSaveTimer);
+  if (immediate) { fire(); return; }
+  mvSaveTimer = setTimeout(fire, 500);
+}
+
+async function mvStartAttempt() {
+  if (!movementFlow || movementFlow.saving) return;
+  movementFlow.saving = true;
+  renderDashboard();
+  try {
+    const { activeAttempt } = await api(`/api/quest/${movementFlow.questId}/attempt/start`, { method: "POST", body: {} });
+    movementFlow.attempt = activeAttempt;
+    movementFlow.screen = activeAttempt.currentScreen;
+  } catch (e) {
+    movementFlow.reviewError = e.message;
+  }
+  movementFlow.saving = false;
+  renderDashboard();
+}
+
+async function mvAbandonAttempt() {
+  if (!movementFlow) return;
+  const id = movementFlow.questId;
+  movementFlow = null;
+  reflectTarget = null;
+  try { await api(`/api/quest/${id}/attempt/abandon`, { method: "POST" }); } catch (e) { /* quest just stays open either way */ }
+  appState = await api("/api/state").catch(() => appState);
+  renderDashboard();
+}
+
+function movementLabel(quest, withExecutionMode) {
+  const base = "BODY · MOVEMENT";
+  return withExecutionMode && quest.executionMode ? `${base} · ${quest.executionMode}` : base;
+}
+
+// SELESAI KETIKA checklist content - concrete minimum output, not a repeat
+// of quest.description (design handoff's explicit rule). Cardio reads off
+// evidenceSchema (single distance target); Strength reads off
+// plannedExercises (the AI-authored multi-exercise plan, stage 1).
+function movementChecklistHTML(quest) {
+  if (quest.executionMode === "CARDIO") {
+    const s = quest.evidenceSchema || {};
+    const items = [s.activityType ? `Aktivitas: ${s.activityType}` : "Aktivitas fisik"];
+    if (s.target != null) items.push(`Jarak minimal ${s.target} km`);
+    return items;
+  }
+  return (quest.plannedExercises || []).map((e) => `${esc(e.name)}: ${e.targetSets} × ${e.targetReps}${e.targetLoadKg != null ? ` @ ${e.targetLoadKg}kg` : ""}`);
+}
+
+function movementEstimateLabel(quest) {
+  if (quest.executionMode === "CARDIO") return "±30 menit";
+  const totalSets = (quest.plannedExercises || []).reduce((n, e) => n + e.targetSets, 0);
+  return `±${Math.max(10, totalSets * 3)} menit`;
+}
+
+// Minimal own header (back arrow / ELEVA wordmark / "?") - matches the
+// design handoff's screens (no bottom tab bar during this flow), reusing
+// the existing qhub-header/qhub-wordmark/qhub-icon-btn tokens rather than
+// inventing a parallel visual system.
+function movementHeaderHTML(showBack, onBackId) {
+  return `
+    <div class="app-header qhub-header">
+      ${showBack ? `<button class="header-icon-btn qhub-icon-btn" id="${onBackId}" aria-label="Kembali">←</button>` : `<span></span>`}
+      <div class="qhub-wordmark fr">ELEVA</div>
+      ${helpBtnHTML("movement")}
+    </div>`;
+}
+
+function movementPreviewHTML() {
+  const quest = movementFlow.quest;
+  const goalLabel = (appState.goals || [])[movementFlow.goalIndex] || quest.title;
+  return `
+    <div class="quest-card fadeUp">
+      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:6px">${esc(movementLabel(quest))}</div>
+      <p style="color:var(--muted);font-size:12.5px;margin:0 0 10px">Menuju target: <span style="color:var(--text)">${esc(goalLabel)}</span></p>
+      <h2 class="fr" style="font-size:21px;margin:0 0 10px;line-height:1.3">${esc(quest.title)}</h2>
+      <p style="color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 16px">${esc(quest.description)}</p>
+      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:8px">SELESAI KETIKA</div>
+      <div style="margin-bottom:16px">
+        ${movementChecklistHTML(quest).map((item) => `
+          <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+            <span style="width:16px;height:16px;border-radius:50%;border:1px solid var(--hair-strong);flex:none"></span>
+            <span style="font-size:13.5px">${item}</span>
+          </div>`).join("")}
+      </div>
+      <p class="mono" style="font-size:12px;color:var(--muted);margin:0 0 18px">🕐 ${movementEstimateLabel(quest)}</p>
+      <button class="btn-primary full" id="mvPreviewStart">Mulai Quest</button>
+      <button class="btn-ghost" id="mvWhyToggle" style="margin-top:12px">${movementFlow.whyOpen ? "Tutup" : "Kenapa Eleva kasih quest ini?"} ${movementFlow.whyOpen ? "↑" : "↓"}</button>
+      <div class="mv-why-collapse ${movementFlow.whyOpen ? "open" : ""}">
+        <div class="mv-why-inner"><p style="color:var(--muted);font-size:13px;line-height:1.5;margin:10px 0 0">${esc(quest.why || "")}</p></div>
+      </div>
+    </div>`;
+}
+
+function movementPreStartHTML() {
+  const quest = movementFlow.quest;
+  const isStrength = quest.executionMode === "STRENGTH";
+  return `
+    <h2 class="fr" style="font-size:20px;margin:0 0 6px">Siap mulai quest?</h2>
+    <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Pastikan semua sudah siap sebelum mulai.</p>
+    <div class="quest-card">
+      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:6px">${esc(movementLabel(quest))}</div>
+      <div style="font-size:16px;margin-bottom:14px">${esc(quest.title)}</div>
+      ${isStrength ? `
+      <div class="mono" style="font-size:10.5px;color:var(--muted-dim);letter-spacing:1px;margin-bottom:6px">HARI INI</div>
+      ${(quest.plannedExercises || []).map((e) => `
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--hair)">
+          <span style="font-size:14px">${esc(e.name)}</span>
+          <span class="mono" style="font-size:12.5px;color:var(--muted)">${e.targetSets}×${e.targetReps}${e.targetLoadKg != null ? ` @ ${e.targetLoadKg}kg` : ""}</span>
+        </div>`).join("")}
+      ` : `
+      <div class="mono" style="font-size:10.5px;color:var(--muted-dim);letter-spacing:1px;margin-bottom:6px">BUKTI YANG AKAN DICATAT</div>
+      ${["Durasi", "Jarak", "Rasanya gimana", "Screenshot tracker (opsional)"].map((l) => `<div style="font-size:13.5px;padding:4px 0;color:var(--muted)">· ${l}</div>`).join("")}
+      `}
+      <p class="mono" style="font-size:12px;color:var(--muted);margin:14px 0 0">🕐 Estimasi ${movementEstimateLabel(quest)}</p>
+    </div>
+    ${!isStrength ? `
+    <div class="field" style="margin-top:16px">
+      <label>Kondisi sekarang? <span class="opt-note">opsional</span></label>
+      <div class="status-row">
+        ${["Segar", "Cukup", "Capek", "Nyeri"].map((k) => `<button class="status-btn ${movementFlow.attempt?.draftReview?.kondisi === k ? "active" : ""}" data-mv-kondisi="${k}">${k}</button>`).join("")}
+      </div>
+    </div>` : ""}
+    <div style="display:flex;gap:12px;margin-top:18px">
+      <button class="btn-ghost" id="mvPreStartCancel" style="flex:1">Batal</button>
+      <button class="btn-primary" id="mvPreStartGo" style="flex:1" ${movementFlow.saving ? "disabled" : ""}>${isStrength ? "Mulai Latihan" : "Mulai"}</button>
+    </div>
+    ${movementFlow.reviewError ? `<p style="color:var(--rust);font-size:13px;margin-top:12px">${esc(movementFlow.reviewError)}</p>` : ""}`;
+}
+
+function movementScreenBodyHTML() {
+  const screen = movementFlow.screen;
+  if (screen === "preview") return movementPreviewHTML();
+  if (screen === "prestart") return movementPreStartHTML();
+  if (screen === "active") return movementActiveSessionHTML();
+  if (screen === "review") return movementReviewHTML();
+  if (screen === "evidence") return movementEvidenceHTML();
+  if (screen === "submitted") return movementSubmittedHTML();
+  return "";
+}
+
+function renderMovementFlow() {
+  const screen = movementFlow.screen;
+  // Submitted is a terminal ack, same "no back arrow" posture as every
+  // other completedResult-style screen in this app.
+  const showBack = screen === "preview" || screen === "prestart" || screen === "review" || screen === "evidence";
+  const backId = screen === "preview" ? "mvBackToHome" : "mvBackScreen";
+  root.innerHTML = `
+    <div class="shell app-shell qhub-shell">
+      ${movementHeaderHTML(showBack, backId)}
+      ${helpSheetHTML("movement")}
+      <div class="screen-body qhub-scroll">${movementScreenBodyHTML()}</div>
+      ${screen === "active" && movementFlow.exitSheetOpen ? movementExitSheetHTML() : ""}
+    </div>`;
+  wireMovementHandlers();
+}
+
+function wireMovementHandlers() {
+  document.getElementById("mvBackToHome")?.addEventListener("click", () => {
+    movementFlow = null;
+    renderDashboard();
+  });
+  document.getElementById("mvBackScreen")?.addEventListener("click", () => {
+    const screen = movementFlow.screen;
+    if (screen === "prestart") { movementFlow.screen = "preview"; renderDashboard(); return; }
+    if (screen === "review" || screen === "evidence") {
+      // Mid-attempt back is a soft nav only (no data lost, attempt keeps
+      // living) - exiting the flow entirely goes through the exit
+      // sheet/Batalkan Quest action instead, never this arrow.
+      movementFlow = null;
+      renderDashboard();
+      return;
+    }
+    movementFlow = null;
+    renderDashboard();
+  });
+  document.getElementById("mvPreviewStart")?.addEventListener("click", () => {
+    movementFlow.screen = "prestart";
+    renderDashboard();
+  });
+  document.getElementById("mvWhyToggle")?.addEventListener("click", () => {
+    movementFlow.whyOpen = !movementFlow.whyOpen;
+    renderDashboard();
+  });
+  document.getElementById("mvPreStartCancel")?.addEventListener("click", () => {
+    movementFlow.screen = "preview";
+    renderDashboard();
+  });
+  document.getElementById("mvPreStartGo")?.addEventListener("click", mvStartAttempt);
+  document.querySelectorAll("[data-mv-kondisi]").forEach((b) => b.addEventListener("click", () => {
+    const k = b.dataset.mvKondisi;
+    if (!movementFlow.attempt) return; // attempt only exists post-start; pre-start taps just preview the pick
+    movementFlow.attempt.draftReview = { ...movementFlow.attempt.draftReview, kondisi: k };
+    renderDashboard();
+  }));
+  wireMovementActiveHandlers();
+  wireMovementReviewHandlers();
+  wireMovementEvidenceHandlers();
+}
+
+// Active Session (Strength), Finish & Review, Evidence, Submitted, and the
+// exit-confirmation sheet are built out in full below (stages 5-7) - kept
+// as placeholders here only long enough for Preview/Pre-Start to be
+// smoke-testable in isolation; every one of these is replaced before this
+// feature ships, never left as a stub.
+function movementActiveSessionHTML() { return `<p style="color:var(--muted)">Active Session — coming soon.</p>`; }
+function movementReviewHTML() { return `<p style="color:var(--muted)">Finish & Review — coming soon.</p>`; }
+function movementEvidenceHTML() { return `<p style="color:var(--muted)">Evidence — coming soon.</p>`; }
+function movementSubmittedHTML() { return `<p style="color:var(--muted)">Submitted — coming soon.</p>`; }
+function movementExitSheetHTML() { return ""; }
+function wireMovementActiveHandlers() {}
+function wireMovementReviewHandlers() {}
+function wireMovementEvidenceHandlers() {}
+
 // SOMA Nutrition Part B: opens the Log Meal / Nutrition flow for a given
 // nutrition-log quest (fresh or resumed) - fetches today's entries for it
 // so a resumed session shows real prior progress, not an empty slate.
@@ -5009,6 +5275,14 @@ function renderDashboard() {
   // below, exactly like Practice Test's own kind/track picker steps do.
   if (listeningDiagnosticFlow?.step === "active" || listeningDiagnosticFlow?.step === "submitted") {
     return renderListeningDiagnosticTest();
+  }
+  // BODY · MOVEMENT execution flow: its own state machine, own shell (no
+  // bottom tab bar, minimal header), same "bypass renderDashboard's normal
+  // assembly entirely" pattern as the listening diagnostic's test mode
+  // above - see movementFlow's own declaration comment for why it's kept
+  // isolated from reflectOpen/structForm/gymSession rather than folded in.
+  if (movementFlow) {
+    return renderMovementFlow();
   }
   const s = appState;
   // Task 11c: server still mixes real Side Quests into openQuests (flagged
@@ -5340,6 +5614,17 @@ function renderDashboard() {
     // non-reflective completionType above.
     if (quest?.completionType === "nutrition-log") {
       await openNutritionFlow({ id, quest });
+      renderDashboard();
+      return;
+    }
+    // BODY · MOVEMENT execution flow (design handoff): quests tagged
+    // primaryFeature "MOVEMENT" (cardio/gym Today's Trial quests, stage 1's
+    // normalizeMovementFields) get the real multi-screen flow instead of
+    // the legacy single-form reflect flow - checked before the fallthrough
+    // below, which stays exactly as-is for recovery and every other quest.
+    if (quest?.primaryFeature === "MOVEMENT") {
+      const goalIndex = allOpenQuests.find((q) => q.id === id)?.goalIndex;
+      beginMovementFlow(id, quest, goalIndex);
       renderDashboard();
       return;
     }
