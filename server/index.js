@@ -16,6 +16,7 @@ const nutrition = require("./nutrition");
 const nutritionEntry = require("./nutritionEntry");
 const metaTargets = require("./metaTargets");
 const exerciseCatalog = require("./exerciseCatalog");
+const crypto = require("crypto");
 
 // Task 14 (Livelihood Milestone, PRD.md section 26): auto-creates the fixed
 // "10 Qualified Applications" milestone the first time a Livelihood goal's
@@ -974,6 +975,107 @@ app.post("/api/quest/shortfall-reason", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan alasan." });
+  }
+});
+
+// BODY · MOVEMENT execution flow (design handoff): in-progress-attempt
+// persistence so a refresh, brief navigation away, or reopening the quest
+// never silently loses Pre-Start/Active Session/Review progress. Reuses
+// db.updateQuestProgress exactly as nutrition-log's `quest.progressive`
+// field already does (see resolveNutritionQuest/POST /api/nutrition/log
+// above) - the attempt lives inside the existing `quest` jsonb column as
+// `activeAttempt`, so GET /api/state's normal openQuests payload already
+// round-trips it back to the client on refresh, no new read endpoint
+// needed. Scoped to primaryFeature==="MOVEMENT" quests only - every other
+// completionType is untouched by these three routes.
+function movementAttemptGuard(day) {
+  if (!day) return { error: "Quest tidak ditemukan.", code: 404 };
+  if (day.reflection) return { error: "Quest ini sudah selesai.", code: 400 };
+  if (day.quest?.primaryFeature !== "MOVEMENT") return { error: "Quest ini bukan Body Movement.", code: 400 };
+  return null;
+}
+
+// Idempotent by design: a double-tap on "Mulai"/"Mulai Latihan" or a
+// refresh-triggered re-POST both just return the SAME existing attempt
+// unchanged rather than creating a second one or erroring - the client
+// can always safely call this on Pre-Start's primary CTA without first
+// checking whether an attempt already exists.
+app.post("/api/quest/:id/attempt/start", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const day = await db.getQuestById(req.userId, id);
+    const guard = movementAttemptGuard(day);
+    if (guard) return res.status(guard.code).json({ error: guard.error });
+    if (day.quest.activeAttempt) {
+      return res.json({ ok: true, activeAttempt: day.quest.activeAttempt });
+    }
+    const executionMode = day.quest.executionMode;
+    const activeAttempt = {
+      attemptId: crypto.randomUUID(),
+      startedAt: new Date().toISOString(),
+      executionMode,
+      // Cardio has no dedicated Active Session screen (design handoff, honest-
+      // evidence-only posture) - Pre-Start's "Mulai" goes straight to Review.
+      // Strength's real execution engine gets "active" instead.
+      currentScreen: executionMode === "STRENGTH" ? "active" : "review",
+      draftReview: { durationMin: "", durationSec: "", distanceKm: "", effort: null, notes: "", kondisi: null },
+      strengthExercises: executionMode === "STRENGTH"
+        ? (day.quest.plannedExercises || []).map((e) => ({
+            ...e, sets: Array.from({ length: e.targetSets }, () => ({ reps: "", weightKg: "", done: false })), rpe: null,
+          }))
+        : null,
+      evidenceChoice: null,
+    };
+    const quest = await db.updateQuestProgress(req.userId, id, { activeAttempt });
+    res.json({ ok: true, activeAttempt: quest.activeAttempt });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal memulai sesi." });
+  }
+});
+
+// Debounced incremental save (client-side ~500ms debounce + an immediate
+// flush at screen-transition boundaries, same posture as the onboarding
+// draft's saveOnboardingDraft/saveOnboardingDraftNow) - shallow-merges the
+// patch onto the EXISTING activeAttempt only, never the whole quest, and
+// strips attemptId/startedAt/executionMode from the incoming patch so a
+// save call can never rewrite the attempt's own identity/mode mid-flight.
+app.post("/api/quest/:id/attempt/save", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const day = await db.getQuestById(req.userId, id);
+    const guard = movementAttemptGuard(day);
+    if (guard) return res.status(guard.code).json({ error: guard.error });
+    if (!day.quest.activeAttempt) return res.status(400).json({ error: "Belum ada sesi aktif untuk quest ini." });
+    const patch = req.body?.patch;
+    if (!patch || typeof patch !== "object") return res.status(400).json({ error: "Data patch tidak valid." });
+    const { attemptId, startedAt, executionMode, ...safePatch } = patch;
+    const activeAttempt = { ...day.quest.activeAttempt, ...safePatch };
+    const quest = await db.updateQuestProgress(req.userId, id, { activeAttempt });
+    res.json({ ok: true, activeAttempt: quest.activeAttempt });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan progres." });
+  }
+});
+
+// "Batalkan Quest" (Active Session's exit sheet, or Finish & Review) -
+// discards the attempt entirely, no reflection written, quest returns to
+// not-started and stays retryable. Distinct from "Akhiri & Simpan Progress"
+// (client just navigates the SAME attempt to the review screen with
+// whatever's logged so far - no server call needed for that, the attempt
+// keeps living until Evidence's final submit clears it).
+app.post("/api/quest/:id/attempt/abandon", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const day = await db.getQuestById(req.userId, id);
+    const guard = movementAttemptGuard(day);
+    if (guard) return res.status(guard.code).json({ error: guard.error });
+    await db.updateQuestProgress(req.userId, id, { activeAttempt: null });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal membatalkan sesi." });
   }
 });
 
