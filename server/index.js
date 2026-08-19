@@ -18,6 +18,7 @@ const nutrition = require("./nutrition");
 const nutritionEntry = require("./nutritionEntry");
 const metaTargets = require("./metaTargets");
 const exerciseCatalog = require("./exerciseCatalog");
+const questHub = require("./questHub");
 const crypto = require("crypto");
 
 // Task 14 (Livelihood Milestone, PRD.md section 26): auto-creates the fixed
@@ -2027,6 +2028,104 @@ app.post("/api/nutrition/analyze-photo", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menganalisis foto." });
+  }
+});
+
+// Multi-Domain Quest Hub (design handoff, 19 Agustus): a quest requiring
+// BOTH a Recovery AND a Nutrition sub-flow, order-independent, before it
+// resolves. Both save routes share this helper (real shared logic, not
+// premature abstraction - the two differ only in which featureKey/validator
+// they use) - fetch, ownership/type/not-already-completed checks, merge the
+// patch into quest.featureData[featureKey] (partial saves allowed, brief:
+// "saves whatever is filled"), recompute featureState/status fresh from the
+// merged data (never trust a stored status independently - see
+// questHub.computeFeatureState's own comment), persist via the existing
+// generic updateQuestProgress read-modify-write.
+async function saveQuestHubFeature(req, res, featureKey, validateFn) {
+  try {
+    const { questId } = req.body;
+    const day = await db.getQuestById(req.userId, Number(questId));
+    if (!day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "multi-domain") return res.status(400).json({ error: "Quest ini bukan Multi-Domain Quest Hub." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah selesai." });
+
+    const validated = validateFn(req.body);
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
+
+    const requirements = day.quest.featureRequirements?.[featureKey] || [];
+    const featureData = { ...(day.quest.featureData || {}), [featureKey]: { ...(day.quest.featureData?.[featureKey] || {}), ...validated.clean } };
+    const featureState = { ...(day.quest.featureState || {}) };
+    featureState[featureKey] = questHub.computeFeatureState(requirements, featureData[featureKey]);
+    const status = questHub.computeQuestStatus(featureState, day.quest.primaryFeature, day.quest.supportingFeatures || []);
+
+    const updated = await db.updateQuestProgress(req.userId, day.id, { featureData, featureState, status });
+    res.json({ ok: true, featureData: updated.featureData, featureState: updated.featureState, status: updated.status });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan data." });
+  }
+}
+
+app.post("/api/quest-hub/recovery", requireAuth, (req, res) => saveQuestHubFeature(req, res, "RECOVERY", questHub.validateRecoveryPatch));
+app.post("/api/quest-hub/nutrition", requireAuth, (req, res) => saveQuestHubFeature(req, res, "NUTRITION", questHub.validateNutritionPatch));
+
+// Only reachable once every feature is COMPLETE (quest.status ===
+// READY_TO_COMPLETE, recomputed fresh above on every patch save - never a
+// client-trusted flag). Submits the already-saved featureData/featureState,
+// never re-collects anything - same "objective evidence, one AI call for
+// mentorReply/interpretation, no re-judging the raw data" pattern
+// resolveNutritionQuest already established for nutrition-log. No
+// chapterAdvance handling here, matching that same precedent (both are
+// programmatic/lazy-style completions, distinct from the main interactive
+// POST /api/reflection flow where chapter advance is the norm).
+app.post("/api/quest-hub/complete", requireAuth, async (req, res) => {
+  try {
+    const { questId } = req.body;
+    const day = await db.getQuestById(req.userId, Number(questId));
+    if (!day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "multi-domain") return res.status(400).json({ error: "Quest ini bukan Multi-Domain Quest Hub." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah selesai." });
+    if (day.quest.status !== "READY_TO_COMPLETE") return res.status(400).json({ error: "Lengkapi Recovery dan Nutrition dulu." });
+
+    const state = await db.getState(req.userId);
+    const ctx = {
+      profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
+      quest: day.quest, status: "done",
+      multiDomainResult: { status: day.quest.status, featureState: day.quest.featureState, featureData: day.quest.featureData },
+      stats: state.stats, growthSessions: state.growthSessions,
+    };
+    const result = await ai.processReflection(ctx);
+    const deltas = result.statDeltas || {};
+    const newStats = { ...state.stats };
+    Object.entries(deltas).forEach(([k, v]) => {
+      if (newStats[k] !== undefined && typeof v === "number") {
+        newStats[k] = Math.max(0, Math.min(100, newStats[k] + Math.max(0, Math.min(5, Math.round(v)))));
+      }
+    });
+    const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+
+    await db.updateQuestProgress(req.userId, day.id, { status: "COMPLETED" });
+    const reflection = {
+      status: "COMPLETED", text: "",
+      multiDomainResult: { featureData: day.quest.featureData, featureState: day.quest.featureState },
+      deltas, mentorReply: result.mentorReply, interpretation: result.interpretation || null,
+      safetyNote: result.safetyNote || null,
+      timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+    await db.touchStatActivity(req.userId, Object.keys(deltas));
+    await db.updateState(req.userId, {
+      stats: newStats, chapterNumber: state.chapterNumber, chapterTitle: state.chapterTitle,
+      growthSessions: newGrowthSessions, pathwayNoun: state.pathwayNoun,
+    });
+
+    res.json({
+      ok: true, questTitle: day.quest.title, mentorReply: result.mentorReply,
+      interpretation: result.interpretation || null, safetyNote: result.safetyNote || null, deltas,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyelesaikan quest." });
   }
 });
 
