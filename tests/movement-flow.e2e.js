@@ -131,11 +131,14 @@ async function test(name, fn) {
   }
 
   console.log("E2E: Quest Preview (both modes)");
-  await test("Cardio quest opens Preview with BODY · MOVEMENT label, checklist, no bottom tab bar", async () => {
+  await test("Cardio quest opens Preview with the shared quest eyebrow, checklist, no bottom tab bar", async () => {
     await openDashboard();
     await page.click(`[data-reflect-id="${cardioId}"]`);
     await page.waitForSelector("#mvPreviewStart", { timeout: 20000 });
-    assert.ok(await page.locator("text=BODY · MOVEMENT").count(), "domain label must render");
+    // SOMA Training feedback brief (20 Agustus), item 3: Movement screens now
+    // render the SAME questEyebrowHTML() eyebrow as the Home quest card
+    // ("QUEST HARI INI · BODY") instead of a Movement-only static label.
+    assert.ok(await page.locator("text=QUEST HARI INI · BODY").count(), "shared quest eyebrow must render");
     assert.ok(await page.locator("text=Jarak minimal 3.2 km").count(), "cardio checklist must read off evidenceSchema.target");
     assert.strictEqual(await page.locator(".tab-bar").count(), 0, "Movement flow must hide the bottom tab bar");
   });

@@ -822,6 +822,15 @@ let metaTargetBusy = false; // guards the confirm/add-goal buttons while a reque
 // evidence).
 let nutritionFlow = null;
 let nfSearchTimer = null; // debounce handle for the Nutrition page's live food search
+// Multi-Domain Quest Hub (design handoff, 19 Agustus) - same "separate flow,
+// not reflectOpen" pattern as nutritionFlow/jobMatchFlow above. Purely a
+// VIEW pointer, not a data cache - questHubFlowHTML always looks up the
+// live quest fresh from appState.openQuests by questId every render, same
+// "never cache, always re-derive from appState" convention used everywhere
+// else in this file, so a save (which refreshes appState) is instantly
+// reflected without questHubFlow needing to track the data itself.
+// { questId, view: "hub"|"recovery"|"nutrition", draft, error, saving, completing }
+let questHubFlow = null;
 // Task 10a (Artifacts library): sheet state, independent of any quest flow -
 // reachable any time via its own icon, not just from job-match-analysis.
 let artifactsOpen = false;
@@ -3670,6 +3679,264 @@ function nutritionFlowHTML() {
     </div>`;
 }
 
+// Multi-Domain Quest Hub (design handoff, 19 Agustus): a quest requiring
+// BOTH Recovery AND Nutrition sub-flows, completed in either order, routed
+// through this dedicated 3-view screen (overview -> a feature module ->
+// back to overview -> "Selesaikan Quest" once both are COMPLETE). Own field
+// vocabulary (sleep/energy/soreness/recovery_session,
+// protein/hydration/meals), deliberately NOT the pre-existing single-domain
+// recovery form (recoveryFieldsHTML above) or nutrition-log's PROGRESSIVE
+// system (nutritionFlow above) - see server/questHub.js's own comment for
+// why these stay separate. Requirement ids/labels/targets are hand-synced
+// with that module (no shared module system in this codebase, same
+// established pattern as SUB_PATHWAY_NAMES/PATHWAY_DESC elsewhere in this
+// file) - keep both in sync if either changes. CSS prefix deliberately
+// .mdq- (not .qh-) to avoid any confusion with the pre-existing --qh-*
+// custom properties/.qhub- classes belonging to the unrelated Home compact
+// quest carousel feature (see styles.css's own comment on this).
+const QH_FEATURE_META = {
+  RECOVERY: { label: "Recovery", accent: "#63e38b", icon: "heart", desc: "Tidur, kondisi tubuh, atau recovery session." },
+  NUTRITION: { label: "Nutrition", accent: "#c4d97a", icon: "droplet", desc: "Protein, hidrasi, dan asupan makan." },
+};
+const QH_SLEEP_OPTIONS = ["Kurang", "Cukup", "Baik"];
+const QH_ENERGY_OPTIONS = ["Rendah", "Normal", "Tinggi"];
+const QH_SORENESS_OPTIONS = ["Tidak ada", "Ringan", "Berat"];
+const QH_RECOVERY_SESSION_OPTIONS = ["Jalan pemulihan", "Stretching", "Mobility", "Meditasi"];
+
+function qhIconSVG(icon, color) {
+  const common = `width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.6" style="flex:none"`;
+  if (icon === "heart") return `<svg ${common}><path d="M12 20s-7-4.35-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 5c-2.5 4.65-9.5 9-9.5 9z"></path></svg>`;
+  return `<svg ${common}><path d="M12 2s6 7 6 12a6 6 0 0 1-12 0c0-5 6-12 6-12z"></path></svg>`; // droplet (Nutrition)
+}
+// "N dari M tercatat" - mirrors server/questHub.js's countRecorded exactly
+// (required-ids-with-a-recorded-value count), so the Hub card's bukti-ring
+// and the server's own gating never disagree about what's "recorded".
+function qhCountRecorded(requirements, data) {
+  const d = data || {};
+  const requiredIds = (requirements || []).filter((r) => r.required).map((r) => r.id);
+  return { recorded: requiredIds.filter((id) => d[id] != null).length, total: requiredIds.length };
+}
+function qhCtaLabel(state) {
+  return state === "COMPLETE" ? "Lihat/Ubah" : state === "IN_PROGRESS" ? "Lanjut" : "Isi";
+}
+function qhStatusPillHTML(state, recorded, total) {
+  const cls = state === "COMPLETE" ? "done" : state === "IN_PROGRESS" ? "partial" : "empty";
+  const text = state === "COMPLETE" ? "Selesai" : state === "IN_PROGRESS" ? `${recorded} dari ${total} tercatat` : "Belum lengkap";
+  return `<span class="mdq-pill mdq-pill-${cls}">${esc(text)}</span>`;
+}
+
+// "Recovery + Nutrition" style short label for a multi-domain quest -
+// generic over primaryFeature/supportingFeatures (not hardcoded to this
+// one template) so a future 2nd multi-domain template stays correct here
+// without a code change, same principle as questHub.js's own template
+// design. Used by both the compact carousel card's summary line and the
+// detail panel's eyebrow suffix (design handoff 01-01-home.png).
+function mdqFeatureLabelJoin(quest, upper) {
+  const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+  return keys.map((k) => {
+    const label = QH_FEATURE_META[k]?.label || k;
+    return upper ? label.toUpperCase() : label;
+  }).join(" + ");
+}
+
+// Home screen's 3-tile info row (design handoff 01-01-home.png, sits
+// between the description and "SELESAI KETIKA" on the detail panel) -
+// "area utama"/"waktu"/"tujuan" at a glance. Originally multi-domain-only;
+// widened to every quest type on founder request (20 Agustus) once a
+// plain single-feature quest was compared side by side and the founder
+// wanted one consistent card style everywhere, not just Recovery+Nutrition.
+// For a multi-domain quest, "area" is the real primaryFeature+supportingFeatures
+// count/labels and "tujuan" is the template's own tujuanSingkat. For every
+// other completionType there's no such structured breakdown, so "area"
+// falls back to the quest's single statFocus (still real data, just not
+// multi-part) and "tujuan" falls back to the active goal text (goalLabel -
+// user-supplied, must stay escaped same as every other use of it in this
+// file) since there's no per-quest short-purpose field outside the Hub
+// template.
+function mdqHomeInfoRowHTML(quest, goalLabel) {
+  const isMultiDomain = quest.completionType === "multi-domain";
+  const keys = isMultiDomain ? [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean) : [];
+  const areaCount = isMultiDomain ? keys.length : 1;
+  const areaSub = isMultiDomain ? mdqFeatureLabelJoin(quest, false) : esc(statLabel(quest.statFocus) || "Umum");
+  const tujuanSub = esc(quest.tujuanSingkat || goalLabel || "");
+  const common = `width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" style="flex:none"`;
+  const tiles = [
+    { icon: `<svg ${common}><path d="M5 3v18M5 4h11l-2.5 3.5L16 11H5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: `${areaCount} area utama`, sub: areaSub },
+    { icon: `<svg ${common}><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: "Est. waktu", sub: "±30 menit" },
+    { icon: `<svg ${common}><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="0.8" fill="var(--accent)"></circle></svg>`, label: "Tujuan", sub: tujuanSub },
+  ];
+  return `
+    <div class="mdq-info-row">
+      ${tiles.map((t) => `
+        <div class="mdq-info-tile">
+          ${t.icon}
+          <div class="mdq-info-label">${esc(t.label)}</div>
+          <div class="mdq-info-sub">${t.sub}</div>
+        </div>`).join("")}
+    </div>`;
+}
+
+// Home screen's "SELESAI KETIKA" checklist. For a multi-domain quest this
+// replaces the generic bullet list with a per-area radio-style checklist
+// reflecting REAL featureState - never a static preview that could drift
+// from what the Hub itself shows, same "evidence, not checkboxes, always
+// derived" rule as questHub.js's own computeFeatureState. Every other
+// completionType has no per-requirement completion tracking at all (the
+// quest resolves as one atomic event, not N independently-completable
+// parts), so widening this to all quest types (founder request, 20
+// Agustus) means the radios for those requirements stay permanently
+// unfilled here by construction - same honesty rule, just nothing to
+// report yet since there's no sub-state to read. That's still preferable
+// to inventing fake partial-completion data: it's the same information
+// the old bullet list carried, only visually unified with the Hub's style.
+function mdqHomeChecklistHTML(quest, dod) {
+  const isMultiDomain = quest.completionType === "multi-domain";
+  if (isMultiDomain) {
+    const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+    const featureState = quest.featureState || {};
+    return `
+      <div class="mdq-home-checklist">
+        ${keys.map((k) => {
+          const done = featureState[k] === "COMPLETE";
+          const label = QH_FEATURE_META[k]?.label || k;
+          return `
+          <div class="mdq-home-check-item">
+            <span class="mdq-home-check-radio ${done ? "done" : ""}"></span>
+            <span>${esc(label)} requirement terpenuhi</span>
+          </div>`;
+        }).join("")}
+      </div>`;
+  }
+  return `
+    <div class="mdq-home-checklist">
+      ${(dod || []).map((d) => `
+        <div class="mdq-home-check-item">
+          <span class="mdq-home-check-radio"></span>
+          <span>${esc(d)}</span>
+        </div>`).join("")}
+    </div>`;
+}
+
+function questHubFlowHTML() {
+  const f = questHubFlow;
+  if (!f) return "";
+  // Never cached in questHubFlow itself - always looked up fresh from
+  // appState.openQuests (refreshed after every save), same "single source
+  // of truth" convention every other flow in this file follows. This is
+  // also what makes a save's effect show up immediately without
+  // questHubFlow needing to track the data itself. Reads appState directly
+  // (not the allOpenQuests local var renderDashboard computes) - this
+  // function sits outside renderDashboard's scope, called from inside its
+  // homeBodyHTML dispatch ternary, so allOpenQuests itself isn't reachable
+  // here as a free variable.
+  const day = (appState.openQuests || []).find((q) => q.id === f.questId);
+  if (!day) {
+    return `<div class="quest-card fadeUp"><p class="why">Quest ini sudah tidak tersedia lagi.</p><button class="btn-primary full" id="mdqBackHome" style="margin-top:14px">← Kembali ke Home</button></div>`;
+  }
+  if (f.view === "recovery") return questHubFeatureHTML(day, f, "RECOVERY");
+  if (f.view === "nutrition") return questHubFeatureHTML(day, f, "NUTRITION");
+  return questHubOverviewHTML(day, f);
+}
+
+function questHubOverviewHTML(day, f) {
+  const quest = day.quest;
+  const primary = quest.primaryFeature;
+  const supporting = quest.supportingFeatures || [];
+  const featureKeys = [primary, ...supporting].filter(Boolean);
+  const featureState = quest.featureState || {};
+  const requirements = quest.featureRequirements || {};
+  const completeCount = featureKeys.filter((k) => featureState[k] === "COMPLETE").length;
+  const ready = quest.status === "READY_TO_COMPLETE";
+
+  return `
+    <div class="quest-card fadeUp mdq-card">
+      <button class="mdq-back" id="mdqBackHome">← Kembali</button>
+      <div class="mdq-eyebrow mono">SESSION QUEST · ${esc(quest.domain || "BODY")} • ${esc(mdqFeatureLabelJoin(quest, false))}</div>
+      <h2 class="fr mdq-title">${esc(quest.title)}</h2>
+      <p class="mdq-desc">Lengkapi Recovery dan Nutrition kapan pun selama hari ini. Kamu bebas mulai dari mana.</p>
+      <div class="mdq-meta mono">±30 menit · ${featureKeys.length} area perlu terpenuhi · Tujuan: Pulih &amp; bertenaga</div>
+
+      <div class="mdq-section-label mono">LENGKAPI KEDUA AREA</div>
+      ${featureKeys.map((key) => {
+        const meta = QH_FEATURE_META[key] || { label: key, accent: "#e8a33d", icon: "heart", desc: "" };
+        const reqs = requirements[key] || [];
+        const data = (quest.featureData || {})[key] || {};
+        const { recorded, total } = qhCountRecorded(reqs, data);
+        const state = featureState[key] || "NOT_STARTED";
+        return `
+        <div class="mdq-feature-card" style="border-color:${meta.accent}33">
+          <div class="mdq-feature-top">
+            <div class="mdq-feature-icon" style="border-color:${meta.accent}55">${qhIconSVG(meta.icon, meta.accent)}</div>
+            <div class="mdq-feature-info">
+              <div class="mdq-feature-name fr">${esc(meta.label)}</div>
+              <div class="mdq-feature-desc">${esc(meta.desc)}</div>
+            </div>
+            <div class="mdq-ring" style="--mdq-ring-color:${meta.accent};--mdq-ring-pct:${total ? Math.round((recorded / total) * 100) : 0}%">
+              <span class="mdq-ring-frac">${total ? `${recorded}/${total}` : "–"}</span><span class="mdq-ring-label mono">BUKTI</span>
+            </div>
+          </div>
+          ${qhStatusPillHTML(state, recorded, total)}
+          <button class="btn-primary full mdq-feature-cta" style="background:${meta.accent}" data-mdq-open="${key.toLowerCase()}">${esc(qhCtaLabel(state))} ${esc(meta.label)} ›</button>
+        </div>`;
+      }).join("")}
+
+      <div class="mdq-progress-label mono">${completeCount} / ${featureKeys.length} area selesai</div>
+      <div class="mdq-progress-bar"><div class="mdq-progress-fill" style="width:${featureKeys.length ? (completeCount / featureKeys.length) * 100 : 0}%"></div></div>
+
+      ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:10px 0 0">${esc(f.error)}</p>` : ""}
+      <button class="btn-primary full" id="mdqComplete" style="margin-top:16px" ${ready && !f.completing ? "" : "disabled"}>${f.completing ? "Menyelesaikan..." : "Selesaikan Quest"}</button>
+      ${!ready ? `<p class="mdq-helper mono">Lengkapi Recovery dan Nutrition dulu.</p>` : ""}
+    </div>`;
+}
+
+// Shared shell for both feature modules - RECOVERY's chip-pick fields and
+// NUTRITION's numeric steppers are different enough in kind that they don't
+// share field-rendering code, but the surrounding card/back-button/save-
+// button/draft-init logic is identical, so that part is unified here rather
+// than duplicated per feature.
+function questHubFeatureHTML(day, f, featureKey) {
+  const meta = QH_FEATURE_META[featureKey];
+  const draft = f.draft || {};
+  const chipRow = (label, key, options) => `
+    <div class="field">
+      <label class="mdq-field-label mono">${esc(label)}</label>
+      <div class="status-row">
+        ${options.map((v) => `<button class="status-btn ${draft[key] === v ? "active" : ""}" data-mdq-chip="${key}" data-mdq-value="${esc(v)}">${esc(v)}</button>`).join("")}
+      </div>
+    </div>`;
+  const stepperRow = (label, key, target, unit, step, decimals) => {
+    const val = typeof draft[key] === "number" ? draft[key] : 0;
+    return `
+    <div class="mdq-stepper-row">
+      <div class="mdq-stepper-top"><span>${esc(label)}</span><span class="mono mdq-stepper-val">${val.toFixed(decimals)} / ${target}${unit}</span></div>
+      <div class="mdq-stepper-controls">
+        <button class="mdq-stepper-btn" data-mdq-step="${key}" data-mdq-delta="-${step}" data-mdq-max="999">−</button>
+        <div class="mdq-stepper-track"><div class="mdq-stepper-fill" style="width:${Math.min(100, (val / target) * 100)}%;background:${meta.accent}"></div></div>
+        <button class="mdq-stepper-btn" data-mdq-step="${key}" data-mdq-delta="${step}" data-mdq-max="999">+</button>
+      </div>
+    </div>`;
+  };
+  const bodyHTML = featureKey === "RECOVERY"
+    ? `<h2 class="fr mdq-title">Body Check &amp; Recovery Session</h2>
+       ${chipRow("TIDUR SEMALAM", "sleep", QH_SLEEP_OPTIONS)}
+       ${chipRow("ENERGI", "energy", QH_ENERGY_OPTIONS)}
+       ${chipRow("SORENESS", "soreness", QH_SORENESS_OPTIONS)}
+       <div class="mdq-divider"></div>
+       ${chipRow("RECOVERY SESSION", "recovery_session", QH_RECOVERY_SESSION_OPTIONS)}`
+    : `<h2 class="fr mdq-title">Protein, Hidrasi &amp; Makan</h2>
+       ${stepperRow("Protein", "protein", 80, "g", 5, 0)}
+       ${stepperRow("Hidrasi", "hydration", 2.5, "L", 0.25, 2)}
+       ${stepperRow("Meals dicatat", "meals", 3, "", 1, 0)}`;
+  return `
+    <div class="quest-card fadeUp mdq-card">
+      <button class="mdq-back" id="mdqBackHub">← Kembali</button>
+      <div class="mdq-eyebrow mono" style="color:${meta.accent}">${meta.label.toUpperCase()}</div>
+      ${bodyHTML}
+      ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+      <button class="btn-primary full" id="mdqSaveFeature" data-mdq-feature="${featureKey}" style="margin-top:18px;background:${meta.accent}">${f.saving ? "Menyimpan..." : `Simpan ${esc(meta.label)}`}</button>
+    </div>`;
+}
+
 // Task 10a: Artifacts library sheet - reachable any time via its own icon,
 // independent of any quest flow (spec: "lihat, tambah, ATAU GANTI artifact
 // kapan saja"). artifactsList is metadata-only (no file bytes - see
@@ -5460,6 +5727,8 @@ function questCategoryIconSVG(quest, size, color) {
       return `<svg ${common}><path d="M6 2v6a2 2 0 0 0 4 0V2M7 2v6" stroke-linecap="round"></path><line x1="7" y1="8" x2="7" y2="22"></line><path d="M17 2v9c0 1.5-1 2-1 2v9" stroke-linecap="round"></path></svg>`;
     case "video-quiz":
       return `<svg ${common}><rect x="2.5" y="5" width="19" height="14" rx="2"></rect><path d="M10 9.5l5 2.5-5 2.5z" stroke-linejoin="round"></path></svg>`;
+    case "multi-domain":
+      return `<svg ${common}><path d="M12 20s-6-3.8-8.5-8A5 5 0 0 1 12 6a5 5 0 0 1 8.5 6c-2.5 4.2-8.5 8-8.5 8z"></path><path d="M9 11h6M12 8v6" stroke-linecap="round"></path></svg>`;
     case "reflective":
     default:
       return `<svg ${common}><circle cx="12" cy="12" r="9"></circle><path d="M15 9l-2 5-5 2 2-5z"></path></svg>`;
@@ -5519,6 +5788,8 @@ function deriveDoDChecklist(quest) {
       else if (s.status === "skipped") suffix = " — dilewati (job match belum lolos)";
       items.push(`${glyph} Langkah ${i + 1}: ${label}${suffix}`);
     });
+  } else if (quest.completionType === "multi-domain") {
+    items.push("2 area utama · Recovery + Nutrition");
   }
   if (!items.length) items.push(quest.description);
   return items;
@@ -5558,6 +5829,8 @@ function questHubCardsHTML(quests) {
         // before the Home redesign, just relocated to the compact card.
         const summary = q.quest.completionType === "nutrition-log" && q.quest.progressive
           ? nutritionProgressLabel(q.quest.progressive)
+          : q.quest.completionType === "multi-domain"
+          ? mdqFeatureLabelJoin(q.quest, false)
           : (q.quest.description || "").split(/(?<=[.!?])\s/)[0];
         return `
         <button class="qhub-card ${i === activeIdx ? "selected" : ""}" data-qhub-idx="${i}">
@@ -5579,30 +5852,47 @@ function questHubCardsHTML(quests) {
 // (beginStructuredOrReflectiveFlow + the 4 special-flow branches) -
 // nothing about quest completion itself changes, only what feeds the
 // button's label/disabled state is new.
-function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
-  const reasonOpen = reasonOpenIds.has(q.id);
+// SOMA Training feedback brief (20 Agustus), item 3: this eyebrow used to be
+// built inline (questDetailPanelHTML only) with a separate, independently-
+// added "Body: Training" SOMA sub-label and multi-domain feature suffix -
+// every other Movement screen rolled its own separate/inconsistent header
+// (or none at all). Extracted so questDetailPanelHTML/Preview/Pre-Start/
+// Active Session/Evidence/Submitted all render the exact same string,
+// keeping the multi-domain suffix and Training sub-label intact, with a
+// chain-badge branch (quest.chain, set by the Recovery->Nutrition->Training
+// chain feature) taking priority over all of it when present.
+function questEyebrowHTML(quest) {
+  const isMultiDomain = quest.completionType === "multi-domain";
+  const somaSubLabel = quest.primaryFeature === "MOVEMENT" ? "Training" : "";
+  const statTag = quest.statFocus ? esc(statLabel(quest.statFocus)).toUpperCase() : "";
+  let base = `QUEST HARI INI${statTag ? " · " + statTag + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(quest, true)) : ""}`;
   // Founder request 19 Agustus: name the LABORA feature in the eyebrow -
   // single quest: "QUEST HARI INI · LIVELIHOOD · JOB MATCH"; chain quest:
   // "QUEST HARI INI · LIVELIHOOD: JOB MATCH · LANGKAH 2/3".
-  const stat = q.quest.statFocus ? esc(statLabel(q.quest.statFocus)).toUpperCase() : "";
-  let eyebrow = `QUEST HARI INI${stat ? ` · ${stat}` : ""}`;
-  if (q.quest.completionType === "labora-chain" && q.quest.laboraChain) {
-    const c = q.quest.laboraChain;
-    const step = chainCurrentStep(q.quest);
-    if (step) eyebrow = `QUEST HARI INI · ${stat || "LIVELIHOOD"}: ${LABORA_FEATURE_EYEBROW[step.feature] || ""} · LANGKAH ${c.currentIndex + 1}/${c.steps.length}`;
-  } else if (LABORA_FEATURE_EYEBROW[q.quest.completionType]) {
-    eyebrow += ` · ${LABORA_FEATURE_EYEBROW[q.quest.completionType]}`;
+  if (quest.completionType === "labora-chain" && quest.laboraChain) {
+    const c = quest.laboraChain;
+    const step = chainCurrentStep(quest);
+    if (step) base = `QUEST HARI INI · ${statTag || "LIVELIHOOD"}: ${LABORA_FEATURE_EYEBROW[step.feature] || ""} · LANGKAH ${c.currentIndex + 1}/${c.steps.length}`;
+  } else if (LABORA_FEATURE_EYEBROW[quest.completionType]) {
+    base += ` · ${LABORA_FEATURE_EYEBROW[quest.completionType]}`;
   }
+  const text = quest.chain ? `BODY · ${esc(quest.chain.label).toUpperCase()} · Langkah ${quest.chain.step}/${quest.chain.total}` : base;
+  return `<div class="qhub-eyebrow mono">${text}</div>`;
+}
+
+function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
+  const reasonOpen = reasonOpenIds.has(q.id);
   const dod = deriveDoDChecklist(q.quest);
   return `
     <div class="qhub-detail">
-      <div class="qhub-eyebrow mono">${eyebrow}</div>
+      ${questEyebrowHTML(q.quest)}
       ${goalLabel ? `<div class="qhub-target">Menuju target: <span class="qhub-target-value">${esc(goalLabel)}</span></div>` : ""}
       <h2 class="fr qhub-detail-title">${esc(q.quest.title)}</h2>
       <p class="qhub-detail-desc">${esc(q.quest.description)}</p>
       ${q.quest.completionType === "nutrition-log" && q.quest.progressive ? `<p class="qhub-target mono" style="color:var(--qh-gold)">${esc(nutritionProgressLabel(q.quest.progressive))}</p>` : ""}
+      ${mdqHomeInfoRowHTML(q.quest, goalLabel)}
       <div class="qhub-dod-label mono">SELESAI KETIKA</div>
-      <ul class="qhub-dod-list">${dod.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>
+      ${mdqHomeChecklistHTML(q.quest, dod)}
       <div class="qhub-detail-foot">
         <span class="qhub-duration mono">±30 menit</span>
         <button class="btn-primary" data-reflect-id="${q.id}" ${ctaDisabled ? "disabled" : ""}>${esc(ctaLabel)}</button>
@@ -5711,6 +6001,7 @@ function completedResultCardHTML(r) {
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
       ${r.structuredData?.kind === "gym-session" ? gymSessionEvalHTML(r.structuredData.evaluation) : ""}
       ${r.jobApplication ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(jobApplicationSummary(r.jobApplication))}</div>` : ""}
+      ${r.multiDomainSummary ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">Recovery ✓ / Nutrition ✓</div>` : ""}
       ${r.practiceTest ? practiceTestResultHTML(r.practiceTest) : ""}
       ${r.jobMatch ? jobMatchResultHTML(r.jobMatch) : ""}
       ${r.mentorReply ? `<p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>` : ""}
@@ -6312,10 +6603,6 @@ async function mvAbandonAttempt() {
   renderDashboard();
 }
 
-function movementLabel(quest, withExecutionMode) {
-  const base = "BODY · MOVEMENT";
-  return withExecutionMode && quest.executionMode ? `${base} · ${quest.executionMode}` : base;
-}
 
 // SELESAI KETIKA checklist content - concrete minimum output, not a repeat
 // of quest.description (design handoff's explicit rule). Cardio reads off
@@ -6355,7 +6642,7 @@ function movementPreviewHTML() {
   const goalLabel = (appState.goals || [])[movementFlow.goalIndex] || quest.title;
   return `
     <div class="quest-card fadeUp">
-      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:6px">${esc(movementLabel(quest))}</div>
+      ${questEyebrowHTML(quest)}
       <p style="color:var(--muted);font-size:12.5px;margin:0 0 10px">Menuju target: <span style="color:var(--text)">${esc(goalLabel)}</span></p>
       <h2 class="fr" style="font-size:21px;margin:0 0 10px;line-height:1.3">${esc(quest.title)}</h2>
       <p style="color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 16px">${esc(quest.description)}</p>
@@ -6383,7 +6670,7 @@ function movementPreStartHTML() {
     <h2 class="fr" style="font-size:20px;margin:0 0 6px">Siap mulai quest?</h2>
     <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Pastikan semua sudah siap sebelum mulai.</p>
     <div class="quest-card">
-      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:6px">${esc(movementLabel(quest))}</div>
+      ${questEyebrowHTML(quest)}
       <div style="font-size:16px;margin-bottom:14px">${esc(quest.title)}</div>
       ${isStrength ? `
       <div class="mono" style="font-size:10.5px;color:var(--muted-dim);letter-spacing:1px;margin-bottom:6px">HARI INI</div>
@@ -6547,7 +6834,7 @@ function movementActiveSessionHTML() {
     </div>`;
   }).join("");
   return `
-      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:4px">${esc(movementLabel(quest, true))}</div>
+      ${questEyebrowHTML(quest)}
       <h2 class="fr" style="font-size:19px;margin:0 0 16px">${esc(quest.title)}</h2>
       ${cardsHTML}
       <div style="display:flex;gap:12px;margin-top:18px">
@@ -6784,6 +7071,7 @@ function movementEvidenceHTML() {
   const attempt = movementFlow.attempt;
   if (quest.executionMode === "STRENGTH") {
     return `
+      ${questEyebrowHTML(quest)}
       <h2 class="fr" style="font-size:20px;margin:0 0 4px">Kirim bukti latihan</h2>
       <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Data set/reps/beban yang barusan kamu catat sudah cukup jadi bukti.</p>
       <div class="quest-card" style="display:flex;align-items:center;gap:12px">
@@ -6791,7 +7079,7 @@ function movementEvidenceHTML() {
         <span style="font-size:13.5px">Sistem sudah mencatat sets, reps, dan beban dari sesi latihanmu — nggak perlu screenshot tambahan.</span>
       </div>
       ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
-      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>Kirim Bukti</button>`;
+      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? "Mengirim…" : "Kirim Bukti"}</button>`;
   }
   const choices = [
     ["activity-data", "Data aktivitas", "Durasi + jarak yang sudah dicatat"],
@@ -6799,6 +7087,7 @@ function movementEvidenceHTML() {
     ["treadmill-photo", "Foto treadmill", "Jika lari di treadmill"],
   ];
   return `
+    ${questEyebrowHTML(quest)}
     <h2 class="fr" style="font-size:20px;margin:0 0 4px">Kirim bukti aktivitas</h2>
     <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Pilih bukti yang ingin kamu kirim.</p>
     <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:8px">BUKTI UTAMA (PILIH SALAH SATU)</div>
@@ -6813,7 +7102,7 @@ function movementEvidenceHTML() {
         ${attempt.evidencePhotoName ? `<p style="color:var(--muted);font-size:12px;margin:6px 0 0">✓ ${esc(attempt.evidencePhotoName)}</p>` : ""}
       </div>` : ""}
     ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
-    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>Kirim Bukti</button>`;
+    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? "Mengirim…" : "Kirim Bukti"}</button>`;
 }
 
 function wireMovementEvidenceHandlers() {
@@ -6952,10 +7241,12 @@ async function mvSubmitStrength() {
 // and feed the next quest/Riwayat as usual, just not echoed verbatim here.
 function movementSubmittedHTML() {
   return `
+    ${questEyebrowHTML(movementFlow.quest)}
     <div style="text-align:center;padding:20px 0 0">
       <div style="width:56px;height:56px;border-radius:50%;border:1px solid var(--growth);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;color:var(--growth);font-size:24px">✓</div>
       <h2 class="fr" style="font-size:19px;margin:0 0 6px">Bukti terkirim!</h2>
-      <p style="color:var(--muted);font-size:13.5px;margin:0 0 22px">Eleva sedang menganalisis progresmu.</p>
+      <p style="color:var(--muted);font-size:13.5px;margin:0 0 6px">Eleva sedang menganalisis progresmu.</p>
+      <p style="color:var(--muted);font-size:12.5px;margin:0 0 22px">Analisis lengkapnya akan muncul di quest berikutnya sebagai "Eleva Observed."</p>
     </div>
     <div class="quest-card" style="text-align:left">
       ${[
@@ -7167,7 +7458,13 @@ function renderDashboard() {
   // can look one up by id while a META session is in progress via
   // targetDay/reflectTarget below), but never join the Primary Quest row -
   // see the is_meta column comment in db.js's init().
-  const openQuests = allOpenQuests.filter((q) => !q.isSideQuest && !q.isMeta);
+  const openQuests = allOpenQuests.filter((q) => !q.isSideQuest && !q.isMeta && !q.isChain);
+  // SOMA Training feedback brief item 4: a chain quest stays out of the
+  // normal 3-slot goal/side-quest cap (server-side, see GET /api/state's
+  // needySlots/sideSlots guards) but - unlike META - still needs to render
+  // on Home through the SAME card/detail components as a normal quest, not
+  // META's separate Inner Realm UI. At most one is ever open at a time.
+  const chainQuest = allOpenQuests.find((q) => q.isChain) || null;
   const goals = s.goals || [];
   const goalLabel = (goalIndex) => (goalIndex != null && goals[goalIndex] ? goals[goalIndex] : null);
   // Which open quest the reflect flow targets - looked up fresh from
@@ -7330,7 +7627,13 @@ function renderDashboard() {
   // no card row) while reflectOpen, same "one focus at a time" precedent
   // the old carousel used - and to the special-flow/completed-ack views
   // exactly as before.
-  const homeQuests = openQuests.slice(0, 3);
+  // The active chain quest always gets a guaranteed visible slot, pinned
+  // first, rather than competing with goal quests for the existing
+  // slice(0,3) cap - keeps the total displayed count at <= 3 without
+  // growing the carousel past what the rest of this screen assumes.
+  const homeQuests = chainQuest
+    ? [chainQuest, ...openQuests.filter((q) => q.id !== chainQuest.id)].slice(0, 3)
+    : openQuests.slice(0, 3);
   const activeIdx = Math.min(selectedQuestIndex ?? 0, Math.max(homeQuests.length - 1, 0));
   const selectedQuest = homeQuests[activeIdx] || null;
   // Round 40: CTA lockout now matches the REAL server deadline (24h nominal
@@ -7361,6 +7664,7 @@ function renderDashboard() {
     : jobMatchFlow ? jobMatchFlowHTML()
     : jobApplicationFlow ? jobApplicationFlowHTML()
     : nutritionFlow ? nutritionFlowHTML()
+    : questHubFlow ? questHubFlowHTML()
     : reflectOpen && targetDay ? questDetailPanelHTML(targetDay, goalLabel(targetDay.goalIndex), questCtaLabel(targetDay.quest, targetDay.id), false) + reflectFormHTML
     : !homeQuests.length ? `<div class="quest-card">${spinnerHTML("AI sedang menyusun quest...")}</div>`
     : `
@@ -7536,6 +7840,18 @@ function renderDashboard() {
         return;
       }
       beginMovementFlow(id, fresh.quest, fresh.goalIndex);
+      renderDashboard();
+      return;
+    }
+    // Multi-Domain Quest Hub: "Mulai Quest" always opens the Hub overview -
+    // never jumps straight into Recovery or Nutrition, per the handoff's
+    // explicit rule (the Hub is the only place quest-level status lives).
+    // Keyed on completionType (not primaryFeature, unlike the MOVEMENT
+    // check just above) - this quest's primaryFeature is "RECOVERY", never
+    // the literal string "MOVEMENT", so the two checks can never collide
+    // regardless of which runs first.
+    if (quest?.completionType === "multi-domain") {
+      questHubFlow = { questId: id, view: "hub", error: "", saving: false, completing: false };
       renderDashboard();
       return;
     }
@@ -8111,6 +8427,80 @@ function renderDashboard() {
     nutritionFlow = null;
     root.innerHTML = spinnerHTML("Memuat...");
     appState = await api("/api/state");
+    renderDashboard();
+  });
+  // Multi-Domain Quest Hub (design handoff, 19 Agustus).
+  document.getElementById("mdqBackHome")?.addEventListener("click", async () => {
+    questHubFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state");
+    renderDashboard();
+  });
+  // "Kembali" from a feature module is a pure cancel back to the Hub
+  // overview, not a save - only what was already persisted via "Simpan"
+  // survives; the in-progress draft is discarded, matching the handoff's
+  // explicit "Back vs. cancel are separate" rule (this button never loses
+  // ALREADY-SAVED progress, since that lives server-side, not in the draft).
+  document.getElementById("mdqBackHub")?.addEventListener("click", () => {
+    questHubFlow.view = "hub"; questHubFlow.draft = null; questHubFlow.error = "";
+    renderDashboard();
+  });
+  // Opens a feature module, seeding the draft from whatever's already saved
+  // server-side for that feature - so re-opening an in-progress or COMPLETE
+  // feature shows the previous picks, not a blank form (brief: editing an
+  // already-complete feature back to incomplete must be possible).
+  document.querySelectorAll("[data-mdq-open]").forEach((b) => b.addEventListener("click", () => {
+    const featureKey = b.dataset.mdqOpen.toUpperCase();
+    const day = (appState.openQuests || []).find((q) => q.id === questHubFlow.questId);
+    questHubFlow.view = featureKey.toLowerCase();
+    questHubFlow.draft = { ...((day?.quest?.featureData || {})[featureKey] || {}) };
+    questHubFlow.error = "";
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-mdq-chip]").forEach((b) => b.addEventListener("click", () => {
+    questHubFlow.draft = { ...(questHubFlow.draft || {}), [b.dataset.mdqChip]: b.dataset.mdqValue };
+    questHubFlow.error = "";
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-mdq-step]").forEach((b) => b.addEventListener("click", () => {
+    const key = b.dataset.mdqStep;
+    const delta = Number(b.dataset.mdqDelta);
+    const current = typeof questHubFlow.draft?.[key] === "number" ? questHubFlow.draft[key] : 0;
+    const next = Math.round(Math.max(0, current + delta) * 100) / 100; // avoid float drift on 0.25 steps
+    questHubFlow.draft = { ...(questHubFlow.draft || {}), [key]: next };
+    questHubFlow.error = "";
+    renderDashboard();
+  }));
+  document.getElementById("mdqSaveFeature")?.addEventListener("click", async (e) => {
+    if (questHubFlow.saving) return; // duplicate-submit guard
+    const featureKey = e.currentTarget.dataset.mdqFeature;
+    questHubFlow.saving = true; questHubFlow.error = "";
+    renderDashboard();
+    try {
+      const path = featureKey === "RECOVERY" ? "/api/quest-hub/recovery" : "/api/quest-hub/nutrition";
+      await api(path, { method: "POST", body: { questId: questHubFlow.questId, ...questHubFlow.draft } });
+      appState = await api("/api/state");
+      questHubFlow.saving = false; questHubFlow.view = "hub"; questHubFlow.draft = null;
+    } catch (err) {
+      questHubFlow.saving = false; questHubFlow.error = err.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("mdqComplete")?.addEventListener("click", async () => {
+    if (!questHubFlow || questHubFlow.completing) return; // duplicate-submit guard
+    questHubFlow.completing = true; questHubFlow.error = "";
+    renderDashboard();
+    try {
+      const resp = await api("/api/quest-hub/complete", { method: "POST", body: { questId: questHubFlow.questId } });
+      questHubFlow = null;
+      completedResult = {
+        questTitle: resp.questTitle, status: "COMPLETED", interpretation: resp.interpretation,
+        safetyNote: resp.safetyNote, deltas: resp.deltas, mentorReply: resp.mentorReply,
+        multiDomainSummary: true,
+      };
+    } catch (err) {
+      questHubFlow.completing = false; questHubFlow.error = err.message;
+    }
     renderDashboard();
   });
   // Task 10a: Artifacts sheet.
