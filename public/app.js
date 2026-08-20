@@ -5799,7 +5799,13 @@ function questHubCardsHTML(quests) {
 function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
   const reasonOpen = reasonOpenIds.has(q.id);
   const isMultiDomain = q.quest.completionType === "multi-domain";
-  const eyebrow = `QUEST HARI INI${q.quest.statFocus ? " · " + esc(statLabel(q.quest.statFocus)).toUpperCase() : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(q.quest, true)) : ""}`;
+  // Founder request (20 Agustus): BODY · MOVEMENT/Training quests show
+  // which SOMA tool generated them (quest.primaryFeature === "MOVEMENT",
+  // same field the movement flow itself dispatches on - see
+  // beginMovementFlow's own comment) as a "Body: Training" suffix on the
+  // stat label, same eyebrow slot the multi-domain feature-suffix uses.
+  const somaSubLabel = q.quest.primaryFeature === "MOVEMENT" ? "Training" : "";
+  const eyebrow = `QUEST HARI INI${q.quest.statFocus ? " · " + esc(statLabel(q.quest.statFocus)).toUpperCase() + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(q.quest, true)) : ""}`;
   const dod = deriveDoDChecklist(q.quest);
   return `
     <div class="qhub-detail">
