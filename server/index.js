@@ -10,12 +10,15 @@ const structured = require("./structured");
 const targets = require("./targets");
 const practiceTestLib = require("./practiceTest");
 const listeningDiagnostic = require("./listeningDiagnostic");
+const videoQuizLib = require("./videoQuiz");
+const youtube = require("./youtube");
 const jobMatch = require("./jobMatch");
 const jobApplication = require("./jobApplication");
 const nutrition = require("./nutrition");
 const nutritionEntry = require("./nutritionEntry");
 const metaTargets = require("./metaTargets");
 const exerciseCatalog = require("./exerciseCatalog");
+const questHub = require("./questHub");
 const crypto = require("crypto");
 
 // Task 14 (Livelihood Milestone, PRD.md section 26): auto-creates the fixed
@@ -224,6 +227,15 @@ async function resolveNutritionQuest(userId, dayId, quest, state) {
     timestamp: new Date().toISOString(),
   };
   await db.saveReflection(userId, dayId, reflection);
+  // SOMA Training feedback brief item 4: a Nutrition chain step (step 2)
+  // resolves through THIS choke point, not POST /api/reflection's own -
+  // both routes that can complete a nutrition-log quest (immediate, in
+  // POST /api/nutrition/log, and the lazy end-of-day sweep in GET
+  // /api/state) funnel through resolveNutritionQuest, so the chain-advance
+  // hook belongs here rather than duplicated at both call sites.
+  if (quest.chain) {
+    await advanceChain(userId, state, { quest, id: dayId }, null);
+  }
   await db.touchStatActivity(userId, Object.keys(deltas));
   await db.updateState(userId, {
     stats: newStats, chapterNumber: state.chapterNumber, chapterTitle: state.chapterTitle,
@@ -461,6 +473,16 @@ app.get("/api/state", requireAuth, async (req, res) => {
       await resolveExpiredQuest(req.userId, q.id);
       if (q.goalIndex != null) expiredGoalIndexes.add(q.goalIndex);
       resolvedAnyExpired = true;
+      // SOMA Training feedback brief item 4: unlike META, a chain-step quest
+      // DOES have a real deadline - a step nobody engaged with means the
+      // chain cancels outright (safe default, never stalls the account
+      // waiting for a step that's never coming). Clear the SAME request's
+      // in-memory state too, not just the DB, so the needySlots/sideSlots
+      // guards below immediately see rotation as unfrozen.
+      if (q.isChain) {
+        await db.clearActiveChain(req.userId);
+        state.activeChain = null;
+      }
     }
     if (resolvedAnyExpired) {
       openQuests = await db.getOpenQuests(req.userId); // re-fetch: resolved rows must drop out of "open" before needySlots below
@@ -471,7 +493,15 @@ app.get("/api/state", requireAuth, async (req, res) => {
     // quest" - a goal_index-null META session would otherwise satisfy a
     // legacy ungoaled account's single slot check (both use goal_index NULL)
     // and silently block that account's real daily quest from generating.
-    const needySlots = goalSlots.filter((gi) => !openQuests.some((q) => q.goalIndex === gi && !q.isMeta));
+    // SOMA Training feedback brief item 4: while a condition-triggered chain
+    // (Recovery->Nutrition->Training) is active, normal goal-rotation quest
+    // generation freezes - same "field-gated read-time check" idiom as
+    // applyDecayIfDue's kondisi-status pause, not a separate suspend/resume
+    // call. Already-open goal quests are completely untouched; only
+    // generating NEW ones into empty slots stops. Resumes automatically the
+    // instant db.clearActiveChain runs (chain completes or cancels/expires)
+    // - the very next GET /api/state sees state.activeChain falsy again.
+    const needySlots = state.activeChain ? [] : goalSlots.filter((gi) => !openQuests.some((q) => q.goalIndex === gi && !q.isMeta));
     if (needySlots.length) {
       // One shared context snapshot for every goal generated in this pass -
       // avoids a re-read per goal, and right after onboarding (the only
@@ -582,7 +612,10 @@ app.get("/api/state", requireAuth, async (req, res) => {
     // not tied to any goal. Only for accounts that actually have goal
     // capture (goals.length > 0) - legacy pre-goal-capture accounts keep
     // their single ungoaled Primary slot only, no Side Quest sprawl.
-    const sideSlots = goals.length ? Math.max(0, 3 - goals.length) : 0;
+    // Chain suspension (see the needySlots comment above) also freezes Side
+    // Quest generation - a fresh Side Quest appearing mid-chain would be a
+    // confusing distraction while the user is mid-recovery.
+    const sideSlots = state.activeChain ? 0 : (goals.length ? Math.max(0, 3 - goals.length) : 0);
     const openSideCount = openQuests.filter((q) => q.isSideQuest).length;
     for (let i = openSideCount; i < sideSlots; i++) {
       const result = await ai.generateSideQuest({ profile: state.profile, pathway: state.pathway, goals });
@@ -658,7 +691,10 @@ app.get("/api/state", requireAuth, async (req, res) => {
           + (await db.countSessionsSince(req.userId, "listening-diagnostic", startOfMonthKey())),
         somaActivity: await db.countSessionsSince(req.userId, "structured-physical", startOfWeekKey()),
         somaNutrition: await db.countSessionsSince(req.userId, "nutrition-log", startOfWeekKey()),
-        labora: await db.countSessionsSince(req.userId, "job-match-analysis", startOfMonthKey()),
+        // Video Quest: LABORA now has two session-producing tools (Job
+        // Match + Video Quest) - sum both, same reasoning as lingua above.
+        labora: (await db.countSessionsSince(req.userId, "job-match-analysis", startOfMonthKey()))
+          + (await db.countSessionsSince(req.userId, "video-quiz", startOfMonthKey())),
       },
       // META Inner Realm target-recommendation flow (12 Agustus follow-up):
       // "World Map shows Target, Realm page shows Tools" - each realm's card
@@ -892,6 +928,16 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     if (day.quest?.primaryFeature === "MOVEMENT" && day.quest?.activeAttempt) {
       await db.updateQuestProgress(req.userId, day.id, { activeAttempt: null });
     }
+    // SOMA Training feedback brief item 4: if this quest is a chain step,
+    // generate the next one immediately. Gated on !inCrisis deliberately -
+    // a crisis-detected reflection short-circuits normal processing already;
+    // pushing straight into "here's your next quest" right after would be
+    // wrong. The chain simply stalls at that step (safe default, same as
+    // every other edge case here - never strands the account, just never
+    // advances further without the user re-engaging normally).
+    if (day.quest?.chain && !inCrisis) {
+      await advanceChain(req.userId, state, day, structuredClean);
+    }
     await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
     // Task 11e (Decay): record which stats just grew for real, so the decay
     // clock resets for exactly those - and only those - stats.
@@ -971,6 +1017,88 @@ app.post("/api/goal-target", requireAuth, async (req, res) => {
   }
 });
 
+// SOMA Training feedback brief (20 Agustus) item 4: condition-triggered
+// Recovery->Nutrition->Training(adapted) chain, fired when Context Update
+// transitions INTO "Sakit/cedera" specifically. Fully code-authored quest
+// builders for steps 1-2 (no AI judgment needed - same posture as
+// POST /api/meta/start's body/recovery and nutrition branches above, which
+// these deliberately mirror), step 3 goes through ai.generateQuest (needs
+// real judgment - exercise selection) with forced context so it can't
+// independently reinterpret the situation. Chain badge (quest.chain) is
+// stamped by code on every step regardless of what the AI returns.
+function buildRecoveryChainQuest(chainId) {
+  return {
+    completionType: "structured-physical",
+    structuredKind: "recovery",
+    evidenceSchema: null,
+    statFocus: "body",
+    title: "Fokus Pemulihan Hari Ini",
+    description: "Kondisimu lagi sakit/cedera — hari ini fokus pemulihan: tidur, hidrasi, protein, dan level nyeri, bukan aktivitas aktif.",
+    why: "Chain Recovery memastikan langkah berikutnya (Nutrisi, lalu Training yang disesuaikan) dibangun dari kondisi pemulihanmu yang sebenarnya.",
+    chain: { id: chainId, step: 1, total: 3, label: "Recovery" },
+  };
+}
+function buildNutritionChainQuest(chainId) {
+  return {
+    completionType: "nutrition-log",
+    lifecycleType: "progressive",
+    statFocus: "body",
+    title: "Catat Nutrisi Pemulihan",
+    description: "Lanjutan chain Recovery — catat makanmu hari ini biar asupan protein/kalori mendukung pemulihan.",
+    why: "Nutrisi yang tercukupi adalah bagian dari pemulihan, bukan aktivitas terpisah.",
+    progressive: nutrition.initProgressiveState({ requiredContributions: 3, primaryMetric: "protein", targetValue: 60 }),
+    chain: { id: chainId, step: 2, total: 3, label: "Nutrition" },
+  };
+}
+function buildTrainingChainCtx(state, chain) {
+  return {
+    profile: state.profile,
+    pathway: state.pathway,
+    pathwayNoun: state.pathwayNoun,
+    goals: state.goals?.length ? state.goals : undefined,
+    stats: state.stats,
+    chapterNumber: state.chapterNumber,
+    chapterTitle: state.chapterTitle,
+    recentDays: [],
+    // Chain continuity: forces the SAME de-intensify prompt clause
+    // generateQuest already has for a live kondisiStatus (see the "Kondisi
+    // terbaru pengguna" ternary) - the chain only exists because of this
+    // exact transition, so it's always safe/correct to force it here rather
+    // than re-reading the (possibly since-changed) live value.
+    kondisiStatus: "Sakit/cedera",
+    kondisiNote: chain.kondisiNoteSnapshot || undefined,
+    chainTrainingContext: {
+      levelNyeri: chain.levelNyeri,
+      instruction: "Ini LANGKAH 3 dari chain Recovery -> Nutrition -> Training. Quest HARUS structured-physical (cardio/gym) yang KONKRET beradaptasi ke levelNyeri: fokus upper-body + kerja lower-body ringan kalau levelNyeri Sedang/Berat, boleh lebih standar (tapi tetap moderat, jangan intensitas normal) kalau Ringan/Tidak ada. JANGAN buat quest generik yang tidak menyebut adaptasi ini.",
+    },
+  };
+}
+
+// One active chain per user; the reflection-driven step-2/step-3 handoff
+// lives in advanceChain (called from POST /api/reflection, right after
+// db.saveReflection). Guarded by chain.id/chain.step matching the JUST-
+// SUBMITTED quest's own chain metadata - protects against a stale/
+// duplicate/multi-device double-submit ever generating the same step twice.
+async function advanceChain(userId, state, day, structuredClean) {
+  const chain = state.activeChain;
+  if (!chain || !day.quest.chain || chain.id !== day.quest.chain.id || chain.step !== day.quest.chain.step) return;
+
+  if (chain.step === 1) {
+    const levelNyeri = structuredClean?.levelNyeri || null;
+    const nextQuest = buildNutritionChainQuest(chain.id);
+    const created = await db.createQuest(userId, null, todayKey(), { quest: nextQuest, insight: null }, false, false, true);
+    await db.setActiveChain(userId, { ...chain, step: 2, levelNyeri, stepQuestIds: [...chain.stepQuestIds, created.id] });
+  } else if (chain.step === 2) {
+    const ctx = buildTrainingChainCtx(state, chain);
+    const result = await ai.generateQuest(ctx);
+    result.quest.chain = { id: chain.id, step: 3, total: 3, label: "Training" };
+    const created = await db.createQuest(userId, null, todayKey(), { quest: result.quest, insight: result.insight }, false, false, true);
+    await db.setActiveChain(userId, { ...chain, step: 3, stepQuestIds: [...chain.stepQuestIds, created.id] });
+  } else if (chain.step === 3) {
+    await db.clearActiveChain(userId);
+  }
+}
+
 // Homepage redesign: "Kondisi Hari Ini" - light, not a quest, not mandatory.
 // Single current value, reset lazily back to Normal by GET /api/state once a
 // new calendar day starts (see the lazy-reset check there).
@@ -985,8 +1113,39 @@ app.post("/api/kondisi", requireAuth, async (req, res) => {
     // (a context signal, never evidence/growth), so it also carries
     // whatever short reason text the user typed there.
     const trimmedNote = typeof note === "string" ? note.trim().slice(0, 300) : null;
+
+    // SOMA Training feedback brief item 4: db.updateKondisi is a blind write
+    // with no prior read, so the OLD status has to be read here first to
+    // detect an actual transition INTO "Sakit/cedera" (not just "being" in
+    // it, and not any of the other 5 labels).
+    const priorState = await db.getState(req.userId);
+    const isTransitionIntoSakit = status === "Sakit/cedera" && priorState?.kondisiStatus !== "Sakit/cedera";
+    const chainAlreadyActive = Boolean(priorState?.activeChain);
+
     await db.updateKondisi(req.userId, status, trimmedNote || null);
-    res.json({ ok: true, kondisiStatus: status, kondisiNote: trimmedNote || null });
+
+    let chainStarted = false;
+    if (isTransitionIntoSakit && !chainAlreadyActive) {
+      const chainId = `chain_${crypto.randomUUID()}`;
+      const quest = buildRecoveryChainQuest(chainId);
+      const created = await db.createQuest(req.userId, null, todayKey(), { quest, insight: null }, false, false, true);
+      await db.setActiveChain(req.userId, {
+        id: chainId, type: "sakit-cedera-recovery", step: 1, total: 3,
+        startedAt: new Date().toISOString(), levelNyeri: null,
+        kondisiNoteSnapshot: trimmedNote || null, stepQuestIds: [created.id],
+      });
+      chainStarted = true;
+    } else if (status !== "Sakit/cedera" && chainAlreadyActive) {
+      // Safe default: re-labeling Context Update to anything else mid-chain
+      // cancels it outright rather than letting it keep running against a
+      // status that no longer matches its own premise. The in-flight step
+      // quest is left open/untouched (never force-closed) - it simply stops
+      // advancing (advanceChain's stale-chain-id guard already protects
+      // against it generating a next step even if reflected on later).
+      await db.clearActiveChain(req.userId);
+    }
+
+    res.json({ ok: true, kondisiStatus: status, kondisiNote: trimmedNote || null, chainStarted });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan kondisi." });
@@ -1345,6 +1504,221 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
   }
 });
 
+// --- Video Quest (video-quiz) routes. Flow doc: docs/video-quiz-flow.md ---
+// Step 1 of the flow: "Periksa Materi". Fetches the pasted video's
+// transcript server-side, asks the AI whether it substantively teaches the
+// quest's fixed topic, and stores the result as the CANDIDATE video. The
+// user can re-run this with different URLs freely - swapping only becomes
+// impossible once /start promotes a candidate to the locked video.
+app.post("/api/video-quiz/validate", requireAuth, async (req, res) => {
+  try {
+    const { questId, videoUrl } = req.body;
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    if (day.quest?.videoQuizState?.lockedVideoUrl) {
+      return res.status(400).json({ error: "Materi untuk quest ini sudah dikunci — selesaikan assessment dari video itu dulu." });
+    }
+    if (!youtube.parseVideoId(videoUrl)) {
+      return res.status(400).json({ error: "Link YouTube tidak valid. Tempel link video YouTube (youtube.com atau youtu.be)." });
+    }
+    let video;
+    try {
+      video = await youtube.fetchVideoData(videoUrl);
+    } catch (e) {
+      if (e.code === "NO_CAPTIONS") {
+        return res.status(422).json({ error: "Video ini nggak punya subtitle/transkrip yang bisa dibaca. Pilih video lain yang menyediakan subtitle (kebanyakan video edukasi punya)." });
+      }
+      console.error("video-quiz fetchVideoData failed:", e.message);
+      return res.status(502).json({ error: "Gagal mengambil data video. Coba lagi." });
+    }
+    const topic = day.quest.videoQuiz?.topic || day.quest.title;
+    const { relevant, rationale } = await ai.judgeVideoRelevance({
+      topic, videoTitle: video.videoMeta.title, transcriptExcerpt: video.transcript.slice(0, 6000),
+    });
+    // Full replace: a re-check overwrites any previous candidate. There is
+    // no lock yet (guarded above), so nothing here is worth preserving.
+    await db.setVideoQuizPayload(req.userId, day.id, {
+      candidate: {
+        videoId: video.videoId, videoUrl: String(videoUrl).trim(), videoMeta: video.videoMeta,
+        transcript: video.transcript, relevant, rationale, checkedAt: new Date().toISOString(),
+      },
+    });
+    res.json({ relevant, rationale, videoMeta: { ...video.videoMeta, videoId: video.videoId } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal memeriksa materi. Coba lagi." });
+  }
+});
+
+// Step 2: "Mulai Assessment". Three cases, in order:
+// - RESUME: a locked video with a generated set already exists (page
+//   reload / re-entry) - idempotent, returns the same stripped set without
+//   regenerating or re-validating anything.
+// - RETRY ({retry:true}, the fail screen's "Ulang Assessment"): fresh
+//   question set from the SAME locked transcript, attempt counter +1.
+// - FIRST START: promotes the validated candidate to the locked video.
+//   Questions are generated BEFORE the lock is persisted, so a generation
+//   failure leaves the video still swappable.
+// The lock itself lives in quest.videoQuizState (client-visible via
+// GET /api/state); transcript + answer key stay in video_quiz_payload.
+app.post("/api/video-quiz/start", requireAuth, async (req, res) => {
+  try {
+    const { questId, retry } = req.body;
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    const topic = day.quest.videoQuiz?.topic || day.quest.title;
+    const passThreshold = day.quest.videoQuiz?.passThreshold ?? videoQuizLib.DEFAULT_PASS_THRESHOLD;
+    const payload = await db.getVideoQuizPayload(req.userId, day.id);
+
+    const respond = (p) => res.json({
+      locked: { videoUrl: p.locked.videoUrl, videoMeta: p.locked.videoMeta, videoId: p.locked.videoId },
+      attempt: p.attempt, passThreshold,
+      questions: videoQuizLib.stripQuestions(p.questions),
+    });
+
+    if (payload?.locked && payload.questions && !retry) return respond(payload);
+
+    if (retry) {
+      if (!payload?.locked) return res.status(400).json({ error: "Belum ada materi terkunci untuk diulang — mulai assessment dulu." });
+      const attempt = (payload.attempt || 1) + 1;
+      const { questions } = await ai.generateVideoQuizQuestions({ topic, transcript: payload.locked.transcript, attempt });
+      const next = { locked: payload.locked, attempt, questions };
+      await db.setVideoQuizPayload(req.userId, day.id, next);
+      await db.updateQuestProgress(req.userId, day.id, {
+        videoQuizState: { ...(day.quest.videoQuizState || {}), attempt, lastResult: null },
+      });
+      return respond(next);
+    }
+
+    if (!payload?.candidate?.relevant) {
+      return res.status(400).json({ error: "Periksa materi dulu sebelum mulai assessment." });
+    }
+    const { candidate } = payload;
+    const { questions } = await ai.generateVideoQuizQuestions({ topic, transcript: candidate.transcript, attempt: 1 });
+    const locked = { videoId: candidate.videoId, videoUrl: candidate.videoUrl, videoMeta: candidate.videoMeta, transcript: candidate.transcript };
+    const next = { locked, attempt: 1, questions };
+    await db.setVideoQuizPayload(req.userId, day.id, next);
+    // THE source lock: from here on /validate rejects new URLs and every
+    // re-entry reuses this video until the quest is passed.
+    await db.updateQuestProgress(req.userId, day.id, {
+      videoQuizState: {
+        phase: "locked", lockedVideoUrl: locked.videoUrl, lockedVideoId: locked.videoId,
+        lockedVideoMeta: locked.videoMeta, attempt: 1, lastResult: null,
+      },
+    });
+    return respond(next);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyusun soal dari materi ini. Coba lagi." });
+  }
+});
+
+// Step 3: "Kirim Jawaban". Grading is fully deterministic (videoQuiz.js).
+// FAIL (< passThreshold): quest stays open, lock carries over, NO answer
+// key/explanations in the response (keeps "Ulang Assessment" honest) and no
+// growth. PASS: the same completion pipeline as practice-test's submit -
+// objective evidence, no specificity gate - plus the full pembahasan
+// (per-question review), which only ever leaves the server here.
+app.post("/api/video-quiz/submit", requireAuth, async (req, res) => {
+  try {
+    const { questId, answers } = req.body;
+    const state = await db.getState(req.userId);
+    const day = await db.getQuestById(req.userId, questId);
+    if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
+    const payload = await db.getVideoQuizPayload(req.userId, day.id);
+    if (!payload?.locked || !payload.questions) return res.status(400).json({ error: "Belum ada soal — mulai assessment dulu." });
+
+    const topic = day.quest.videoQuiz?.topic || day.quest.title;
+    const passThreshold = day.quest.videoQuiz?.passThreshold ?? videoQuizLib.DEFAULT_PASS_THRESHOLD;
+    const graded = videoQuizLib.gradeAnswers(payload.questions, answers || {});
+    const { strongConcepts, weakConcepts } = videoQuizLib.conceptSplit(graded.perQuestion);
+    const passed = graded.score >= passThreshold;
+    const lastResult = {
+      score: graded.score, total: graded.total, passed,
+      strongConcepts, weakConcepts, ts: new Date().toISOString(),
+    };
+    await db.updateQuestProgress(req.userId, day.id, {
+      videoQuizState: { ...(day.quest.videoQuizState || {}), lastResult },
+    });
+
+    if (!passed) {
+      return res.json({ passed: false, score: graded.score, total: graded.total, passThreshold, strongConcepts, weakConcepts });
+    }
+
+    const videoQuizResult = {
+      topic, videoTitle: payload.locked.videoMeta?.title || "",
+      score: graded.score, total: graded.total, passThreshold,
+      attempt: payload.attempt || 1, strongConcepts, weakConcepts,
+    };
+    const recentGoalDays = day.goalIndex != null ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined;
+    const ctx = {
+      profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
+      quest: day.quest,
+      status: "COMPLETED",
+      videoQuizResult,
+      recentDays: recentGoalDays,
+      stats: state.stats,
+      growthSessions: state.growthSessions,
+    };
+    const result = await ai.processReflection(ctx);
+    const deltas = result.statDeltas || {}; // objective code-graded evidence - no specificity gate
+
+    const newStats = { ...state.stats };
+    Object.entries(deltas).forEach(([k, v]) => {
+      if (newStats[k] !== undefined && typeof v === "number") {
+        newStats[k] = Math.max(0, Math.min(100, newStats[k] + Math.max(0, Math.min(5, Math.round(v)))));
+      }
+    });
+    const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+    const allowAdvance = result.chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0 && Boolean(result.newChapterTitle && result.newChapterNarrative);
+
+    const reflection = {
+      status: "COMPLETED", text: "",
+      videoQuizResult,
+      deltas, mentorReply: result.mentorReply, timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+    await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
+    await db.touchStatActivity(req.userId, Object.keys(deltas));
+    await db.updateState(req.userId, {
+      stats: newStats,
+      chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
+      chapterTitle: allowAdvance ? result.newChapterTitle : state.chapterTitle,
+      chapterNarrative: allowAdvance ? result.newChapterNarrative : undefined,
+      growthSessions: newGrowthSessions,
+      pathwayNoun: state.pathwayNoun,
+    });
+
+    // Pembahasan: the only place the answer key ever reaches the client,
+    // and only after a pass.
+    const answerLookup = answers || {};
+    const review = payload.questions.map((q) => {
+      const yourAnswer = (Array.isArray(answerLookup[q.id]) ? answerLookup[q.id] : []).map((a) => String(a || "").trim().toLowerCase());
+      return {
+        id: q.id, format: q.format, concept: q.concept, prompt: q.prompt, options: q.options,
+        yourAnswer, correct: q.correct,
+        isCorrect: graded.perQuestion.find((p) => p.id === q.id)?.correct || false,
+        explanation: q.explanation,
+      };
+    });
+    res.json({
+      passed: true, score: graded.score, total: graded.total, passThreshold,
+      strongConcepts, weakConcepts, mentorReply: result.mentorReply, deltas, review,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan hasil assessment." });
+  }
+});
+
 // IELTS Listening Half Diagnostic (round 41): unlike practice-test's submit
 // above, this content is fixed/server-code-defined (listeningDiagnostic.js),
 // not per-attempt AI-generated - no band ladder, no per-track state, no AI
@@ -1650,6 +2024,22 @@ app.post("/api/meta/start", requireAuth, async (req, res) => {
         description: "Diagnostik Listening 20 soal dari META, di luar rotasi goal harian.",
         why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
       };
+    } else if (tool === "video-quest") {
+      // Video Quest from LABORA: the user types the topic themselves (a
+      // META free session picks its own subject, same spirit as META Body's
+      // kind picker). Once created the topic is STATIC for this quest -
+      // that rule is what the source lock hangs off (the topic decides
+      // which video is allowed).
+      const topic = String(req.body?.topic || "").trim().slice(0, 160);
+      if (topic.length < 3) return res.status(400).json({ error: "Tulis topik yang mau kamu pelajari dulu." });
+      quest = {
+        completionType: "video-quiz",
+        statFocus: "growth",
+        videoQuiz: { topic, passThreshold: videoQuizLib.DEFAULT_PASS_THRESHOLD, estimatedMinutes: 25 },
+        title: `Video Quest: ${topic}`,
+        description: `Pelajari "${topic}" dari satu video YouTube pilihanmu, lalu buktikan lewat 15 soal dari materi video itu.`,
+        why: "Latihan bebas tetap dihitung sebagai bukti pertumbuhan longitudinal.",
+      };
     } else if (tool === "nutrition") {
       // SOMA Nutrition Part B: a META Nutrition session has no goal-specific
       // target to derive a metric/count from (unlike a goal-generated
@@ -1811,6 +2201,104 @@ app.post("/api/nutrition/analyze-photo", requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menganalisis foto." });
+  }
+});
+
+// Multi-Domain Quest Hub (design handoff, 19 Agustus): a quest requiring
+// BOTH a Recovery AND a Nutrition sub-flow, order-independent, before it
+// resolves. Both save routes share this helper (real shared logic, not
+// premature abstraction - the two differ only in which featureKey/validator
+// they use) - fetch, ownership/type/not-already-completed checks, merge the
+// patch into quest.featureData[featureKey] (partial saves allowed, brief:
+// "saves whatever is filled"), recompute featureState/status fresh from the
+// merged data (never trust a stored status independently - see
+// questHub.computeFeatureState's own comment), persist via the existing
+// generic updateQuestProgress read-modify-write.
+async function saveQuestHubFeature(req, res, featureKey, validateFn) {
+  try {
+    const { questId } = req.body;
+    const day = await db.getQuestById(req.userId, Number(questId));
+    if (!day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "multi-domain") return res.status(400).json({ error: "Quest ini bukan Multi-Domain Quest Hub." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah selesai." });
+
+    const validated = validateFn(req.body);
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
+
+    const requirements = day.quest.featureRequirements?.[featureKey] || [];
+    const featureData = { ...(day.quest.featureData || {}), [featureKey]: { ...(day.quest.featureData?.[featureKey] || {}), ...validated.clean } };
+    const featureState = { ...(day.quest.featureState || {}) };
+    featureState[featureKey] = questHub.computeFeatureState(requirements, featureData[featureKey]);
+    const status = questHub.computeQuestStatus(featureState, day.quest.primaryFeature, day.quest.supportingFeatures || []);
+
+    const updated = await db.updateQuestProgress(req.userId, day.id, { featureData, featureState, status });
+    res.json({ ok: true, featureData: updated.featureData, featureState: updated.featureState, status: updated.status });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan data." });
+  }
+}
+
+app.post("/api/quest-hub/recovery", requireAuth, (req, res) => saveQuestHubFeature(req, res, "RECOVERY", questHub.validateRecoveryPatch));
+app.post("/api/quest-hub/nutrition", requireAuth, (req, res) => saveQuestHubFeature(req, res, "NUTRITION", questHub.validateNutritionPatch));
+
+// Only reachable once every feature is COMPLETE (quest.status ===
+// READY_TO_COMPLETE, recomputed fresh above on every patch save - never a
+// client-trusted flag). Submits the already-saved featureData/featureState,
+// never re-collects anything - same "objective evidence, one AI call for
+// mentorReply/interpretation, no re-judging the raw data" pattern
+// resolveNutritionQuest already established for nutrition-log. No
+// chapterAdvance handling here, matching that same precedent (both are
+// programmatic/lazy-style completions, distinct from the main interactive
+// POST /api/reflection flow where chapter advance is the norm).
+app.post("/api/quest-hub/complete", requireAuth, async (req, res) => {
+  try {
+    const { questId } = req.body;
+    const day = await db.getQuestById(req.userId, Number(questId));
+    if (!day) return res.status(400).json({ error: "Quest tidak ditemukan." });
+    if (day.quest?.completionType !== "multi-domain") return res.status(400).json({ error: "Quest ini bukan Multi-Domain Quest Hub." });
+    if (day.reflection) return res.status(400).json({ error: "Quest ini sudah selesai." });
+    if (day.quest.status !== "READY_TO_COMPLETE") return res.status(400).json({ error: "Lengkapi Recovery dan Nutrition dulu." });
+
+    const state = await db.getState(req.userId);
+    const ctx = {
+      profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
+      quest: day.quest, status: "done",
+      multiDomainResult: { status: day.quest.status, featureState: day.quest.featureState, featureData: day.quest.featureData },
+      stats: state.stats, growthSessions: state.growthSessions,
+    };
+    const result = await ai.processReflection(ctx);
+    const deltas = result.statDeltas || {};
+    const newStats = { ...state.stats };
+    Object.entries(deltas).forEach(([k, v]) => {
+      if (newStats[k] !== undefined && typeof v === "number") {
+        newStats[k] = Math.max(0, Math.min(100, newStats[k] + Math.max(0, Math.min(5, Math.round(v)))));
+      }
+    });
+    const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+
+    await db.updateQuestProgress(req.userId, day.id, { status: "COMPLETED" });
+    const reflection = {
+      status: "COMPLETED", text: "",
+      multiDomainResult: { featureData: day.quest.featureData, featureState: day.quest.featureState },
+      deltas, mentorReply: result.mentorReply, interpretation: result.interpretation || null,
+      safetyNote: result.safetyNote || null,
+      timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+    await db.touchStatActivity(req.userId, Object.keys(deltas));
+    await db.updateState(req.userId, {
+      stats: newStats, chapterNumber: state.chapterNumber, chapterTitle: state.chapterTitle,
+      growthSessions: newGrowthSessions, pathwayNoun: state.pathwayNoun,
+    });
+
+    res.json({
+      ok: true, questTitle: day.quest.title, mentorReply: result.mentorReply,
+      interpretation: result.interpretation || null, safetyNote: result.safetyNote || null, deltas,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyelesaikan quest." });
   }
 });
 

@@ -122,6 +122,17 @@ async function init() {
     ALTER TABLE days ADD COLUMN IF NOT EXISTS practice_test_payload JSONB;
   `);
 
+  // Video Quest (video-quiz): same answer-key isolation rule as
+  // practice_test_payload - the locked video's transcript, the candidate
+  // video under validation, and the generated 15-question set (with correct
+  // ids + explanations) live HERE, never inside `quest` (which ships to the
+  // browser verbatim via rowToQuest). Only the /api/video-quiz routes read
+  // this column; the client sees questions only through stripQuestions and
+  // the answer key only in the pass response (pembahasan).
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS video_quiz_payload JSONB;
+  `);
+
   // Reading Half Diagnostic (round 42): ONE reading sprint per Monday-start
   // week per track, shared GLOBALLY across users (founder decision - a
   // diagnostic stays comparable within the week; the Listening diagnostic
@@ -239,6 +250,30 @@ async function init() {
   // which it already is for any goal_index-NULL row.
   await pool.query(`
     ALTER TABLE days ADD COLUMN IF NOT EXISTS is_meta BOOLEAN NOT NULL DEFAULT false;
+  `);
+
+  // SOMA Training feedback brief (20 Agustus) item 4: condition-triggered
+  // Recovery->Nutrition->Training chain. active_chain mirrors kondisi_status
+  // as a single-current-value field on character_state (no history table -
+  // there is only ever one active chain per user) - null means no chain
+  // running, and doubles as both the one-chain-per-user guard and the
+  // goal-rotation-suspension gate read at the top of GET /api/state (same
+  // "field-gated read-time check" idiom applyDecayIfDue already uses for
+  // kondisi_status !== 'Normal'). Shape: { id, type, step, total, startedAt,
+  // levelNyeri, kondisiNoteSnapshot, stepQuestIds }.
+  await pool.query(`
+    ALTER TABLE character_state ADD COLUMN IF NOT EXISTS active_chain JSONB;
+  `);
+
+  // is_chain mirrors is_side_quest/is_meta exactly - a chain-step quest is
+  // never tied to a goal (goal_index NULL) and must never compete for a
+  // goal's one-open-quest slot or the Side Quest fill, same reasoning as
+  // is_meta above, but UNLIKE is_meta it still renders on Home (see
+  // app.js's chainQuest carousel handling) and still expires via the normal
+  // 28h sweep (the expiry loop explicitly skips is_meta rows but must NOT
+  // skip is_chain ones).
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS is_chain BOOLEAN NOT NULL DEFAULT false;
   `);
 
   // Kisahmu screen: full narrative per Chapter, chronological. Chapters are
@@ -449,6 +484,10 @@ async function getState(userId) {
     // generated (see index.js) - null until the first quest with real
     // recentDays context to reason about exists.
     observed: row.observed,
+    // SOMA Training feedback brief item 4: null when no condition-triggered
+    // chain is running - see the active_chain column comment in init() for
+    // the full shape/rationale.
+    activeChain: row.active_chain,
   };
 }
 
@@ -503,6 +542,17 @@ async function updateKondisi(userId, status, note) {
     `UPDATE character_state SET kondisi_status = $2, kondisi_note = $3, kondisi_updated_at = now() WHERE user_id = $1`,
     [userId, status, note || null]
   );
+}
+
+// SOMA Training feedback brief item 4: single-mutable-current-value writes
+// for the condition-triggered quest chain, same posture as updateKondisi
+// just above - no history, wholesale replace/clear.
+async function setActiveChain(userId, chain) {
+  await pool.query(`UPDATE character_state SET active_chain = $2 WHERE user_id = $1`, [userId, chain]);
+}
+
+async function clearActiveChain(userId) {
+  await pool.query(`UPDATE character_state SET active_chain = NULL WHERE user_id = $1`, [userId]);
 }
 // Called ONLY by the lazy daily-reset check (index.js) - resets back to
 // Normal without bumping kondisi_updated_at to "now" a second time
@@ -648,6 +698,17 @@ async function getPracticeTestPayload(userId, dayId) {
   return rows[0]?.practice_test_payload || null;
 }
 
+// Video Quest: candidate/locked video + transcript + generated question set
+// (with answer key). Full replace like setPracticeTestPayload - each save
+// writes the whole attempt state. See the column comment in init().
+async function setVideoQuizPayload(userId, dayId, payload) {
+  await pool.query(`UPDATE days SET video_quiz_payload = $3 WHERE user_id = $1 AND id = $2`, [userId, dayId, payload]);
+}
+async function getVideoQuizPayload(userId, dayId) {
+  const { rows } = await pool.query(`SELECT video_quiz_payload FROM days WHERE user_id = $1 AND id = $2`, [userId, dayId]);
+  return rows[0]?.video_quiz_payload || null;
+}
+
 // --- Reading Half Diagnostic: weekly global content cache ---
 
 async function getWeeklyReadingTest(weekKey, track) {
@@ -733,7 +794,7 @@ function normalizeLegacyStatus(reflection) {
 }
 
 function rowToQuest(r) {
-  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: normalizeLegacyStatus(r.reflection), createdAt: r.created_at, isSideQuest: r.is_side_quest, isMeta: r.is_meta };
+  return { id: r.id, goalIndex: r.goal_index, date: r.date, quest: r.quest, insight: r.insight, reflection: normalizeLegacyStatus(r.reflection), createdAt: r.created_at, isSideQuest: r.is_side_quest, isMeta: r.is_meta, isChain: r.is_chain };
 }
 
 // Every quest still open (not yet marked done) across the user's goals -
@@ -762,10 +823,10 @@ async function getQuestById(userId, id) {
 // fresh insert - id is a plain serial, there's nothing to collide with,
 // unlike the old (user_id, date) key that forced awkward upsert/conflict
 // logic.
-async function createQuest(userId, goalIndex, date, { quest, insight }, isSideQuest = false, isMeta = false) {
+async function createQuest(userId, goalIndex, date, { quest, insight }, isSideQuest = false, isMeta = false, isChain = false) {
   const { rows } = await pool.query(
-    `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest, is_meta) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7) RETURNING *`,
-    [userId, goalIndex, date, quest, insight, isSideQuest, isMeta]
+    `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest, is_meta, is_chain) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, $8) RETURNING *`,
+    [userId, goalIndex, date, quest, insight, isSideQuest, isMeta, isChain]
   );
   return rowToQuest(rows[0]);
 }
@@ -1015,6 +1076,7 @@ module.exports = {
   getState, createState, updateState, setGoalTarget, activatePathway, resetUser,
   getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
+  setVideoQuizPayload, getVideoQuizPayload,
   getWeeklyReadingTest, insertWeeklyReadingTestIfAbsent, recentWeeklyReadingTitles,
   getWeeklyListeningTest, insertWeeklyListeningTestIfAbsent, recentWeeklyListeningTitles,
   listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
@@ -1022,4 +1084,5 @@ module.exports = {
   touchStatActivity, applyDecayIfDue, setShortfallReason, listPendingShortfalls,
   updateQuestProgress, createFoodEntry, listFoodEntriesForQuest, listFoodEntriesForDate,
   searchFoods, getFoodByBarcode, countSessionsSince, setMetaActiveTarget, addGoal,
+  setActiveChain, clearActiveChain,
 };
