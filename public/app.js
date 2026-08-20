@@ -3725,6 +3725,66 @@ function qhStatusPillHTML(state, recorded, total) {
   return `<span class="mdq-pill mdq-pill-${cls}">${esc(text)}</span>`;
 }
 
+// "Recovery + Nutrition" style short label for a multi-domain quest -
+// generic over primaryFeature/supportingFeatures (not hardcoded to this
+// one template) so a future 2nd multi-domain template stays correct here
+// without a code change, same principle as questHub.js's own template
+// design. Used by both the compact carousel card's summary line and the
+// detail panel's eyebrow suffix (design handoff 01-01-home.png).
+function mdqFeatureLabelJoin(quest, upper) {
+  const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+  return keys.map((k) => {
+    const label = QH_FEATURE_META[k]?.label || k;
+    return upper ? label.toUpperCase() : label;
+  }).join(" + ");
+}
+
+// Home screen's 3-tile info row for a multi-domain quest (design handoff
+// 01-01-home.png, sits between the description and "SELESAI KETIKA" on
+// the detail panel) - "area utama"/"waktu"/"tujuan" at a glance, without
+// needing to open the Hub. Purely descriptive (no live data besides the
+// area count/labels, which are already known from featureRequirements).
+function mdqHomeInfoRowHTML(quest) {
+  const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+  const common = `width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" style="flex:none"`;
+  const tiles = [
+    { icon: `<svg ${common}><path d="M5 3v18M5 4h11l-2.5 3.5L16 11H5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: `${keys.length} area utama`, sub: mdqFeatureLabelJoin(quest, false) },
+    { icon: `<svg ${common}><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: "Est. waktu", sub: "±30 menit" },
+    { icon: `<svg ${common}><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="0.8" fill="var(--accent)"></circle></svg>`, label: "Tujuan", sub: esc(quest.tujuanSingkat || "") },
+  ];
+  return `
+    <div class="mdq-info-row">
+      ${tiles.map((t) => `
+        <div class="mdq-info-tile">
+          ${t.icon}
+          <div class="mdq-info-label">${esc(t.label)}</div>
+          <div class="mdq-info-sub">${t.sub}</div>
+        </div>`).join("")}
+    </div>`;
+}
+
+// Home screen's "SELESAI KETIKA" for a multi-domain quest replaces the
+// generic bullet list with a per-area radio-style checklist (design
+// handoff), reflecting REAL featureState - never a static preview that
+// could drift from what the Hub itself shows, same "evidence, not
+// checkboxes, always derived" rule as questHub.js's own computeFeatureState.
+function mdqHomeChecklistHTML(quest) {
+  const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+  const featureState = quest.featureState || {};
+  return `
+    <div class="mdq-home-checklist">
+      ${keys.map((k) => {
+        const done = featureState[k] === "COMPLETE";
+        const label = QH_FEATURE_META[k]?.label || k;
+        return `
+        <div class="mdq-home-check-item">
+          <span class="mdq-home-check-radio ${done ? "done" : ""}"></span>
+          <span>${esc(label)} requirement terpenuhi</span>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
 function questHubFlowHTML() {
   const f = questHubFlow;
   if (!f) return "";
@@ -3759,7 +3819,7 @@ function questHubOverviewHTML(day, f) {
   return `
     <div class="quest-card fadeUp mdq-card">
       <button class="mdq-back" id="mdqBackHome">← Kembali</button>
-      <div class="mdq-eyebrow mono">SESSION QUEST · ${esc(quest.domain || "BODY")} · Recovery + Nutrition</div>
+      <div class="mdq-eyebrow mono">SESSION QUEST · ${esc(quest.domain || "BODY")} • ${esc(mdqFeatureLabelJoin(quest, false))}</div>
       <h2 class="fr mdq-title">${esc(quest.title)}</h2>
       <p class="mdq-desc">Lengkapi Recovery dan Nutrition kapan pun selama hari ini. Kamu bebas mulai dari mana.</p>
       <div class="mdq-meta mono">±30 menit · ${featureKeys.length} area perlu terpenuhi · Tujuan: Pulih &amp; bertenaga</div>
@@ -5681,6 +5741,8 @@ function questHubCardsHTML(quests) {
         // before the Home redesign, just relocated to the compact card.
         const summary = q.quest.completionType === "nutrition-log" && q.quest.progressive
           ? nutritionProgressLabel(q.quest.progressive)
+          : q.quest.completionType === "multi-domain"
+          ? mdqFeatureLabelJoin(q.quest, false)
           : (q.quest.description || "").split(/(?<=[.!?])\s/)[0];
         return `
         <button class="qhub-card ${i === activeIdx ? "selected" : ""}" data-qhub-idx="${i}">
@@ -5704,7 +5766,8 @@ function questHubCardsHTML(quests) {
 // button's label/disabled state is new.
 function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
   const reasonOpen = reasonOpenIds.has(q.id);
-  const eyebrow = `QUEST HARI INI${q.quest.statFocus ? " · " + esc(statLabel(q.quest.statFocus)).toUpperCase() : ""}`;
+  const isMultiDomain = q.quest.completionType === "multi-domain";
+  const eyebrow = `QUEST HARI INI${q.quest.statFocus ? " · " + esc(statLabel(q.quest.statFocus)).toUpperCase() : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(q.quest, true)) : ""}`;
   const dod = deriveDoDChecklist(q.quest);
   return `
     <div class="qhub-detail">
@@ -5713,8 +5776,9 @@ function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
       <h2 class="fr qhub-detail-title">${esc(q.quest.title)}</h2>
       <p class="qhub-detail-desc">${esc(q.quest.description)}</p>
       ${q.quest.completionType === "nutrition-log" && q.quest.progressive ? `<p class="qhub-target mono" style="color:var(--qh-gold)">${esc(nutritionProgressLabel(q.quest.progressive))}</p>` : ""}
+      ${isMultiDomain ? mdqHomeInfoRowHTML(q.quest) : ""}
       <div class="qhub-dod-label mono">SELESAI KETIKA</div>
-      <ul class="qhub-dod-list">${dod.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>
+      ${isMultiDomain ? mdqHomeChecklistHTML(q.quest) : `<ul class="qhub-dod-list">${dod.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>`}
       <div class="qhub-detail-foot">
         <span class="qhub-duration mono">±30 menit</span>
         <button class="btn-primary" data-reflect-id="${q.id}" ${ctaDisabled ? "disabled" : ""}>${esc(ctaLabel)}</button>

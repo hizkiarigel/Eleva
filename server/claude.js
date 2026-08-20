@@ -377,7 +377,7 @@ function normalizeMultiDomainQuest(result) {
     title: t.title, description: t.description, why: t.why, statFocus: t.statFocus,
     completionType: "multi-domain", structuredKind: null,
     domain: t.domain, primaryFeature: t.primaryFeature, supportingFeatures: t.supportingFeatures,
-    featureRequirements: t.featureRequirements,
+    featureRequirements: t.featureRequirements, tujuanSingkat: t.tujuanSingkat,
     featureData: { RECOVERY: {}, NUTRITION: {} },
     featureState: { RECOVERY: "NOT_STARTED", NUTRITION: "NOT_STARTED" },
     status: "NOT_STARTED",

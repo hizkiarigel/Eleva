@@ -86,7 +86,7 @@ async function test(name, fn) {
       mode: "quest", completionType: "multi-domain", structuredKind: null,
       title: t.title, description: t.description, why: t.why, statFocus: t.statFocus,
       domain: t.domain, primaryFeature: t.primaryFeature, supportingFeatures: t.supportingFeatures,
-      featureRequirements: t.featureRequirements,
+      featureRequirements: t.featureRequirements, tujuanSingkat: t.tujuanSingkat,
       featureData: { RECOVERY: {}, NUTRITION: {} },
       featureState: { RECOVERY: "NOT_STARTED", NUTRITION: "NOT_STARTED" },
       status: "NOT_STARTED", goalIndex: 0,
@@ -114,6 +114,31 @@ async function test(name, fn) {
     await page.goto(BASE);
     await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
   }
+
+  console.log("E2E: Home screen enhanced preview (design handoff 01-01-home.png)");
+  await test("compact carousel card shows 'Recovery + Nutrition', not a description snippet", async () => {
+    await openDashboard();
+    assert.ok(await page.locator(".qhub-summary:has-text(\"Recovery + Nutrition\")").count(), "carousel card summary must read 'Recovery + Nutrition'");
+  });
+
+  await test("detail panel eyebrow includes the feature suffix, and the 3-tile info row renders", async () => {
+    const eyebrow = await page.locator(".qhub-eyebrow").first().innerText();
+    assert.ok(/RECOVERY \+ NUTRITION/.test(eyebrow), `eyebrow must include the feature suffix, got: "${eyebrow}"`);
+    const tiles = page.locator(".mdq-info-tile");
+    assert.strictEqual(await tiles.count(), 3, "must render exactly 3 info tiles");
+    assert.ok(await page.locator(".mdq-info-tile:has-text(\"2 area utama\")").count());
+    assert.ok(await page.locator(".mdq-info-tile:has-text(\"Est. waktu\")").count());
+    assert.ok(await page.locator(".mdq-info-tile:has-text(\"Tujuan\")").count());
+    assert.ok(await page.locator(".mdq-info-tile:has-text(\"±30 menit\")").count());
+    assert.ok(await page.locator(".mdq-info-tile:has-text(\"Pulih & bertenaga\")").count());
+  });
+
+  await test("'SELESAI KETIKA' shows a live per-area checklist, both unfilled before anything is recorded", async () => {
+    assert.strictEqual(await page.locator(".mdq-home-check-item").count(), 2, "must show exactly 2 checklist items (Recovery + Nutrition)");
+    assert.ok(await page.locator(".mdq-home-check-item:has-text(\"Recovery requirement terpenuhi\")").count());
+    assert.ok(await page.locator(".mdq-home-check-item:has-text(\"Nutrition requirement terpenuhi\")").count());
+    assert.strictEqual(await page.locator(".mdq-home-check-radio.done").count(), 0, "neither area is complete yet - no radio should be filled");
+  });
 
   console.log("E2E: Home -> Hub routing (never straight into a sub-flow)");
   await test("tapping the quest card opens the Hub overview, not a feature module", async () => {
@@ -177,6 +202,14 @@ async function test(name, fn) {
     assert.strictEqual(await page.locator(".mdq-pill-done").count(), 1, "Recovery card should show Selesai now");
     assert.strictEqual(await page.locator('.mdq-feature-cta:has-text("Lihat/Ubah")').count(), 1);
     assert.strictEqual(await page.locator("#mdqComplete").isDisabled(), true, "still gated - Nutrition not done");
+  });
+
+  await test("Home screen's checklist reflects REAL state, not a static preview: Recovery filled, Nutrition still empty", async () => {
+    await page.click("#mdqBackHome");
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    assert.strictEqual(await page.locator(".mdq-home-check-radio.done").count(), 1, "exactly one area (Recovery) must show filled on Home now");
+    assert.ok(await page.locator(".mdq-home-check-item:has-text(\"Recovery requirement terpenuhi\") .mdq-home-check-radio.done").count(), "the filled radio must specifically be Recovery's, not Nutrition's");
+    assert.strictEqual(await page.locator(".mdq-home-check-item:has-text(\"Nutrition requirement terpenuhi\") .mdq-home-check-radio.done").count(), 0, "Nutrition must still read unfilled");
   });
 
   console.log("E2E: refresh mid-attempt restores Hub state (persistence)");
@@ -263,7 +296,7 @@ async function test(name, fn) {
       mode: "quest", completionType: "multi-domain", structuredKind: null,
       title: t.title, description: t.description, why: t.why, statFocus: t.statFocus,
       domain: t.domain, primaryFeature: t.primaryFeature, supportingFeatures: t.supportingFeatures,
-      featureRequirements: t.featureRequirements,
+      featureRequirements: t.featureRequirements, tujuanSingkat: t.tujuanSingkat,
       featureData: { RECOVERY: {}, NUTRITION: {} },
       featureState: { RECOVERY: "NOT_STARTED", NUTRITION: "NOT_STARTED" },
       status: "NOT_STARTED", goalIndex: 0,

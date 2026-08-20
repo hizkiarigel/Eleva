@@ -236,7 +236,7 @@ async function apiTests() {
       mode: "quest", completionType: "multi-domain", structuredKind: null,
       title: quest.title, description: quest.description, why: quest.why, statFocus: quest.statFocus,
       domain: quest.domain, primaryFeature: quest.primaryFeature, supportingFeatures: quest.supportingFeatures,
-      featureRequirements: quest.featureRequirements,
+      featureRequirements: quest.featureRequirements, tujuanSingkat: quest.tujuanSingkat,
       featureData: { RECOVERY: {}, NUTRITION: {} },
       featureState: { RECOVERY: "NOT_STARTED", NUTRITION: "NOT_STARTED" },
       status: "NOT_STARTED", goalIndex: 0,

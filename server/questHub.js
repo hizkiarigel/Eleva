@@ -54,6 +54,11 @@ const RECOVERY_NUTRITION_TEMPLATE = {
   primaryFeature: "RECOVERY",
   supportingFeatures: ["NUTRITION"],
   featureRequirements: { RECOVERY: RECOVERY_REQUIREMENTS, NUTRITION: NUTRITION_REQUIREMENTS },
+  // Short 2-3 word phrase for the Home screen's "Tujuan" preview tile
+  // (design handoff's 01-01-home.png) - kept as template-owned content,
+  // same reasoning as title/description/why above, rather than hardcoded
+  // client-side where it'd be disconnected from this template.
+  tujuanSingkat: "Pulih & bertenaga",
 };
 
 function num(v) {
