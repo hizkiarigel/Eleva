@@ -5813,7 +5813,13 @@ function renderDashboard() {
   // can look one up by id while a META session is in progress via
   // targetDay/reflectTarget below), but never join the Primary Quest row -
   // see the is_meta column comment in db.js's init().
-  const openQuests = allOpenQuests.filter((q) => !q.isSideQuest && !q.isMeta);
+  const openQuests = allOpenQuests.filter((q) => !q.isSideQuest && !q.isMeta && !q.isChain);
+  // SOMA Training feedback brief item 4: a chain quest stays out of the
+  // normal 3-slot goal/side-quest cap (server-side, see GET /api/state's
+  // needySlots/sideSlots guards) but - unlike META - still needs to render
+  // on Home through the SAME card/detail components as a normal quest, not
+  // META's separate Inner Realm UI. At most one is ever open at a time.
+  const chainQuest = allOpenQuests.find((q) => q.isChain) || null;
   const goals = s.goals || [];
   const goalLabel = (goalIndex) => (goalIndex != null && goals[goalIndex] ? goals[goalIndex] : null);
   // Which open quest the reflect flow targets - looked up fresh from
@@ -5976,7 +5982,13 @@ function renderDashboard() {
   // no card row) while reflectOpen, same "one focus at a time" precedent
   // the old carousel used - and to the special-flow/completed-ack views
   // exactly as before.
-  const homeQuests = openQuests.slice(0, 3);
+  // The active chain quest always gets a guaranteed visible slot, pinned
+  // first, rather than competing with goal quests for the existing
+  // slice(0,3) cap - keeps the total displayed count at <= 3 without
+  // growing the carousel past what the rest of this screen assumes.
+  const homeQuests = chainQuest
+    ? [chainQuest, ...openQuests.filter((q) => q.id !== chainQuest.id)].slice(0, 3)
+    : openQuests.slice(0, 3);
   const activeIdx = Math.min(selectedQuestIndex ?? 0, Math.max(homeQuests.length - 1, 0));
   const selectedQuest = homeQuests[activeIdx] || null;
   // Round 40: CTA lockout now matches the REAL server deadline (24h nominal

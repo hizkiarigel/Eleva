@@ -224,6 +224,15 @@ async function resolveNutritionQuest(userId, dayId, quest, state) {
     timestamp: new Date().toISOString(),
   };
   await db.saveReflection(userId, dayId, reflection);
+  // SOMA Training feedback brief item 4: a Nutrition chain step (step 2)
+  // resolves through THIS choke point, not POST /api/reflection's own -
+  // both routes that can complete a nutrition-log quest (immediate, in
+  // POST /api/nutrition/log, and the lazy end-of-day sweep in GET
+  // /api/state) funnel through resolveNutritionQuest, so the chain-advance
+  // hook belongs here rather than duplicated at both call sites.
+  if (quest.chain) {
+    await advanceChain(userId, state, { quest, id: dayId }, null);
+  }
   await db.touchStatActivity(userId, Object.keys(deltas));
   await db.updateState(userId, {
     stats: newStats, chapterNumber: state.chapterNumber, chapterTitle: state.chapterTitle,
@@ -461,6 +470,16 @@ app.get("/api/state", requireAuth, async (req, res) => {
       await resolveExpiredQuest(req.userId, q.id);
       if (q.goalIndex != null) expiredGoalIndexes.add(q.goalIndex);
       resolvedAnyExpired = true;
+      // SOMA Training feedback brief item 4: unlike META, a chain-step quest
+      // DOES have a real deadline - a step nobody engaged with means the
+      // chain cancels outright (safe default, never stalls the account
+      // waiting for a step that's never coming). Clear the SAME request's
+      // in-memory state too, not just the DB, so the needySlots/sideSlots
+      // guards below immediately see rotation as unfrozen.
+      if (q.isChain) {
+        await db.clearActiveChain(req.userId);
+        state.activeChain = null;
+      }
     }
     if (resolvedAnyExpired) {
       openQuests = await db.getOpenQuests(req.userId); // re-fetch: resolved rows must drop out of "open" before needySlots below
@@ -471,7 +490,15 @@ app.get("/api/state", requireAuth, async (req, res) => {
     // quest" - a goal_index-null META session would otherwise satisfy a
     // legacy ungoaled account's single slot check (both use goal_index NULL)
     // and silently block that account's real daily quest from generating.
-    const needySlots = goalSlots.filter((gi) => !openQuests.some((q) => q.goalIndex === gi && !q.isMeta));
+    // SOMA Training feedback brief item 4: while a condition-triggered chain
+    // (Recovery->Nutrition->Training) is active, normal goal-rotation quest
+    // generation freezes - same "field-gated read-time check" idiom as
+    // applyDecayIfDue's kondisi-status pause, not a separate suspend/resume
+    // call. Already-open goal quests are completely untouched; only
+    // generating NEW ones into empty slots stops. Resumes automatically the
+    // instant db.clearActiveChain runs (chain completes or cancels/expires)
+    // - the very next GET /api/state sees state.activeChain falsy again.
+    const needySlots = state.activeChain ? [] : goalSlots.filter((gi) => !openQuests.some((q) => q.goalIndex === gi && !q.isMeta));
     if (needySlots.length) {
       // One shared context snapshot for every goal generated in this pass -
       // avoids a re-read per goal, and right after onboarding (the only
@@ -582,7 +609,10 @@ app.get("/api/state", requireAuth, async (req, res) => {
     // not tied to any goal. Only for accounts that actually have goal
     // capture (goals.length > 0) - legacy pre-goal-capture accounts keep
     // their single ungoaled Primary slot only, no Side Quest sprawl.
-    const sideSlots = goals.length ? Math.max(0, 3 - goals.length) : 0;
+    // Chain suspension (see the needySlots comment above) also freezes Side
+    // Quest generation - a fresh Side Quest appearing mid-chain would be a
+    // confusing distraction while the user is mid-recovery.
+    const sideSlots = state.activeChain ? 0 : (goals.length ? Math.max(0, 3 - goals.length) : 0);
     const openSideCount = openQuests.filter((q) => q.isSideQuest).length;
     for (let i = openSideCount; i < sideSlots; i++) {
       const result = await ai.generateSideQuest({ profile: state.profile, pathway: state.pathway, goals });
@@ -892,6 +922,16 @@ app.post("/api/reflection", requireAuth, async (req, res) => {
     if (day.quest?.primaryFeature === "MOVEMENT" && day.quest?.activeAttempt) {
       await db.updateQuestProgress(req.userId, day.id, { activeAttempt: null });
     }
+    // SOMA Training feedback brief item 4: if this quest is a chain step,
+    // generate the next one immediately. Gated on !inCrisis deliberately -
+    // a crisis-detected reflection short-circuits normal processing already;
+    // pushing straight into "here's your next quest" right after would be
+    // wrong. The chain simply stalls at that step (safe default, same as
+    // every other edge case here - never strands the account, just never
+    // advances further without the user re-engaging normally).
+    if (day.quest?.chain && !inCrisis) {
+      await advanceChain(req.userId, state, day, structuredClean);
+    }
     await archiveChapterIfAdvancing(req.userId, state, allowAdvance);
     // Task 11e (Decay): record which stats just grew for real, so the decay
     // clock resets for exactly those - and only those - stats.
@@ -971,6 +1011,88 @@ app.post("/api/goal-target", requireAuth, async (req, res) => {
   }
 });
 
+// SOMA Training feedback brief (20 Agustus) item 4: condition-triggered
+// Recovery->Nutrition->Training(adapted) chain, fired when Context Update
+// transitions INTO "Sakit/cedera" specifically. Fully code-authored quest
+// builders for steps 1-2 (no AI judgment needed - same posture as
+// POST /api/meta/start's body/recovery and nutrition branches above, which
+// these deliberately mirror), step 3 goes through ai.generateQuest (needs
+// real judgment - exercise selection) with forced context so it can't
+// independently reinterpret the situation. Chain badge (quest.chain) is
+// stamped by code on every step regardless of what the AI returns.
+function buildRecoveryChainQuest(chainId) {
+  return {
+    completionType: "structured-physical",
+    structuredKind: "recovery",
+    evidenceSchema: null,
+    statFocus: "body",
+    title: "Fokus Pemulihan Hari Ini",
+    description: "Kondisimu lagi sakit/cedera — hari ini fokus pemulihan: tidur, hidrasi, protein, dan level nyeri, bukan aktivitas aktif.",
+    why: "Chain Recovery memastikan langkah berikutnya (Nutrisi, lalu Training yang disesuaikan) dibangun dari kondisi pemulihanmu yang sebenarnya.",
+    chain: { id: chainId, step: 1, total: 3, label: "Recovery" },
+  };
+}
+function buildNutritionChainQuest(chainId) {
+  return {
+    completionType: "nutrition-log",
+    lifecycleType: "progressive",
+    statFocus: "body",
+    title: "Catat Nutrisi Pemulihan",
+    description: "Lanjutan chain Recovery — catat makanmu hari ini biar asupan protein/kalori mendukung pemulihan.",
+    why: "Nutrisi yang tercukupi adalah bagian dari pemulihan, bukan aktivitas terpisah.",
+    progressive: nutrition.initProgressiveState({ requiredContributions: 3, primaryMetric: "protein", targetValue: 60 }),
+    chain: { id: chainId, step: 2, total: 3, label: "Nutrition" },
+  };
+}
+function buildTrainingChainCtx(state, chain) {
+  return {
+    profile: state.profile,
+    pathway: state.pathway,
+    pathwayNoun: state.pathwayNoun,
+    goals: state.goals?.length ? state.goals : undefined,
+    stats: state.stats,
+    chapterNumber: state.chapterNumber,
+    chapterTitle: state.chapterTitle,
+    recentDays: [],
+    // Chain continuity: forces the SAME de-intensify prompt clause
+    // generateQuest already has for a live kondisiStatus (see the "Kondisi
+    // terbaru pengguna" ternary) - the chain only exists because of this
+    // exact transition, so it's always safe/correct to force it here rather
+    // than re-reading the (possibly since-changed) live value.
+    kondisiStatus: "Sakit/cedera",
+    kondisiNote: chain.kondisiNoteSnapshot || undefined,
+    chainTrainingContext: {
+      levelNyeri: chain.levelNyeri,
+      instruction: "Ini LANGKAH 3 dari chain Recovery -> Nutrition -> Training. Quest HARUS structured-physical (cardio/gym) yang KONKRET beradaptasi ke levelNyeri: fokus upper-body + kerja lower-body ringan kalau levelNyeri Sedang/Berat, boleh lebih standar (tapi tetap moderat, jangan intensitas normal) kalau Ringan/Tidak ada. JANGAN buat quest generik yang tidak menyebut adaptasi ini.",
+    },
+  };
+}
+
+// One active chain per user; the reflection-driven step-2/step-3 handoff
+// lives in advanceChain (called from POST /api/reflection, right after
+// db.saveReflection). Guarded by chain.id/chain.step matching the JUST-
+// SUBMITTED quest's own chain metadata - protects against a stale/
+// duplicate/multi-device double-submit ever generating the same step twice.
+async function advanceChain(userId, state, day, structuredClean) {
+  const chain = state.activeChain;
+  if (!chain || !day.quest.chain || chain.id !== day.quest.chain.id || chain.step !== day.quest.chain.step) return;
+
+  if (chain.step === 1) {
+    const levelNyeri = structuredClean?.levelNyeri || null;
+    const nextQuest = buildNutritionChainQuest(chain.id);
+    const created = await db.createQuest(userId, null, todayKey(), { quest: nextQuest, insight: null }, false, false, true);
+    await db.setActiveChain(userId, { ...chain, step: 2, levelNyeri, stepQuestIds: [...chain.stepQuestIds, created.id] });
+  } else if (chain.step === 2) {
+    const ctx = buildTrainingChainCtx(state, chain);
+    const result = await ai.generateQuest(ctx);
+    result.quest.chain = { id: chain.id, step: 3, total: 3, label: "Training" };
+    const created = await db.createQuest(userId, null, todayKey(), { quest: result.quest, insight: result.insight }, false, false, true);
+    await db.setActiveChain(userId, { ...chain, step: 3, stepQuestIds: [...chain.stepQuestIds, created.id] });
+  } else if (chain.step === 3) {
+    await db.clearActiveChain(userId);
+  }
+}
+
 // Homepage redesign: "Kondisi Hari Ini" - light, not a quest, not mandatory.
 // Single current value, reset lazily back to Normal by GET /api/state once a
 // new calendar day starts (see the lazy-reset check there).
@@ -985,8 +1107,39 @@ app.post("/api/kondisi", requireAuth, async (req, res) => {
     // (a context signal, never evidence/growth), so it also carries
     // whatever short reason text the user typed there.
     const trimmedNote = typeof note === "string" ? note.trim().slice(0, 300) : null;
+
+    // SOMA Training feedback brief item 4: db.updateKondisi is a blind write
+    // with no prior read, so the OLD status has to be read here first to
+    // detect an actual transition INTO "Sakit/cedera" (not just "being" in
+    // it, and not any of the other 5 labels).
+    const priorState = await db.getState(req.userId);
+    const isTransitionIntoSakit = status === "Sakit/cedera" && priorState?.kondisiStatus !== "Sakit/cedera";
+    const chainAlreadyActive = Boolean(priorState?.activeChain);
+
     await db.updateKondisi(req.userId, status, trimmedNote || null);
-    res.json({ ok: true, kondisiStatus: status, kondisiNote: trimmedNote || null });
+
+    let chainStarted = false;
+    if (isTransitionIntoSakit && !chainAlreadyActive) {
+      const chainId = `chain_${crypto.randomUUID()}`;
+      const quest = buildRecoveryChainQuest(chainId);
+      const created = await db.createQuest(req.userId, null, todayKey(), { quest, insight: null }, false, false, true);
+      await db.setActiveChain(req.userId, {
+        id: chainId, type: "sakit-cedera-recovery", step: 1, total: 3,
+        startedAt: new Date().toISOString(), levelNyeri: null,
+        kondisiNoteSnapshot: trimmedNote || null, stepQuestIds: [created.id],
+      });
+      chainStarted = true;
+    } else if (status !== "Sakit/cedera" && chainAlreadyActive) {
+      // Safe default: re-labeling Context Update to anything else mid-chain
+      // cancels it outright rather than letting it keep running against a
+      // status that no longer matches its own premise. The in-flight step
+      // quest is left open/untouched (never force-closed) - it simply stops
+      // advancing (advanceChain's stale-chain-id guard already protects
+      // against it generating a next step even if reflected on later).
+      await db.clearActiveChain(req.userId);
+    }
+
+    res.json({ ok: true, kondisiStatus: status, kondisiNote: trimmedNote || null, chainStarted });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan kondisi." });
