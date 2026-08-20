@@ -12,6 +12,7 @@ const practiceTestLib = require("./practiceTest");
 const listeningDiagnostic = require("./listeningDiagnostic");
 const videoQuizLib = require("./videoQuiz");
 const youtube = require("./youtube");
+const laboraChain = require("./laboraChain");
 const jobMatch = require("./jobMatch");
 const jobApplication = require("./jobApplication");
 const nutrition = require("./nutrition");
@@ -1330,6 +1331,82 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
   }
 });
 
+// --- LABORA Chain helpers (labora-chain completionType). Flow doc:
+// docs/labora-chain-flow.md ---
+// Type-guard replacement for the per-feature routes: accepts BOTH a plain
+// quest of that completionType and a labora-chain quest whose CURRENT step
+// is that feature. Returns { chain } ({ chain: null } = plain quest) or
+// null (wrong type / wrong step -> route 400s).
+function resolveChainStep(day, feature) {
+  const q = day?.quest || {};
+  if (q.completionType === feature) return { chain: null };
+  if (q.completionType === "labora-chain" && q.laboraChain) {
+    const step = laboraChain.currentStep(q.laboraChain);
+    if (step && step.feature === feature) return { chain: q.laboraChain };
+  }
+  return null;
+}
+
+// The ONE real completion for a finished chain - mirrors the video-quiz
+// pass pipeline. The reflection embeds jobMatchResult/jobApplicationSubmit
+// at TOP LEVEL so the existing recentDays lookups (jobMatchHint in GET
+// /api/state and the submit route's qualified gate) keep working unchanged.
+async function completeLaboraChain(userId, state, day, finishedChain) {
+  await db.updateQuestProgress(userId, day.id, { laboraChain: finishedChain });
+  const summary = laboraChain.chainSummary(finishedChain);
+  const jm = laboraChain.inChainJobMatch(finishedChain);
+  const doneStep = (f) => finishedChain.steps.find((s) => s.feature === f && s.status === "done")?.result || null;
+  const vq = doneStep("video-quiz");
+  const ja = doneStep("job-application-submit");
+  const recentGoalDays = day.goalIndex != null ? await db.recentDays(userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined;
+  const result = await ai.processReflection({
+    profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
+    quest: day.quest, status: "COMPLETED",
+    laboraChainResult: summary,
+    ...(vq ? { videoQuizResult: vq } : {}),
+    recentDays: recentGoalDays, stats: state.stats, growthSessions: state.growthSessions,
+  });
+  const deltas = result.statDeltas || {}; // objective multi-step evidence - no specificity gate
+  const newStats = { ...state.stats };
+  Object.entries(deltas).forEach(([k, v]) => {
+    if (newStats[k] !== undefined && typeof v === "number") {
+      newStats[k] = Math.max(0, Math.min(100, newStats[k] + Math.max(0, Math.min(5, Math.round(v)))));
+    }
+  });
+  const newGrowthSessions = state.growthSessions + (Object.keys(deltas).length > 0 ? 1 : 0);
+  const allowAdvance = result.chapterAdvance && newGrowthSessions > 0 && newGrowthSessions % 5 === 0 && Boolean(result.newChapterTitle && result.newChapterNarrative);
+  const reflection = {
+    status: "COMPLETED", text: "",
+    laboraChainResult: summary,
+    ...(vq ? { videoQuizResult: vq } : {}),
+    ...(jm ? { jobMatchResult: jm } : {}),
+    ...(ja ? { jobApplicationSubmit: ja } : {}),
+    deltas, mentorReply: result.mentorReply, timestamp: new Date().toISOString(),
+  };
+  await db.saveReflection(userId, day.id, reflection);
+  await archiveChapterIfAdvancing(userId, state, allowAdvance);
+  await db.touchStatActivity(userId, Object.keys(deltas));
+  await db.updateState(userId, {
+    stats: newStats,
+    chapterNumber: allowAdvance ? state.chapterNumber + 1 : state.chapterNumber,
+    chapterTitle: allowAdvance ? result.newChapterTitle : state.chapterTitle,
+    chapterNarrative: allowAdvance ? result.newChapterNarrative : undefined,
+    growthSessions: newGrowthSessions,
+    pathwayNoun: state.pathwayNoun,
+  });
+  return { mentorReply: result.mentorReply, deltas };
+}
+
+// Compact chain info for client responses.
+function chainClientInfo(chain, completed) {
+  return {
+    completed,
+    nextFeature: completed ? null : laboraChain.currentStep(chain)?.feature || null,
+    currentIndex: chain.currentIndex,
+    steps: chain.steps.map(({ feature, status }) => ({ feature, status })),
+  };
+}
+
 // --- Video Quest (video-quiz) routes. Flow doc: docs/video-quiz-flow.md ---
 // Step 1 of the flow: "Periksa Materi". Fetches the pasted video's
 // transcript server-side, asks the AI whether it substantively teaches the
@@ -1338,11 +1415,11 @@ app.post("/api/practice-test/submit", requireAuth, async (req, res) => {
 // impossible once /start promotes a candidate to the locked video.
 app.post("/api/video-quiz/validate", requireAuth, async (req, res) => {
   try {
-    const { questId, videoUrl } = req.body;
+    const { questId, videoUrl, manualTranscript } = req.body;
     const state = await db.getState(req.userId);
     const day = await db.getQuestById(req.userId, questId);
     if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
-    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (!resolveChainStep(day, "video-quiz")) return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
     if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
     if (day.quest?.videoQuizState?.lockedVideoUrl) {
       return res.status(400).json({ error: "Materi untuk quest ini sudah dikunci — selesaikan assessment dari video itu dulu." });
@@ -1351,14 +1428,30 @@ app.post("/api/video-quiz/validate", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Link YouTube tidak valid. Tempel link video YouTube (youtube.com atau youtu.be)." });
     }
     let video;
-    try {
-      video = await youtube.fetchVideoData(videoUrl);
-    } catch (e) {
-      if (e.code === "NO_CAPTIONS") {
-        return res.status(422).json({ error: "Video ini nggak punya subtitle/transkrip yang bisa dibaca. Pilih video lain yang menyediakan subtitle (kebanyakan video edukasi punya)." });
+    if (typeof manualTranscript === "string" && manualTranscript.trim()) {
+      // Manual fallback (production bug 19 Agustus): when YouTube blocks
+      // server-side fetching, the user pastes the transcript from YouTube's
+      // own transcript panel. Same downstream pipeline - only the source of
+      // the transcript string differs (marked source:"manual" for honesty).
+      const cleaned = youtube.sanitizeManualTranscript(manualTranscript);
+      if (!cleaned) {
+        return res.status(400).json({ error: "Transkrip manual terlalu pendek — tempel isi transkrip dari panel transcript YouTube (minimal ±200 karakter)." });
       }
-      console.error("video-quiz fetchVideoData failed:", e.message);
-      return res.status(502).json({ error: "Gagal mengambil data video. Coba lagi." });
+      const videoId = youtube.parseVideoId(videoUrl);
+      video = { videoId, videoMeta: await youtube.fetchVideoMetaOnly(videoId), transcript: cleaned, source: "manual" };
+    } else {
+      try {
+        video = { ...(await youtube.fetchVideoData(videoUrl)), source: "auto" };
+      } catch (e) {
+        if (e.code === "NO_CAPTIONS") {
+          return res.status(422).json({ error: "Video ini nggak punya subtitle/transkrip yang bisa dibaca. Pilih video lain — atau tempel transkripnya manual di bawah.", code: "NO_CAPTIONS", manualAllowed: true });
+        }
+        if (e.code === "YT_BLOCKED") {
+          return res.status(422).json({ error: "YouTube lagi membatasi akses dari server. Tempel transkripnya manual di bawah (buka video → Transcript → salin), atau coba lagi nanti.", code: "YT_BLOCKED", manualAllowed: true });
+        }
+        console.error("video-quiz fetchVideoData failed:", e.message);
+        return res.status(502).json({ error: "Gagal mengambil data video. Coba lagi." });
+      }
     }
     const topic = day.quest.videoQuiz?.topic || day.quest.title;
     const { relevant, rationale } = await ai.judgeVideoRelevance({
@@ -1369,7 +1462,7 @@ app.post("/api/video-quiz/validate", requireAuth, async (req, res) => {
     await db.setVideoQuizPayload(req.userId, day.id, {
       candidate: {
         videoId: video.videoId, videoUrl: String(videoUrl).trim(), videoMeta: video.videoMeta,
-        transcript: video.transcript, relevant, rationale, checkedAt: new Date().toISOString(),
+        transcript: video.transcript, source: video.source, relevant, rationale, checkedAt: new Date().toISOString(),
       },
     });
     res.json({ relevant, rationale, videoMeta: { ...video.videoMeta, videoId: video.videoId } });
@@ -1396,7 +1489,7 @@ app.post("/api/video-quiz/start", requireAuth, async (req, res) => {
     const state = await db.getState(req.userId);
     const day = await db.getQuestById(req.userId, questId);
     if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
-    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (!resolveChainStep(day, "video-quiz")) return res.status(400).json({ error: "Quest ini bukan tipe Video Quest — atau langkah chain saat ini bukan Video Quest." });
     if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
     const topic = day.quest.videoQuiz?.topic || day.quest.title;
     const passThreshold = day.quest.videoQuiz?.passThreshold ?? videoQuizLib.DEFAULT_PASS_THRESHOLD;
@@ -1457,7 +1550,7 @@ app.post("/api/video-quiz/submit", requireAuth, async (req, res) => {
     const state = await db.getState(req.userId);
     const day = await db.getQuestById(req.userId, questId);
     if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
-    if (day.quest?.completionType !== "video-quiz") return res.status(400).json({ error: "Quest ini bukan tipe Video Quest." });
+    if (!resolveChainStep(day, "video-quiz")) return res.status(400).json({ error: "Quest ini bukan tipe Video Quest — atau langkah chain saat ini bukan Video Quest." });
     if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
     const payload = await db.getVideoQuizPayload(req.userId, day.id);
     if (!payload?.locked || !payload.questions) return res.status(400).json({ error: "Belum ada soal — mulai assessment dulu." });
@@ -1484,6 +1577,43 @@ app.post("/api/video-quiz/submit", requireAuth, async (req, res) => {
       score: graded.score, total: graded.total, passThreshold,
       attempt: payload.attempt || 1, strongConcepts, weakConcepts,
     };
+
+    // Pembahasan: the only place the answer key ever reaches the client,
+    // and only after a pass (chain or plain alike - the user earned it).
+    const answerLookup = answers || {};
+    const review = payload.questions.map((q) => {
+      const yourAnswer = (Array.isArray(answerLookup[q.id]) ? answerLookup[q.id] : []).map((a) => String(a || "").trim().toLowerCase());
+      return {
+        id: q.id, format: q.format, concept: q.concept, prompt: q.prompt, options: q.options,
+        yourAnswer, correct: q.correct,
+        isCorrect: graded.perQuestion.find((p) => p.id === q.id)?.correct || false,
+        explanation: q.explanation,
+      };
+    });
+
+    // LABORA Chain: a pass here is one STEP done, not the quest - store the
+    // step result and advance; only a finished chain runs the real
+    // completion (completeLaboraChain). Canonical ordering makes video-quiz
+    // step 1 of >= 2, so `completed` is normally false here.
+    const { chain } = resolveChainStep(day, "video-quiz");
+    if (chain) {
+      const { chain: nextChain, completed } = laboraChain.advanceChain(chain, { ...videoQuizResult, ts: new Date().toISOString() });
+      if (!completed) {
+        await db.updateQuestProgress(req.userId, day.id, { laboraChain: nextChain });
+        return res.json({
+          passed: true, score: graded.score, total: graded.total, passThreshold,
+          strongConcepts, weakConcepts, mentorReply: null, deltas: {}, review,
+          chain: chainClientInfo(nextChain, false),
+        });
+      }
+      const done = await completeLaboraChain(req.userId, state, day, nextChain);
+      return res.json({
+        passed: true, score: graded.score, total: graded.total, passThreshold,
+        strongConcepts, weakConcepts, mentorReply: done.mentorReply, deltas: done.deltas, review,
+        chain: chainClientInfo(nextChain, true),
+      });
+    }
+
     const recentGoalDays = day.goalIndex != null ? await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 7 }) : undefined;
     const ctx = {
       profile: { name: state.profile.name, originStory: state.profile.originStory || state.profile.situation },
@@ -1523,18 +1653,6 @@ app.post("/api/video-quiz/submit", requireAuth, async (req, res) => {
       pathwayNoun: state.pathwayNoun,
     });
 
-    // Pembahasan: the only place the answer key ever reaches the client,
-    // and only after a pass.
-    const answerLookup = answers || {};
-    const review = payload.questions.map((q) => {
-      const yourAnswer = (Array.isArray(answerLookup[q.id]) ? answerLookup[q.id] : []).map((a) => String(a || "").trim().toLowerCase());
-      return {
-        id: q.id, format: q.format, concept: q.concept, prompt: q.prompt, options: q.options,
-        yourAnswer, correct: q.correct,
-        isCorrect: graded.perQuestion.find((p) => p.id === q.id)?.correct || false,
-        explanation: q.explanation,
-      };
-    });
     res.json({
       passed: true, score: graded.score, total: graded.total, passThreshold,
       strongConcepts, weakConcepts, mentorReply: result.mentorReply, deltas, review,
@@ -1659,7 +1777,8 @@ app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
     const state = await db.getState(req.userId);
     const day = await db.getQuestById(req.userId, questId);
     if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
-    if (day.quest?.completionType !== "job-match-analysis") return res.status(400).json({ error: "Quest ini bukan tipe Job Match Analysis." });
+    const chainCheck = resolveChainStep(day, "job-match-analysis");
+    if (!chainCheck) return res.status(400).json({ error: "Quest ini bukan tipe Job Match Analysis — atau langkah chain saat ini bukan Job Match." });
     if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
     const cvArtifact = await db.getArtifactById(req.userId, cvArtifactId);
     if (!cvArtifact) return res.status(400).json({ error: "CV tidak ditemukan — upload atau pilih CV dulu." });
@@ -1670,13 +1789,6 @@ app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
       pathway: state.pathway,
     });
 
-    const reflection = {
-      status: "COMPLETED", text: "",
-      jobMatchResult: result,
-      deltas: {}, timestamp: new Date().toISOString(),
-    };
-    await db.saveReflection(req.userId, day.id, reflection);
-
     // Task 14 point 1/2: a Livelihood goal's Milestone line ("→ Milestone:
     // 10 Qualified Applications (X/10)") only renders once state.goalTargets
     // actually has an entry for this goalIndex (questSummaryCard reads that
@@ -1686,8 +1798,29 @@ app.post("/api/job-match/analyze", requireAuth, async (req, res) => {
     // up at all. META sessions (goalIndex null) have no goal to attach a
     // Milestone to, same guard the A/B/C structured-physical flow already uses.
     const target = day.goalIndex != null ? await ensureQualifiedApplicationsMilestone(req.userId, state, day.goalIndex) : null;
+    const targetInfo = target ? { mode: "progress", kind: target.kind, currentTarget: target } : null;
 
-    res.json({ ok: true, result, target: target ? { mode: "progress", kind: target.kind, currentTarget: target } : null });
+    // LABORA Chain: the analysis is one STEP - no reflection yet. The
+    // auto-skip inside advanceChain fires here when the analysis came out
+    // unqualified and the next step is submit (usually completing the chain).
+    if (chainCheck.chain) {
+      const { chain: nextChain, completed } = laboraChain.advanceChain(chainCheck.chain, { ...result, ts: new Date().toISOString() });
+      if (!completed) {
+        await db.updateQuestProgress(req.userId, day.id, { laboraChain: nextChain });
+        return res.json({ ok: true, result, target: targetInfo, chain: chainClientInfo(nextChain, false) });
+      }
+      const done = await completeLaboraChain(req.userId, state, day, nextChain);
+      return res.json({ ok: true, result, target: targetInfo, mentorReply: done.mentorReply, deltas: done.deltas, chain: chainClientInfo(nextChain, true) });
+    }
+
+    const reflection = {
+      status: "COMPLETED", text: "",
+      jobMatchResult: result,
+      deltas: {}, timestamp: new Date().toISOString(),
+    };
+    await db.saveReflection(req.userId, day.id, reflection);
+
+    res.json({ ok: true, result, target: targetInfo });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menganalisis kecocokan lowongan." });
@@ -1716,7 +1849,8 @@ app.post("/api/job-application/submit", requireAuth, async (req, res) => {
     const state = await db.getState(req.userId);
     const day = await db.getQuestById(req.userId, questId);
     if (!state || !day) return res.status(400).json({ error: "Quest tidak ditemukan." });
-    if (day.quest?.completionType !== "job-application-submit") return res.status(400).json({ error: "Quest ini bukan tipe Submit Application." });
+    const chainCheck = resolveChainStep(day, "job-application-submit");
+    if (!chainCheck) return res.status(400).json({ error: "Quest ini bukan tipe Submit Application — atau langkah chain saat ini bukan Submit Application." });
     if (day.reflection) return res.status(400).json({ error: "Quest ini sudah pernah diselesaikan." });
     if (day.goalIndex == null) return res.status(400).json({ error: "Quest ini tidak terikat ke goal manapun." });
 
@@ -1730,10 +1864,21 @@ app.post("/api/job-application/submit", requireAuth, async (req, res) => {
     // (not any goal) must have passed. Mirrors the jobMatchHint lookup in
     // GET /api/state, but re-checked here independently - a stale/replayed
     // client request must never increment the counter off an old hint.
-    const goalRecent = await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 5 });
-    const lastAnalysis = goalRecent.find((d) => d.reflection?.jobMatchResult);
-    if (!lastAnalysis || !lastAnalysis.reflection.jobMatchResult.qualified) {
-      return res.status(400).json({ error: "Belum ada Job Match Analysis yang LOLOS (qualified) untuk goal ini — selesaikan analisisnya dulu." });
+    // Under a LABORA chain the analysis lives IN the same quest (its step
+    // result, no reflection yet) - that in-chain result is the gate; a
+    // chain built without a job-match step (hint already qualified) keeps
+    // the recentDays re-check.
+    const inChainJm = chainCheck.chain ? laboraChain.inChainJobMatch(chainCheck.chain) : null;
+    if (inChainJm) {
+      if (inChainJm.qualified !== true) {
+        return res.status(400).json({ error: "Belum ada Job Match Analysis yang LOLOS (qualified) untuk goal ini — selesaikan analisisnya dulu." });
+      }
+    } else {
+      const goalRecent = await db.recentDays(req.userId, { goalIndex: day.goalIndex, excludeId: day.id, limit: 5 });
+      const lastAnalysis = goalRecent.find((d) => d.reflection?.jobMatchResult);
+      if (!lastAnalysis || !lastAnalysis.reflection.jobMatchResult.qualified) {
+        return res.status(400).json({ error: "Belum ada Job Match Analysis yang LOLOS (qualified) untuk goal ini — selesaikan analisisnya dulu." });
+      }
     }
 
     const target = await ensureQualifiedApplicationsMilestone(req.userId, state, day.goalIndex);
@@ -1745,13 +1890,28 @@ app.post("/api/job-application/submit", requireAuth, async (req, res) => {
     await db.setGoalTarget(req.userId, day.goalIndex, updatedTarget);
 
     const jobApplicationSubmit = { ...validated.clean, cvArtifactId: cvArtifact.id };
-    const reflection = {
-      status: "COMPLETED", text: "",
-      jobApplicationSubmit,
-      mentorReply: `Lamaran ke ${validated.clean.companyName} untuk ${validated.clean.roleTitle} tercatat.`,
-      deltas: {}, timestamp: new Date().toISOString(),
-    };
-    await db.saveReflection(req.userId, day.id, reflection);
+    let chainDone = null;
+    let finishedChainInfo = null;
+    if (chainCheck.chain) {
+      // Canonical ordering makes submit the LAST chain step - advancing
+      // always finishes the chain, and completeLaboraChain writes the one
+      // real reflection (embedding jobMatchResult + jobApplicationSubmit).
+      const { chain: nextChain, completed } = laboraChain.advanceChain(chainCheck.chain, { ...jobApplicationSubmit, ts: new Date().toISOString() });
+      if (completed) {
+        chainDone = await completeLaboraChain(req.userId, state, day, nextChain);
+      } else {
+        await db.updateQuestProgress(req.userId, day.id, { laboraChain: nextChain });
+      }
+      finishedChainInfo = chainClientInfo(nextChain, completed);
+    } else {
+      const reflection = {
+        status: "COMPLETED", text: "",
+        jobApplicationSubmit,
+        mentorReply: `Lamaran ke ${validated.clean.companyName} untuk ${validated.clean.roleTitle} tercatat.`,
+        deltas: {}, timestamp: new Date().toISOString(),
+      };
+      await db.saveReflection(req.userId, day.id, reflection);
+    }
 
     // Task 14 point 7: reached 10/10 -> generalize the existing "Target
     // Berikutnya" A/B/C mechanism (Fokus 2.2/2.3) to Livelihood goals, same
@@ -1768,7 +1928,11 @@ app.post("/api/job-application/submit", requireAuth, async (req, res) => {
       targetScreen = { mode: "progress", kind: "qualified-applications", currentTarget: updatedTarget };
     }
 
-    res.json({ ok: true, jobApplication: jobApplicationSubmit, target: targetScreen });
+    res.json({
+      ok: true, jobApplication: jobApplicationSubmit, target: targetScreen,
+      ...(chainDone ? { mentorReply: chainDone.mentorReply, deltas: chainDone.deltas } : {}),
+      ...(finishedChainInfo ? { chain: finishedChainInfo } : {}),
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan lamaran." });

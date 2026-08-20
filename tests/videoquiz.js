@@ -165,6 +165,51 @@ test("11/15 passes at default threshold, 10/15 fails", () => {
   assert.ok(!(10 >= vq.DEFAULT_PASS_THRESHOLD));
 });
 
+console.log("Unit: parseTimedTextXml (caption XML fallback)");
+test("joins <text> bodies, strips inner tags, decodes entities", () => {
+  const xml = `<transcript><text start="0" dur="2">hello &amp; welcome</text><text start="2">it&#39;s <i>great</i> &#x27;fun&#x27;</text></transcript>`;
+  assert.strictEqual(yt.parseTimedTextXml(xml), "hello & welcome it's great 'fun'");
+});
+test("empty/garbage xml -> empty string", () => {
+  assert.strictEqual(yt.parseTimedTextXml(""), "");
+  assert.strictEqual(yt.parseTimedTextXml("<transcript></transcript>"), "");
+  assert.strictEqual(yt.parseTimedTextXml(null), "");
+});
+
+console.log("Unit: selectCaptionTrack priority ladder");
+const trk = (languageCode, kind) => ({ languageCode, ...(kind ? { kind } : {}), baseUrl: "u" });
+test("manual id beats everything", () => {
+  assert.strictEqual(yt.selectCaptionTrack([trk("en"), trk("id", "asr"), trk("id")]).languageCode, "id");
+  assert.strictEqual(yt.selectCaptionTrack([trk("en"), trk("id", "asr"), trk("id")]).kind, undefined);
+});
+test("manual en beats asr id", () => {
+  const t = yt.selectCaptionTrack([trk("id", "asr"), trk("en")]);
+  assert.strictEqual(t.languageCode, "en");
+  assert.strictEqual(t.kind, undefined);
+});
+test("asr id beats asr en; anything beats nothing", () => {
+  assert.strictEqual(yt.selectCaptionTrack([trk("en", "asr"), trk("id", "asr")]).languageCode, "id");
+  assert.strictEqual(yt.selectCaptionTrack([trk("fr")]).languageCode, "fr");
+  assert.strictEqual(yt.selectCaptionTrack([]), null);
+});
+
+console.log("Unit: sanitizeManualTranscript");
+const LONG = "kalimat materi pembelajaran yang cukup panjang untuk dianggap transkrip valid ".repeat(5);
+test("strips standalone timestamps (0:00, 12:34, 1:02:34)", () => {
+  const out = yt.sanitizeManualTranscript(`0:00 halo semua 12:34 ini materi 1:02:34 penutup ${LONG}`);
+  assert.ok(out && !/\d{1,2}:\d{2}/.test(out));
+  assert.ok(out.includes("halo semua") && out.includes("ini materi"));
+});
+test("too short -> null", () => assert.strictEqual(yt.sanitizeManualTranscript("materi singkat 0:00"), null));
+test("caps at TRANSCRIPT_CHAR_CAP", () => {
+  const out = yt.sanitizeManualTranscript("a".repeat(20000) + " b");
+  assert.ok(out.length <= yt.TRANSCRIPT_CHAR_CAP);
+});
+test("collapses whitespace/newlines", () => {
+  const out = yt.sanitizeManualTranscript(`baris satu\n\nbaris   dua\t${LONG}`);
+  assert.ok(out.includes("baris satu baris dua"));
+});
+
 console.log("Unit: claude.js normalization + fallback fixture");
 // Requiring claude.js also runs the VIDEO_QUIZ_FALLBACK module-load
 // assertion (it throws if the fixture stops passing cleanVideoQuizPayload).
@@ -192,7 +237,87 @@ test("non-video-quiz gets videoQuiz nulled", () => {
   ai.normalizeVideoQuizSchema(q);
   assert.strictEqual(q.videoQuiz, null);
 });
+// Async tests kept out of the sync test() helper so their assertions still
+// count toward `failures` before the summary prints.
+async function atest(name, fn) {
+  try {
+    await fn();
+    console.log(`  ok - ${name}`);
+  } catch (e) {
+    failures += 1;
+    console.error(`  FAIL - ${name}: ${e.message}`);
+  }
+}
+
+// Monkey-patched global fetch for the error-taxonomy tests (no network).
+// handler(url, opts) returns { status?, json?, text? }.
+async function withFakeFetch(handler, fn) {
+  const real = global.fetch;
+  global.fetch = async (url, opts) => {
+    const r = handler(String(url), opts) || {};
+    return {
+      ok: (r.status || 200) < 400,
+      status: r.status || 200,
+      json: async () => { if (r.json === undefined) throw new Error("not json"); return r.json; },
+      text: async () => r.text ?? "",
+      headers: { getSetCookie: () => [] },
+    };
+  };
+  try { await fn(); } finally { global.fetch = real; }
+}
+const playerBody = (opts) => JSON.parse(opts?.body || "{}");
+
 (async () => {
+  console.log("Unit: fetchVideoData error taxonomy (fake fetch)");
+  await atest("all strategies bot-checked -> YT_BLOCKED", () => withFakeFetch((url) => {
+    if (url.includes("oembed")) return { json: { title: "T", author_name: "A" } };
+    if (url.includes("youtubei/v1/player")) return { json: { playabilityStatus: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm" } } };
+    if (url.includes("/watch")) return { text: "<html>nothing useful</html>" };
+    return { status: 404 };
+  }, async () => {
+    await assert.rejects(() => yt.fetchVideoData("https://youtu.be/dQw4w9WgXcQ"), (e) => e.code === "YT_BLOCKED");
+  }));
+  await atest("playable response with zero tracks -> NO_CAPTIONS", () => withFakeFetch((url) => {
+    if (url.includes("oembed")) return { json: { title: "T", author_name: "A" } };
+    if (url.includes("youtubei/v1/player")) return { json: { playabilityStatus: { status: "OK" }, videoDetails: { lengthSeconds: "100" } } };
+    if (url.includes("/watch")) return { text: "<html></html>" };
+    return { status: 404 };
+  }, async () => {
+    await assert.rejects(() => yt.fetchVideoData("https://youtu.be/dQw4w9WgXcQ"), (e) => e.code === "NO_CAPTIONS");
+  }));
+  await atest("empty json3 body falls back to timedtext XML", () => withFakeFetch((url, opts) => {
+    if (url.includes("oembed")) return { json: { title: "Judul Video", author_name: "Kanal" } };
+    if (url.includes("youtubei/v1/player")) {
+      const client = playerBody(opts)?.context?.client?.clientName;
+      if (client === "ANDROID") {
+        return { json: { playabilityStatus: { status: "OK" }, videoDetails: { lengthSeconds: "300", title: "Judul", author: "Kanal" }, captions: { playerCaptionsTracklistRenderer: { captionTracks: [{ languageCode: "id", baseUrl: "https://cap.example/track" }] } } } };
+      }
+      return { json: { playabilityStatus: { status: "LOGIN_REQUIRED" } } };
+    }
+    if (url.startsWith("https://cap.example/track&fmt=json3")) return { json: { events: [] } };
+    if (url.startsWith("https://cap.example/track")) return { text: `<transcript><text start="0">materi dari xml &amp; lainnya</text></transcript>` };
+    return { status: 404 };
+  }, async () => {
+    const data = await yt.fetchVideoData("https://youtu.be/dQw4w9WgXcQ");
+    assert.strictEqual(data.transcript, "materi dari xml & lainnya");
+    assert.strictEqual(data.videoMeta.title, "Judul Video");
+    assert.strictEqual(data.videoMeta.durationSec, 300);
+  }));
+  await atest("first strategy with tracks wins (winner had transcript via json3)", () => withFakeFetch((url, opts) => {
+    if (url.includes("oembed")) return { status: 500 }; // oEmbed failure must be non-fatal now
+    if (url.includes("youtubei/v1/player")) {
+      const client = playerBody(opts)?.context?.client?.clientName;
+      if (client === "ANDROID") return { json: { playabilityStatus: { status: "LOGIN_REQUIRED" } } };
+      return { json: { playabilityStatus: { status: "OK" }, videoDetails: { lengthSeconds: "60", title: "Fallback Title", author: "Ch" }, captions: { playerCaptionsTracklistRenderer: { captionTracks: [{ languageCode: "en", baseUrl: "https://cap.example/web" }] } } } };
+    }
+    if (url.startsWith("https://cap.example/web&fmt=json3")) return { json: { events: [{ segs: [{ utf8: "hello" }, { utf8: "world" }] }] } };
+    return { status: 404 };
+  }, async () => {
+    const data = await yt.fetchVideoData("https://youtu.be/dQw4w9WgXcQ");
+    assert.strictEqual(data.transcript, "hello world");
+    assert.strictEqual(data.videoMeta.title, "Fallback Title"); // from player, oEmbed dead
+  }));
+
   // Async test kept out of the sync test() helper so its assertions still
   // count toward `failures` before the summary prints.
   try {

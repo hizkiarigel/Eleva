@@ -171,6 +171,26 @@ async function test(name, fn) {
     await page.waitForSelector("#vqBeginAssessment", { timeout: 20000 });
   });
 
+  await test("manual transcript is accepted, sanitized, and marked source:manual", async () => {
+    const manual = "0:00 halo semua selamat datang 0:07 di materi data entry kali ini kita membahas dasar-dasar spreadsheet 0:15 mulai dari format sel validasi data sampai kebiasaan verifikasi " +
+      "12:34 praktik terbaiknya adalah mulai dari kasus kecil verifikasi hasil di setiap langkah dan dokumentasikan prosesnya supaya bisa ditelusuri ulang oleh siapa pun di tim kamu";
+    const resp = await call("/api/video-quiz/validate", { questId, videoUrl: VIDEO_URL, manualTranscript: manual });
+    assert.strictEqual(resp.relevant, true, JSON.stringify(resp));
+    const { rows } = await sql.query("SELECT video_quiz_payload FROM days WHERE id = $1", [questId]);
+    const cand = rows[0].video_quiz_payload.candidate;
+    assert.strictEqual(cand.source, "manual");
+    assert.ok(!/\d{1,2}:\d{2}/.test(cand.transcript), "timestamps must be stripped");
+    assert.ok(cand.transcript.includes("dasar-dasar spreadsheet"));
+  });
+
+  await test("a too-short manual transcript is rejected with 400", async () => {
+    const resp = await call("/api/video-quiz/validate", { questId, videoUrl: VIDEO_URL, manualTranscript: "0:00 terlalu pendek" });
+    assert.ok(/terlalu pendek/.test(resp.error || ""), JSON.stringify(resp));
+    // restore the stubbed auto candidate for the rest of the run
+    const auto = await call("/api/video-quiz/validate", { questId, videoUrl: VIDEO_URL });
+    assert.strictEqual(auto.relevant, true);
+  });
+
   await test("Mulai Assessment locks the source and serves 15 stripped questions", async () => {
     await page.click("#vqBeginAssessment");
     await page.waitForSelector(".vq-option", { timeout: 20000 });
