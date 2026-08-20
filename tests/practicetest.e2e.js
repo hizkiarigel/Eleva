@@ -124,13 +124,15 @@ async function test(name, fn) {
     await page.click("#ptCancel");
   });
 
-  await test("no schema also goes straight to the questions (defaults to reading/academic)", async () => {
+  await test("no schema defaults to reading/academic and opens the Round 42 test-shell intro (not the flat quiz)", async () => {
     await openDashboard();
     await page.click('[data-qhub-idx="2"]'); // select the 3rd quest hub card (bareQuest) before its detail-panel CTA exists
     await page.click(`[data-reflect-id="${bareQuest}"]`);
-    await page.waitForSelector("#ptSubmit", { timeout: 20000 });
+    await page.waitForSelector("#rdgStart", { timeout: 20000 });
     assert.strictEqual(await page.locator('text=Mau latihan apa dulu?').count(), 0, "kind picker must not appear");
-    await page.click("#ptCancel");
+    assert.ok(await page.locator('text=IELTS Academic Reading').count(), "intro title missing");
+    assert.strictEqual(await page.locator("#ptSubmit").count(), 0, "old flat quiz must not render for reading");
+    await page.click("#rdgCancel");
   });
 
   await test("META Inner Realm's LINGUA detail page starts Reading/Listening directly, presetting kind (12 Agustus target-recommendation follow-up)", async () => {
@@ -174,6 +176,90 @@ async function test(name, fn) {
     // Band must render as a range, never a single score
     const bandText = await page.locator(".pt-band").innerText();
     assert.ok(/IELTS \d(\.5)?–\d(\.5)?/.test(bandText), `band not a range: ${bandText}`);
+  });
+
+  console.log("E2E: Round 42 Reading Half Diagnostic test shell");
+  // Hub-card indices shift as earlier tests complete quests - walk the cards
+  // until the wanted quest's detail-panel CTA appears.
+  async function openQuestCta(questId) {
+    await openDashboard();
+    for (let idx = 0; idx < 5; idx++) {
+      if (await page.locator(`[data-reflect-id="${questId}"]`).count()) break;
+      const card = page.locator(`[data-qhub-idx="${idx}"]`);
+      if (await card.count()) await card.click();
+    }
+    await page.click(`[data-reflect-id="${questId}"]`);
+  }
+
+  await test("Start Test enters chrome-free test mode with a single timer and the Passage tab", async () => {
+    await openQuestCta(bareQuest);
+    await page.waitForSelector("#rdgStart", { timeout: 20000 });
+    await page.click("#rdgStart");
+    await page.waitForSelector(".rdg-shell", { timeout: 20000 });
+    assert.strictEqual(await page.locator(".app-shell").count(), 0, "app chrome must be hidden");
+    assert.strictEqual(await page.locator(".tab-bar").count(), 0, "bottom nav must be hidden");
+    assert.strictEqual(await page.locator("#rdgTimer").count(), 1, "exactly one timer");
+    assert.ok(await page.locator("#rdgPassagePane:not(.rdg-hidden)").count(), "Passage tab active by default");
+    assert.ok(await page.locator('text=Paragraph A').count(), "paragraph labels missing");
+  });
+
+  await test("answers + flag update surgically (footer count, no flat re-render)", async () => {
+    await page.click('[data-rdg-tab="questions"]');
+    await page.waitForSelector('text=QUESTIONS 1–5');
+    const qids = await page.$$eval("#rdgQuestionsPane [data-rdg-opt]", (els) => [...new Set(els.map((e) => e.dataset.rdgOpt))]);
+    for (const qid of qids) await page.click(`[data-rdg-opt="${qid}"] >> nth=0`);
+    assert.ok((await page.locator("#rdgFootCount").innerText()).startsWith("5/20"), "footer count must update");
+    await page.click('[data-rdg-flag="q1"]');
+    await page.click("#rdgOverviewBtn");
+    await page.waitForSelector("#rdgOverviewOverlay");
+    assert.ok(await page.locator('text=1 ditandai').count(), "flag count missing in overview");
+    await page.click("#rdgOverviewClose");
+    await page.waitForSelector("#rdgQuestionsPane");
+  });
+
+  await test("tab scroll positions survive switches (per-tab scroll memory)", async () => {
+    await page.evaluate(() => { document.getElementById("rdgQuestionsPane").scrollTop = 150; });
+    await page.click('[data-rdg-tab="passage"]');
+    await page.click('[data-rdg-tab="questions"]');
+    const st = await page.evaluate(() => document.getElementById("rdgQuestionsPane").scrollTop);
+    assert.ok(st >= 140, `questions scroll position lost on tab switch: ${st}`);
+  });
+
+  await test("Next steps through blocks (resetting only Questions scroll) to Review", async () => {
+    await page.click("#rdgFootNext");
+    await page.waitForSelector('text=QUESTIONS 6–10');
+    const st = await page.evaluate(() => document.getElementById("rdgQuestionsPane").scrollTop);
+    assert.strictEqual(st, 0, "block change must reset Questions scroll to top");
+    await page.click("#rdgFootNext");
+    await page.waitForSelector('text=QUESTIONS 11–15');
+    await page.click("#rdgFootNext");
+    await page.waitForSelector('text=QUESTIONS 16–20');
+    await page.click("#rdgFootNext"); // last block -> Review
+    await page.waitForSelector('text=Periksa sebelum submit', { timeout: 20000 });
+    const stats = await page.$$eval(".rdg-review-stat-num", (els) => els.map((e) => e.textContent.trim()));
+    assert.deepStrictEqual(stats, ["5", "15", "1"], `review stats wrong: ${stats}`);
+  });
+
+  await test("submit with unanswered warns but never blocks; result renders in-shell with a band RANGE", async () => {
+    await page.click("#rdgReviewSubmit");
+    await page.waitForSelector("#rdgSubmitAnyway", { timeout: 20000 });
+    assert.ok(await page.locator('text=15 soal belum dijawab').count(), "unanswered warning missing");
+    await page.click("#rdgSubmitAnyway");
+    await page.waitForSelector('text=READING RESULT', { timeout: 30000 });
+    assert.strictEqual(await page.locator(".app-shell").count(), 0, "result must render in the shell");
+    const band = await page.locator(".rdg-result-band").innerText();
+    assert.ok(/\d(\.5)?–\d(\.5)?/.test(band), `band must be a range: ${band}`);
+    assert.ok(await page.locator('text=NEEDS WORK').count(), "needs-work block missing");
+    await page.click("#rdgExit");
+    await page.waitForSelector(".tab-bar", { timeout: 20000 });
+  });
+
+  await test("a follow-up reading drill also opens in the shell (Reading Drill intro)", async () => {
+    const drillQuest = await insertQuest("Reading Drill Quest", { kind: "reading", track: "academic" });
+    await openQuestCta(drillQuest);
+    await page.waitForSelector("#rdgStart", { timeout: 20000 });
+    assert.ok(await page.locator('text=Reading Drill').count(), "drill intro title missing");
+    await page.click("#rdgCancel");
   });
 
   await browser.close();

@@ -26,7 +26,11 @@ function hasKey() {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
-async function callClaude(userContent) {
+// maxTokens: 1000 is enough for every conversational/JSON reply here EXCEPT
+// the Reading Half Diagnostic sprint (a 650-900-word passage + 20 questions
+// with options/explanations), which passes its own budget. A truncated
+// response fails JSON.parse below and surfaces as a normal generation error.
+async function callClaude(userContent, { maxTokens = 1000 } = {}) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -36,7 +40,7 @@ async function callClaude(userContent) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 1000,
+      max_tokens: maxTokens,
       // MENTOR_SYSTEM is identical on every call (onboarding and daily alike) -
       // cache_control lets repeated calls within the cache window pay ~10% for
       // this portion instead of full price. Below the model's minimum cacheable
@@ -128,6 +132,33 @@ function normalizeCompletionType(quest) {
     quest.structuredKind = null;
     return quest;
   }
+  // Video Quest (LABORA design handoff): a seventh completionType - user
+  // picks ONE YouTube video for the quest's fixed topic, the video gets
+  // locked on assessment start, and completion = passing a 15-question
+  // HOTS set generated from that video's transcript (graded in
+  // server/videoQuiz.js). No structuredKind of its own, same rule as
+  // practice-test/job-match/job-application/nutrition-log. Without this
+  // branch a model-emitted video-quiz would silently downgrade to
+  // reflective (the exact regression tests/recoveryregression.js guards
+  // against for recovery).
+  if (quest.completionType === "video-quiz") {
+    quest.structuredKind = null;
+    return quest;
+  }
+  // Multi-Domain Quest Hub (design handoff, 19 Agustus): an eighth
+  // completionType - a quest requiring completion of TWO independent
+  // feature areas (primaryFeature + supportingFeatures) before it
+  // resolves, order-independent. No structuredKind of its own, same rule
+  // as practice-test/job-match/job-application/nutrition-log/video-quiz.
+  // normalizeMultiDomainQuest (called before this function, in
+  // generateQuest) already stamps completionType/primaryFeature/
+  // supportingFeatures/featureRequirements onto the quest whenever the
+  // model opts in via multiDomain.use - this branch just has to recognize
+  // that shape and pass it through untouched rather than downgrading it.
+  if (quest.completionType === "multi-domain" && quest.primaryFeature && Array.isArray(quest.supportingFeatures) && quest.featureRequirements) {
+    quest.structuredKind = null;
+    return quest;
+  }
   // SOMA Nutrition Implementation Brief Part A: reached here means the model
   // didn't classify this as one of the known valid combos above - before
   // downgrading to reflective, check whether the quest itself reads as
@@ -204,6 +235,27 @@ function normalizePracticeTestSchema(quest) {
   return quest;
 }
 
+// Video Quest: the model self-reports which topic the quest tests (static
+// per quest - the topic anchors which video the user is ALLOWED to pick, so
+// it must never regenerate per attempt) plus pass threshold and a time
+// estimate. Same defense-in-depth normalization as practiceTestSchema,
+// with one difference: topic can never be null (the whole flow needs it),
+// so a malformed/missing topic falls back to the quest title.
+function normalizeVideoQuizSchema(quest) {
+  if (!quest) return quest;
+  if (quest.completionType !== "video-quiz") {
+    quest.videoQuiz = null;
+    return quest;
+  }
+  const s = (quest.videoQuiz && typeof quest.videoQuiz === "object") ? quest.videoQuiz : {};
+  const rawTopic = String(s.topic || "").trim();
+  const topic = rawTopic.length >= 3 ? rawTopic.slice(0, 160) : String(quest.title || "").trim().slice(0, 160);
+  const passThreshold = Number.isInteger(s.passThreshold) ? Math.max(5, Math.min(14, s.passThreshold)) : 11;
+  const estimatedMinutes = Number.isInteger(s.estimatedMinutes) ? Math.max(5, Math.min(120, s.estimatedMinutes)) : 25;
+  quest.videoQuiz = { topic, passThreshold, estimatedMinutes };
+  return quest;
+}
+
 // SOMA Nutrition Implementation Brief Part B item 10: same defense-in-depth
 // normalization as evidenceSchema/practiceTestSchema - the model proposes
 // requiredContributions/primaryMetric/targetValue, code validates/patches
@@ -238,6 +290,15 @@ function normalizeProgressiveSchema(quest) {
 // directly in the route handler and never passes through this function.
 function normalizeMovementFields(quest) {
   if (!quest) return quest;
+  // Multi-Domain Quest Hub (design handoff, 19 Agustus) already owns
+  // domain/primaryFeature/supportingFeatures for this completionType
+  // (server/questHub.js's RECOVERY_NUTRITION_TEMPLATE, stamped by
+  // normalizeMultiDomainQuest earlier in generateQuest's pipeline) - this
+  // function's else-branch below unconditionally nulls those same fields
+  // for anything that isn't BODY·MOVEMENT, so multi-domain quests must be
+  // excluded here explicitly or their Hub fields get silently wiped before
+  // ever reaching the client.
+  if (quest.completionType === "multi-domain") return quest;
   if (quest.completionType === "structured-physical" && (quest.structuredKind === "cardio" || quest.structuredKind === "gym")) {
     quest.domain = "BODY";
     quest.primaryFeature = "MOVEMENT";
@@ -289,15 +350,52 @@ function normalizePlannedExercises(quest) {
   return quest;
 }
 
+const questHub = require("./questHub");
+
+// Multi-Domain Quest Hub (design handoff, 19 Agustus): unlike every other
+// completionType above, the model is trusted for exactly ONE judgment call
+// (multiDomain.use, a boolean) - the entire structural shape of the quest
+// (title/description/why/domain/primaryFeature/supportingFeatures/
+// featureRequirements) is unconditionally replaced with the one hand-
+// authored canonical template this pattern ships with (server/questHub.js),
+// never trusted from the model verbatim. Rationale: a wrong requirement id
+// would silently break the Hub's completion-computation logic (exact
+// string matching against featureData), so the content that matters for
+// correctness is never AI-authored. Must run BEFORE normalizeCompletionType
+// (so that function's own multi-domain branch recognizes the shape) and
+// before normalizeMovementFields (which has its own explicit exemption for
+// completionType "multi-domain" - see that function's comment - so field
+// ownership never depends on pipeline order alone, but this is still the
+// natural place for it: first, since everything else here inspects
+// completionType/structuredKind that this function is what sets).
+function normalizeMultiDomainQuest(result) {
+  if (!result?.multiDomain?.use) return result;
+  const t = questHub.RECOVERY_NUTRITION_TEMPLATE;
+  result.quest = {
+    ...result.quest,
+    mode: "quest",
+    title: t.title, description: t.description, why: t.why, statFocus: t.statFocus,
+    completionType: "multi-domain", structuredKind: null,
+    domain: t.domain, primaryFeature: t.primaryFeature, supportingFeatures: t.supportingFeatures,
+    featureRequirements: t.featureRequirements, tujuanSingkat: t.tujuanSingkat,
+    featureData: { RECOVERY: {}, NUTRITION: {} },
+    featureState: { RECOVERY: "NOT_STARTED", NUTRITION: "NOT_STARTED" },
+    status: "NOT_STARTED",
+  };
+  return result;
+}
+
 async function generateQuest(ctx) {
   if (!hasKey()) return fallbackQuest(ctx);
   try {
-    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan). Kalau quest ini structured-physical, "evidenceSchema.target" WAJIB sama persis dengan angka target ini (jarakKm untuk cardio, repetisi untuk gym) — jangan bikin target baru yang beda.` : ""}${ctx.kondisiStatus && ctx.kondisiStatus !== "Normal" ? ` Kondisi terbaru pengguna (Context Update): "${ctx.kondisiStatus}"${ctx.kondisiNote ? ` (catatan mereka: "${ctx.kondisiNote}")` : ""} — anggap ini bagian dari Obstacle di kerangka WOOP: turunkan intensitas/skala quest hari ini secara wajar (opsi lebih ringan, target lebih kecil, atau geser ke sesuatu yang tetap bisa dikerjakan dalam kondisi ini), JANGAN abaikan kondisi ini demi instruksi generik.` : ""}${ctx.previousQuestExpired ? ` PENTING: quest SEBELUMNYA untuk goal ini kelewat batas waktu tanpa sempat dikerjakan (bukan soal performa mereka — jangan disinggung sebagai kegagalan sama sekali) — anggap ini juga bagian dari Obstacle di kerangka WOOP: buat quest hari ini SECARA JELAS lebih kecil dan lebih ringan dari biasanya (durasi lebih singkat, target lebih kecil, langkah yang lebih sederhana) supaya momentumnya gampang balik lagi, BUKAN quest generik ukuran biasa.` : ""}${ctx.chainTrainingContext ? ` PENTING (Training chain step 3, WAJIB, dihitung sistem): ${ctx.chainTrainingContext.instruction} Level nyeri terakhir dari langkah Recovery: "${ctx.chainTrainingContext.levelNyeri || "Tidak ada"}".` : ""}${ctx.jobMatchHint ? ` PENTING (job-match hint, dihitung sistem, bukan tebakanmu): ${ctx.jobMatchHint.note}` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "observed": {"yesterday": string, "noticed": string, "today": string}|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective"|"practice-test"|"job-match-analysis"|"job-application-submit"|"nutrition-log", "structuredKind": "cardio"|"gym"|"recovery"|null, "evidenceSchema": {"activityType": "Lari"|"Jalan cepat"|"Sepeda"|"Lompat tali"|"Lainnya"|null, "hasWeight": boolean|null, "metricType": "distance"|"reps"|"recovery"|null, "target": number|null}|null, "plannedExercises": [{"name": string, "targetSets": number, "targetReps": number, "targetLoadKg": number|null}]|null, "practiceTestSchema": {"kind": "reading"|"listening"|null, "track": "academic"|"general"|null}|null, "progressive": {"requiredContributions": number, "primaryMetric": "calories"|"protein"|"carbohydrates"|"fat", "targetValue": number}|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "observed" (redesign homepage, "Eleva Observed") adalah jejak penalaran singkat SEBELUM quest hari ini — null kalau ctx.recentDays kosong (belum ada apa pun untuk diamati, jangan mengarang). Kalau ada: "yesterday" 1 kalimat ringkas apa yang terjadi di reflection/structuredData PALING BARU (angka nyata kalau ada, mis. "3.21 km, pace tidak stabil"), "noticed" 1 kalimat pola yang kamu amati dari itu (observasi, bukan instruksi), "today" 1 kalimat keputusan/fokus quest hari ini SEBAGAI AKIBAT dari observasi itu — ketiganya harus benar-benar berantai (today harus terasa seperti konsekuensi logis dari noticed, noticed dari yesterday), bukan tiga kalimat lepas-lepas. "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" untuk quest fisik/terukur (cardio, gym, gerakan) MAUPUN quest istirahat/pemulihan/nutrisi (tidur, hidrasi, makan berprotein, level nyeri — biasanya area Body juga, TERMASUK quest lanjutan setelah cedera/kram/kondisi berat yang fokusnya pemulihan bukan aktivitas aktif): penyelesaiannya lewat field angka/pilihan terstruktur, BUKAN kotak refleksi/jurnal bebas — Task 7d menegaskan TIDAK ADA Trial bertema fisik/tubuh yang boleh default ke textarea bebas, apa pun temanya (aktif maupun pemulihan). "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali), "gym" (beban/set×rep), atau "recovery" (istirahat/hidrasi/nutrisi/pemulihan) kalau structured-physical, null kalau reflective/practice-test/job-match-analysis/job-application-submit/nutrition-log. Pilih "practice-test" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal ujian/tes/sertifikasi terukur dengan komponen reading/listening comprehension (mis. "IELTS band 6.5", persiapan TOEFL, ujian bahasa lain) — kalau ragu atau goal-nya bukan soal itu, JANGAN pilih ini, pakai reflective/structured-physical seperti biasa (practice-test seharusnya jarang muncul). Pilih "job-match-analysis" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal mencari/melamar kerja (mis. "dapat kerja remote sebagai data analyst", goal Livelihood yang jelas-jelas soal job hunting) — quest-nya minta pengguna cek lowongan nyata yang mereka temukan dibanding CV mereka, bukan quest generik "cari lowongan". Kalau ragu, JANGAN pilih ini (job-match-analysis seharusnya jarang muncul, sama seperti practice-test). Pilih "nutrition-log" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal pola makan/nutrisi terukur (mis. "makan lebih sehat", "cukupi protein harian", "turunkan berat badan lewat makan", target kalori/makro) — quest-nya minta pengguna MENCATAT beberapa kali makan hari ini (bukan satu submit tunggal seperti tipe lain: quest ini tetap terbuka sepanjang hari sampai jumlah makan yang diminta tercatat). "progressive" WAJIB diisi (bukan null) kalau completionType "nutrition-log", else null: "requiredContributions" jumlah kali makan yang diminta dicatat hari ini (wajar 2-4, mis. "catat 3 kali makan hari ini"), "primaryMetric" salah satu dari calories/protein/carbohydrates/fat sesuai apa yang paling relevan ke goal-nya (goal soal "cukupi protein" → "protein"; goal soal "turunkan berat badan"/umum → "calories"), "targetValue" angka target metrik itu untuk HARI INI yang wajar (mis. protein 60-100 gram, kalori 1500-2500) — kalau ctx.currentTarget dari goal ini sudah ada progressive sebelumnya, pertahankan primaryMetric yang sama kecuali ada alasan kuat berubah, jangan gonta-ganti metrik tiap hari. Pilih "job-application-submit" HANYA kalau ctx.jobMatchHint.qualified bernilai true (dihitung sistem — artinya analisis kecocokan lowongan TERAKHIR untuk goal ini baru saja LOLOS dan belum di-submit) — quest-nya minta pengguna menyiapkan lamaran dan submit ke lowongan yang barusan dianalisis itu, bukan analisis baru. JANGAN PERNAH pilih ini kalau ctx.jobMatchHint kosong atau qualified false — kalau analisis terakhir TIDAK lolos, pakai "reflective" atau "structured-physical" seperlunya yang menyasar gap dari ctx.jobMatchHint.gap (perkuat skill yang kurang), atau balik ke "job-match-analysis" untuk lowongan LAIN, TAPI JANGAN pernah mengarahkan submit ke lowongan yang baru saja dinyatakan tidak lolos. Quest kualitatif/emosional/sosial lain → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). "evidenceSchema" (Task 7c — WAJIB, dipakai supaya pengguna TIDAK perlu ditanya ulang "jenis aktivitasnya apa?" saat quest disubmit) hanya diisi (bukan null) kalau completionType "structured-physical", else null. Untuk cardio: "activityType" WAJIB salah satu dari 5 pilihan itu sesuai aktivitas yang diminta/tersirat quest-nya, "metricType" harus "distance", "target" = angka target jarak dalam km yang diminta/tersirat quest (mis. quest "Lari 3,2 km" → target 3.2), "hasWeight" null. Untuk gym: "hasWeight" true kalau quest menyebut alat/beban (dumbbell/barbell/mesin/kettlebell), false kalau bodyweight murni (push-up/squat/plank tanpa alat), "metricType" harus "reps", "target" = jumlah repetisi PER SET yang diminta/tersirat quest (mis. quest "push-up 3x20" → target 20), "activityType" null. "plannedExercises" WAJIB diisi (bukan null) kalau structuredKind "gym" — array 2-4 objek {"name","targetSets","targetReps","targetLoadKg"} mendeskripsikan rencana latihan konkret hari ini secara MULTI-GERAKAN, bukan cuma satu gerakan tunggal (mis. quest "kuatkan kaki: squat dan calf raise" → [{"name":"Squat","targetSets":3,"targetReps":10,"targetLoadKg":null},{"name":"Calf Raise","targetSets":3,"targetReps":12,"targetLoadKg":null}]); "targetLoadKg" diisi angka wajar kalau ada alat/beban (hasWeight true), null kalau bodyweight murni. null kalau bukan gym. Untuk recovery: "metricType" harus "recovery", "target" SELALU null (tidak ada satu angka tunggal buat dikejar — user isi 4 field sekaligus: durasi tidur, asupan air, jumlah makan berprotein, level nyeri), "activityType"/"hasWeight" null. Kalau angka target yang wajar/spesifik tidak bisa disimpulkan dari quest-nya, "target" boleh null (bukan mengarang angka). "practiceTestSchema" hanya diisi (bukan null) kalau completionType "practice-test" — dan HANYA field yang quest-nya sendiri SECARA EKSPLISIT sudah tentukan: quest "Tembus Blind Spot Listening" → {"kind":"listening","track":null} (track belum disebut, biarkan null supaya user tetap ditanya track-nya), quest yang eksplisit Academic Reading → {"kind":"reading","track":"academic"}, quest latihan generik tanpa arah spesifik → {"kind":null,"track":null}. JANGAN PERNAH mengarang kind/track yang tidak disebut jelas di title/description quest-nya — null berarti user ditanya seperti biasa, itu perilaku yang benar untuk quest generik. Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. Kalau ctx.recentDays ada reflection.shortfallReason (Task 7d — alasan kenapa evidence sebelumnya jauh di bawah Milestone, mis. "Cuaca", "Cedera") itu CONTEXT, bukan pola stamina — JANGAN anggap itu tanda mereka "tidak sanggup", itu cuma faktor sekali kejadian, jangan turunkan target/intensitas cuma karena itu (beda dari ctx.kondisiStatus yang memang menandakan kondisi masih berlangsung). "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
+    const user = `Konteks pengguna (JSON):\n${JSON.stringify(ctx)}\n\nTugas: buatkan satu instruksi hari ini untuk pengguna ini.${ctx.activeGoal ? ` Quest/Acting hari ini WAJIB diarahkan ke ctx.activeGoal ("${ctx.activeGoal}") — itu goal yang dapat giliran hari ini dari rotasi sistem (ctx.goals berisi semua goal mereka sebagai konteks, tapi fokus hari ini cuma satu itu; ingat aturan Goal-vs-Pathway di system prompt: goal ini yang menentukan APA, Pathway pengguna yang menentukan BAGAIMANA pendekatannya). Rancang lewat kerangka WOOP implisit (lihat aturan di system prompt) — pikirkan dulu Obstacle paling mungkin bikin goal ini gagal buat orang ini spesifik, baru tulis instruksi yang secara desain mengantisipasi itu, bukan instruksi generik.` : ""}${ctx.currentTarget ? ` Goal ini SUDAH punya target berikutnya yang tersimpan: "${ctx.currentTarget.label}" (pendekatan yang dipilih: "${ctx.currentTarget.approach}") — quest hari ini adalah SATU LANGKAH MENUJU target itu, BUKAN asumsi target itu langsung tercapai hari ini juga (butuh berapa quest untuk sampai ke sana tergantung orangnya, jangan dipaksakan). Kalau quest ini structured-physical, "evidenceSchema.target" WAJIB sama persis dengan angka target ini (jarakKm untuk cardio, repetisi untuk gym) — jangan bikin target baru yang beda.` : ""}${ctx.kondisiStatus && ctx.kondisiStatus !== "Normal" ? ` Kondisi terbaru pengguna (Context Update): "${ctx.kondisiStatus}"${ctx.kondisiNote ? ` (catatan mereka: "${ctx.kondisiNote}")` : ""} — anggap ini bagian dari Obstacle di kerangka WOOP: turunkan intensitas/skala quest hari ini secara wajar (opsi lebih ringan, target lebih kecil, atau geser ke sesuatu yang tetap bisa dikerjakan dalam kondisi ini), JANGAN abaikan kondisi ini demi instruksi generik.` : ""}${ctx.previousQuestExpired ? ` PENTING: quest SEBELUMNYA untuk goal ini kelewat batas waktu tanpa sempat dikerjakan (bukan soal performa mereka — jangan disinggung sebagai kegagalan sama sekali) — anggap ini juga bagian dari Obstacle di kerangka WOOP: buat quest hari ini SECARA JELAS lebih kecil dan lebih ringan dari biasanya (durasi lebih singkat, target lebih kecil, langkah yang lebih sederhana) supaya momentumnya gampang balik lagi, BUKAN quest generik ukuran biasa.` : ""}${ctx.chainTrainingContext ? ` PENTING (Training chain step 3, WAJIB, dihitung sistem): ${ctx.chainTrainingContext.instruction} Level nyeri terakhir dari langkah Recovery: "${ctx.chainTrainingContext.levelNyeri || "Tidak ada"}".` : ""}${ctx.jobMatchHint ? ` PENTING (job-match hint, dihitung sistem, bukan tebakanmu): ${ctx.jobMatchHint.note}` : ""} Balas JSON dengan bentuk persis:\n{"chapterNumber": number, "chapterTitle": string, "insight": string, "pathwayNoun": string|null, "multiDomain": {"use": boolean}, "observed": {"yesterday": string, "noticed": string, "today": string}|null, "quest": {"mode": "quest"|"acting", "completionType": "structured-physical"|"reflective"|"practice-test"|"job-match-analysis"|"job-application-submit"|"nutrition-log"|"video-quiz"|"multi-domain", "structuredKind": "cardio"|"gym"|"recovery"|null, "evidenceSchema": {"activityType": "Lari"|"Jalan cepat"|"Sepeda"|"Lompat tali"|"Lainnya"|null, "hasWeight": boolean|null, "metricType": "distance"|"reps"|"recovery"|null, "target": number|null}|null, "plannedExercises": [{"name": string, "targetSets": number, "targetReps": number, "targetLoadKg": number|null}]|null, "practiceTestSchema": {"kind": "reading"|"listening"|null, "track": "academic"|"general"|null}|null, "videoQuiz": {"topic": string, "passThreshold": number, "estimatedMinutes": number}|null, "progressive": {"requiredContributions": number, "primaryMetric": "calories"|"protein"|"carbohydrates"|"fat", "targetValue": number}|null, "title": string, "description": string, "statFocus": one of [body,growth,livelihood,emotional,social,purpose,autonomy] (pakai kunci yang benar-benar ada di ctx.stats kalau akunnya masih membawa kunci era lama), "why": string}}\n\nAturan: "observed" (redesign homepage, "Eleva Observed") adalah jejak penalaran singkat SEBELUM quest hari ini — null kalau ctx.recentDays kosong (belum ada apa pun untuk diamati, jangan mengarang). Kalau ada: "yesterday" 1 kalimat ringkas apa yang terjadi di reflection/structuredData PALING BARU (angka nyata kalau ada, mis. "3.21 km, pace tidak stabil"), "noticed" 1 kalimat pola yang kamu amati dari itu (observasi, bukan instruksi), "today" 1 kalimat keputusan/fokus quest hari ini SEBAGAI AKIBAT dari observasi itu — ketiganya harus benar-benar berantai (today harus terasa seperti konsekuensi logis dari noticed, noticed dari yesterday), bukan tiga kalimat lepas-lepas. "insight" adalah 2-3 kalimat cara kamu memahami kondisi mereka sekarang, bukan nasihat. "quest.description" harus bisa dikerjakan/dilatih hari ini, konkret, maksimal 2 kalimat. "completionType": pilih "structured-physical" untuk quest fisik/terukur (cardio, gym, gerakan) MAUPUN quest istirahat/pemulihan/nutrisi (tidur, hidrasi, makan berprotein, level nyeri — biasanya area Body juga, TERMASUK quest lanjutan setelah cedera/kram/kondisi berat yang fokusnya pemulihan bukan aktivitas aktif): penyelesaiannya lewat field angka/pilihan terstruktur, BUKAN kotak refleksi/jurnal bebas — Task 7d menegaskan TIDAK ADA Trial bertema fisik/tubuh yang boleh default ke textarea bebas, apa pun temanya (aktif maupun pemulihan). "structuredKind" wajib "cardio" (lari/jalan/sepeda/lompat tali), "gym" (beban/set×rep), atau "recovery" (istirahat/hidrasi/nutrisi/pemulihan) kalau structured-physical, null kalau reflective/practice-test/job-match-analysis/job-application-submit/nutrition-log/video-quiz. Pilih "practice-test" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal ujian/tes/sertifikasi terukur dengan komponen reading/listening comprehension (mis. "IELTS band 6.5", persiapan TOEFL, ujian bahasa lain) — kalau ragu atau goal-nya bukan soal itu, JANGAN pilih ini, pakai reflective/structured-physical seperti biasa (practice-test seharusnya jarang muncul). Pilih "job-match-analysis" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal mencari/melamar kerja (mis. "dapat kerja remote sebagai data analyst", goal Livelihood yang jelas-jelas soal job hunting) — quest-nya minta pengguna cek lowongan nyata yang mereka temukan dibanding CV mereka, bukan quest generik "cari lowongan". Kalau ragu, JANGAN pilih ini (job-match-analysis seharusnya jarang muncul, sama seperti practice-test). Pilih "nutrition-log" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal pola makan/nutrisi terukur (mis. "makan lebih sehat", "cukupi protein harian", "turunkan berat badan lewat makan", target kalori/makro) — quest-nya minta pengguna MENCATAT beberapa kali makan hari ini (bukan satu submit tunggal seperti tipe lain: quest ini tetap terbuka sepanjang hari sampai jumlah makan yang diminta tercatat). "progressive" WAJIB diisi (bukan null) kalau completionType "nutrition-log", else null: "requiredContributions" jumlah kali makan yang diminta dicatat hari ini (wajar 2-4, mis. "catat 3 kali makan hari ini"), "primaryMetric" salah satu dari calories/protein/carbohydrates/fat sesuai apa yang paling relevan ke goal-nya (goal soal "cukupi protein" → "protein"; goal soal "turunkan berat badan"/umum → "calories"), "targetValue" angka target metrik itu untuk HARI INI yang wajar (mis. protein 60-100 gram, kalori 1500-2500) — kalau ctx.currentTarget dari goal ini sudah ada progressive sebelumnya, pertahankan primaryMetric yang sama kecuali ada alasan kuat berubah, jangan gonta-ganti metrik tiap hari. Pilih "job-application-submit" HANYA kalau ctx.jobMatchHint.qualified bernilai true (dihitung sistem — artinya analisis kecocokan lowongan TERAKHIR untuk goal ini baru saja LOLOS dan belum di-submit) — quest-nya minta pengguna menyiapkan lamaran dan submit ke lowongan yang barusan dianalisis itu, bukan analisis baru. JANGAN PERNAH pilih ini kalau ctx.jobMatchHint kosong atau qualified false — kalau analisis terakhir TIDAK lolos, pakai "reflective" atau "structured-physical" seperlunya yang menyasar gap dari ctx.jobMatchHint.gap (perkuat skill yang kurang), atau balik ke "job-match-analysis" untuk lowongan LAIN, TAPI JANGAN pernah mengarahkan submit ke lowongan yang baru saja dinyatakan tidak lolos. Pilih "video-quiz" HANYA kalau ctx.activeGoal SECARA EKSPLISIT soal menguasai satu topik pengetahuan/skill yang wajar dipelajari dari materi video (mis. "paham dasar data analysis", "belajar digital marketing", konsep coding/keuangan/skill kerja spesifik) DAN bentuk quest-nya memang minta pengguna belajar dari SATU video pilihan mereka sendiri lalu dibuktikan lewat assessment dari materi video itu — BUKAN untuk goal fisik, nutrisi, emosional, ujian reading/listening (itu practice-test), atau job hunting. Kalau ragu, JANGAN pilih ini (video-quiz seharusnya jarang muncul, sama seperti practice-test/job-match-analysis). "videoQuiz" WAJIB diisi (bukan null) kalau completionType "video-quiz", else null: "topic" SATU topik statis spesifik yang jadi bahan uji (mis. "Data Entry Fundamentals" — topik ini menentukan video apa yang boleh dipilih pengguna, JANGAN terlalu lebar), "passThreshold" 11 (dari 15 soal), "estimatedMinutes" estimasi wajar total belajar+assessment (biasanya 20-40). "multiDomain.use" (Multi-Domain Quest Hub, design handoff 19 Agustus) HANYA true kalau ctx.activeGoal jelas-jelas soal domain Body DAN konteksnya (ctx.kondisiStatus, ctx.recentDays, riwayat cedera/kelelahan) mengarah ke butuh recovery/pemulihan sekaligus asupan nutrisi hari ini — bukan sekadar goal fisik biasa (itu tetap "structured-physical" seperti biasa), harus benar-benar terasa perlu DUA area sekaligus. Kalau true: JANGAN pilih completionType/structuredKind/evidenceSchema sendiri untuk kombinasi ini, sistem yang akan mengisi seluruh detail Recovery+Nutrition-nya secara otomatis dari template baku — cukup isi title/description/why/statFocus quest seperti biasa (bakal ditimpa sistem juga, tapi tetap isi wajar). Default false untuk hampir semua kasus (Quest Hub ini SENGAJA jarang muncul, bahkan lebih jarang dari practice-test/video-quiz/job-match-analysis). Quest kualitatif/emosional/sosial lain → "reflective". Ini dimensi TERPISAH dari "mode" (quest vs acting). "evidenceSchema" (Task 7c — WAJIB, dipakai supaya pengguna TIDAK perlu ditanya ulang "jenis aktivitasnya apa?" saat quest disubmit) hanya diisi (bukan null) kalau completionType "structured-physical", else null. Untuk cardio: "activityType" WAJIB salah satu dari 5 pilihan itu sesuai aktivitas yang diminta/tersirat quest-nya, "metricType" harus "distance", "target" = angka target jarak dalam km yang diminta/tersirat quest (mis. quest "Lari 3,2 km" → target 3.2), "hasWeight" null. Untuk gym: "hasWeight" true kalau quest menyebut alat/beban (dumbbell/barbell/mesin/kettlebell), false kalau bodyweight murni (push-up/squat/plank tanpa alat), "metricType" harus "reps", "target" = jumlah repetisi PER SET yang diminta/tersirat quest (mis. quest "push-up 3x20" → target 20), "activityType" null. "plannedExercises" WAJIB diisi (bukan null) kalau structuredKind "gym" — array 2-4 objek {"name","targetSets","targetReps","targetLoadKg"} mendeskripsikan rencana latihan konkret hari ini secara MULTI-GERAKAN, bukan cuma satu gerakan tunggal (mis. quest "kuatkan kaki: squat dan calf raise" → [{"name":"Squat","targetSets":3,"targetReps":10,"targetLoadKg":null},{"name":"Calf Raise","targetSets":3,"targetReps":12,"targetLoadKg":null}]); "targetLoadKg" diisi angka wajar kalau ada alat/beban (hasWeight true), null kalau bodyweight murni. null kalau bukan gym. Untuk recovery: "metricType" harus "recovery", "target" SELALU null (tidak ada satu angka tunggal buat dikejar — user isi 4 field sekaligus: durasi tidur, asupan air, jumlah makan berprotein, level nyeri), "activityType"/"hasWeight" null. Kalau angka target yang wajar/spesifik tidak bisa disimpulkan dari quest-nya, "target" boleh null (bukan mengarang angka). "practiceTestSchema" hanya diisi (bukan null) kalau completionType "practice-test" — dan HANYA field yang quest-nya sendiri SECARA EKSPLISIT sudah tentukan: quest "Tembus Blind Spot Listening" → {"kind":"listening","track":null} (track belum disebut, biarkan null supaya user tetap ditanya track-nya), quest yang eksplisit Academic Reading → {"kind":"reading","track":"academic"}, quest latihan generik tanpa arah spesifik → {"kind":null,"track":null}. JANGAN PERNAH mengarang kind/track yang tidak disebut jelas di title/description quest-nya — null berarti user ditanya seperti biasa, itu perilaku yang benar untuk quest generik. Kalau ctx.recentDays ada reflection.structuredData dari quest fisik sebelumnya, pakai sebagai BASELINE PROGRESIF di description/why (mis. "minggu lalu push-up 15, sekarang coba 18") — angka nyata mereka, bukan karangan. Kalau ctx.recentDays ada reflection.shortfallReason (Task 7d — alasan kenapa evidence sebelumnya jauh di bawah Milestone, mis. "Cuaca", "Cedera") itu CONTEXT, bukan pola stamina — JANGAN anggap itu tanda mereka "tidak sanggup", itu cuma faktor sekali kejadian, jangan turunkan target/intensitas cuma karena itu (beda dari ctx.kondisiStatus yang memang menandakan kondisi masih berlangsung). "statFocus" mengikuti area yang paling tersentuh instruksi hari ini${ctx.activeGoal ? " (secara alami biasanya area goal aktifnya)" : ""}. Jika ctx.recentDays kosong, chapterNumber mulai dari 1. Jika ctx.recentDays ada isinya, pertahankan chapterNumber/chapterTitle yang sama seperti ctx.chapterNumber/ctx.chapterTitle kecuali ada pergeseran besar. Untuk "pathwayNoun": jika ctx.pathway ada isinya dan ctx.pathwayNoun bernilai null, turunkan SATU kata benda peran dari pathway itu (mis. pathway Specialist dengan konteks "Sales" → "Closer", pathway "Architect" → "Architect"); kalau ctx.pathwayNoun sudah terisi, kembalikan nilai yang sama persis (jangan diganti-ganti tiap hari). Kalau ctx.pathway kosong, pathwayNoun harus null.`;
     const result = await callClaude(user);
     if (!result?.quest?.title) throw new Error("bad shape");
+    normalizeMultiDomainQuest(result);
     normalizeCompletionType(result.quest);
     normalizeEvidenceSchema(result.quest);
     normalizePracticeTestSchema(result.quest);
+    normalizeVideoQuizSchema(result.quest);
     normalizeProgressiveSchema(result.quest);
     normalizeMovementFields(result.quest);
     normalizePlannedExercises(result.quest);
@@ -354,8 +452,12 @@ async function processReflection(ctx) {
     // present. All feed the same response shape - the route still hard-gates
     // deltas independently where relevant (defense in depth), this prompt is
     // the semantic layer on top.
-    const evaluationRules = ctx.nutritionResult
+    const evaluationRules = ctx.multiDomainResult
+      ? `Quest hari ini bertipe MULTI-DOMAIN (Quest Hub — Recovery + Nutrition, kedua area harus lengkap sebelum quest ini resolve, dikerjakan urutan bebas): status akhirnya "${ctx.multiDomainResult.status}" — Recovery ${ctx.multiDomainResult.featureState.RECOVERY}, Nutrition ${ctx.multiDomainResult.featureState.NUTRITION}. Kedua area COMPLETE lewat field yang BENAR-BENAR diisi user (bukti, bukan checklist kosong), sudah divalidasi kode sebelum sampai ke kamu. statDeltas WAJIB diisi wajar HANYA untuk stat "body" — primaryFeature quest ini RECOVERY, jadi growth SEMUA area (termasuk Nutrition) kredit ke stat itu SAJA, JANGAN split/tambahkan ke stat lain meskipun Nutrition-nya juga tersentuh, itu double-counting yang harus dihindari. mentorReply: sebut data konkret dari KEDUA area (mis. tidur/energi/soreness/jenis recovery session dari Recovery, protein/hidrasi/meals dari Nutrition) — jangan cuma bahas satu area dan abaikan yang lain.`
+      : ctx.nutritionResult
       ? `Quest hari ini bertipe NUTRITION (PROGRESSIVE - dievaluasi otomatis oleh kode, bukan submit tunggal): status akhirnya "${ctx.nutritionResult.status}" — ${ctx.nutritionResult.completedContributions}/${ctx.nutritionResult.requiredContributions} makan tercatat (evidenceComplete=${ctx.nutritionResult.evidenceComplete}), ${ctx.nutritionResult.primaryMetric} ${ctx.nutritionResult.currentValue}/${ctx.nutritionResult.targetValue} (targetMet=${ctx.nutritionResult.targetMet}) — kedua angka ini bukti OBJEKTIF dari catatan makan sungguhan, dihitung kode, bukan klaim self-report. statDeltas: WAJIB diisi wajar kalau evidenceComplete true (mencatat SEMUA makan yang diminta sudah bukti keterlibatan nyata, TERLEPAS dari targetMet — jangan menahan growth cuma karena target metrik belum tercapai, itu evidence yang tetap sah, compliance dan pencapaian target adalah dua hal terpisah); KOSONGKAN statDeltas kalau evidenceComplete false (tidak cukup makan tercatat = tidak cukup evidence, terlepas seberapa dekat currentValue ke target). mentorReply: sebut progres nyatanya secara spesifik (jumlah makan tercatat, seberapa dekat ${ctx.nutritionResult.primaryMetric}-nya ke target) — jujur kalau targetMet false, tapi tetap hangat dan akui compliance-nya kalau evidenceComplete true.`
+      : ctx.videoQuizResult
+      ? `Quest hari ini bertipe VIDEO QUEST (video-quiz): pengguna memilih sendiri satu video YouTube untuk topik "${ctx.videoQuizResult.topic}" ("${ctx.videoQuizResult.videoTitle}"), video itu DIKUNCI saat assessment dimulai, lalu mereka LULUS assessment 15 soal HOTS yang dibuat dari transkrip video itu: skor ${ctx.videoQuizResult.score}/${ctx.videoQuizResult.total} (ambang lulus ${ctx.videoQuizResult.passThreshold}, attempt ke-${ctx.videoQuizResult.attempt}) — ini bukti OBJEKTIF (dinilai otomatis benar/salah oleh kode, bukan olehmu), jadi statDeltas WAJIB diisi wajar (lulus assessment terkunci-sumber adalah evidence belajar yang kuat; catatan: yang GAGAL tidak pernah sampai ke kamu, quest-nya tetap terbuka untuk attempt ulang). mentorReply: sebut topik dan skornya secara spesifik, plus SATU konsep kuat (${(ctx.videoQuizResult.strongConcepts || []).join(", ") || "-"}) dan SATU konsep yang tadinya lemah (${(ctx.videoQuizResult.weakConcepts || []).join(", ") || "-"}) secara konkret — jangan pujian generik.`
       : ctx.practiceTestResult
       ? `Quest hari ini bertipe PRACTICE TEST: pengguna baru menyelesaikan sesi latihan ${ctx.practiceTestResult.kind === "listening" ? "Listening" : "Reading"} (${ctx.practiceTestResult.track === "general" ? "General Training" : "Academic"}) dengan skor ${ctx.practiceTestResult.score}/${ctx.practiceTestResult.total} — ini bukti OBJEKTIF (dinilai otomatis benar/salah oleh kode, bukan olehmu), lebih kuat dari growth-gate kespesifikan Task 7, jadi statDeltas WAJIB diisi wajar berapa pun skornya (menyelesaikan tesnya sendiri sudah bukti keterlibatan nyata — jangan menahan growth cuma karena skornya rendah, itu tetap evidence sah). mentorReply: komentari skornya secara spesifik dan hangat (jangan cuma "kerja bagus" generik), dan kalau ctx.recentDays punya practiceTestResult sebelumnya, sebut progresnya secara konkret.`
       : ctx.structuredData
@@ -523,31 +625,9 @@ function fallbackPracticeTest(ctx) {
       ],
     };
   } else {
-    payload = {
-      passage: `Paragraph A. Working from home has become common for many people since the early 2020s. It offers flexibility, since employees can arrange their own schedule around personal commitments, and it removes the daily commute, which surveys suggest saves the average worker close to an hour a day.\n\nParagraph B. However, the arrangement has clear drawbacks. Some workers report feeling isolated without daily contact with colleagues, and younger employees in particular say they miss the informal learning that happens in a shared office. A few studies also link long-term remote work with weaker professional networks.\n\nParagraph C. Companies have responded in practical ways. Many have introduced regular video meetings, occasional in-person gatherings, and shared online documents to keep teams connected. Others rotate teams through the office on fixed days, an approach usually called hybrid working.\n\nParagraph D. The long-term picture is still unsettled. Economists disagree about the effect of remote work on productivity, and governments are only beginning to study what widespread home working means for city centres, public transport, and the housing market.`,
-      questions: [
-        { id: "q1", type: "mc", text: "According to the passage, roughly how much time does removing the commute save per day?", options: ["Half an hour", "Close to an hour", "Two hours", "It is not mentioned"], correctAnswer: "Close to an hour", explanation: "Paragraf A menyebut hemat mendekati satu jam per hari.", category: "detail retrieval" },
-        { id: "q2", type: "mc", text: "Who especially misses informal learning in the office?", options: ["Managers", "Younger employees", "Economists", "Government workers"], correctAnswer: "Younger employees", explanation: "Paragraf B menyebut karyawan muda.", category: "detail retrieval" },
-        { id: "q3", type: "mc", text: "What is rotating teams through the office on fixed days called?", options: ["Flexible working", "Hybrid working", "Remote working", "Shift working"], correctAnswer: "Hybrid working", explanation: "Paragraf C menamainya hybrid working.", category: "detail retrieval" },
-        { id: "q4", type: "mc", text: "Which group disagrees about remote work's effect on productivity?", options: ["Employees", "Economists", "Companies", "City councils"], correctAnswer: "Economists", explanation: "Paragraf D menyebut ekonom belum sepakat.", category: "detail retrieval" },
-        { id: "q5", type: "mc", text: "What kind of professional effect do a few studies link to long-term remote work?", options: ["Stronger networks", "Weaker networks", "Higher salaries", "Faster promotion"], correctAnswer: "Weaker networks", explanation: "Paragraf B menyebut jejaring profesional melemah.", category: "detail retrieval" },
-        { id: "q6", type: "tf", text: "All workers prefer working from home, according to the passage.", options: ["True", "False", "Not Given"], correctAnswer: "False", explanation: "Sebagian pekerja melaporkan merasa terisolasi.", category: "true/false/not given" },
-        { id: "q7", type: "tf", text: "The passage says remote work began in the early 2020s for many people.", options: ["True", "False", "Not Given"], correctAnswer: "True", explanation: "Paragraf A menyebut sejak awal 2020-an.", category: "true/false/not given" },
-        { id: "q8", type: "tf", text: "The passage states that most companies have banned remote work.", options: ["True", "False", "Not Given"], correctAnswer: "False", explanation: "Yang disebut justru cara perusahaan beradaptasi.", category: "true/false/not given" },
-        { id: "q9", type: "tf", text: "The passage mentions how remote work affects school schedules.", options: ["True", "False", "Not Given"], correctAnswer: "Not Given", explanation: "Sekolah tidak pernah disinggung.", category: "true/false/not given" },
-        { id: "q10", type: "tf", text: "Governments have finished studying the effects of home working on cities.", options: ["True", "False", "Not Given"], correctAnswer: "False", explanation: "Paragraf D bilang baru mulai mempelajari.", category: "true/false/not given" },
-        { id: "q11", type: "matching", text: "Which paragraph describes the benefits of working from home?", options: ["Paragraph A", "Paragraph B", "Paragraph C", "Paragraph D"], correctAnswer: "Paragraph A", explanation: "Paragraf A berisi fleksibilitas dan hemat waktu.", category: "matching headings" },
-        { id: "q12", type: "matching", text: "Which paragraph focuses on the drawbacks of remote work?", options: ["Paragraph A", "Paragraph B", "Paragraph C", "Paragraph D"], correctAnswer: "Paragraph B", explanation: "Paragraf B berisi isolasi dan jejaring melemah.", category: "matching headings" },
-        { id: "q13", type: "matching", text: "Which paragraph explains how companies responded?", options: ["Paragraph A", "Paragraph B", "Paragraph C", "Paragraph D"], correctAnswer: "Paragraph C", explanation: "Paragraf C berisi rapat video dan pola hybrid.", category: "matching headings" },
-        { id: "q14", type: "matching", text: "Which paragraph discusses the uncertain long-term picture?", options: ["Paragraph A", "Paragraph B", "Paragraph C", "Paragraph D"], correctAnswer: "Paragraph D", explanation: "Paragraf D soal produktivitas dan dampak kota.", category: "matching headings" },
-        { id: "q15", type: "fill", text: "Companies introduced regular video ____ to keep teams connected.", correctAnswer: "meetings", explanation: "Paragraf C menyebut rapat video rutin.", category: "completion" },
-        { id: "q16", type: "fill", text: "Remote work removes the daily ____.", correctAnswer: "commute", explanation: "Paragraf A menyebut perjalanan harian hilang.", category: "completion" },
-        { id: "q17", type: "fill", text: "Some workers feel ____ without daily contact with colleagues.", correctAnswer: "isolated", explanation: "Paragraf B menyebut isolasi.", category: "completion" },
-        { id: "q18", type: "fill", text: "Teams also stay connected through shared online ____.", correctAnswer: "documents", explanation: "Paragraf C menyebut dokumen online bersama.", category: "completion" },
-        { id: "q19", type: "fill", text: "Governments are studying what home working means for public ____ and housing.", correctAnswer: "transport", explanation: "Paragraf D menyebut transportasi publik.", category: "completion" },
-        { id: "q20", type: "fill", text: "Surveys suggest the average worker saves close to an ____ a day.", correctAnswer: "hour", explanation: "Paragraf A menyebut hemat hampir satu jam.", category: "completion" },
-      ],
-    };
+    // Shallow-clone the module-level fixture so drill mode below can swap
+    // the questions array without corrupting the shared constant.
+    payload = { ...READING_FALLBACK_V2, questions: [...READING_FALLBACK_V2.questions] };
   }
   // Drill mode: focus on the requested category when the static set has it,
   // padding with other questions up to the drill size - honest about being
@@ -556,9 +636,58 @@ function fallbackPracticeTest(ctx) {
     const focused = payload.questions.filter((q) => q.category === drill.category);
     const rest = payload.questions.filter((q) => q.category !== drill.category);
     payload.questions = [...focused, ...rest].slice(0, practiceTest.DRILL_QUESTIONS);
+    // A 12-question drill no longer matches the 4x5 sprint blocks - drop
+    // them and let the client derive its own grouping.
+    delete payload.blocks;
   }
   return payload;
 }
+
+// Reading Half Diagnostic (round 42): the reading fallback is a v2 payload -
+// {title, paragraphs A-D} passage + the exact 5/5/5/5 block structure the
+// real generator produces, so keyless mode exercises the same shell/grading
+// path. Deliberately shorter than a real generated passage (honest keyless
+// artifact - validated with minPassageWords: 0). Built and validated ONCE at
+// module load, throwing on failure, same fail-fast guarantee as
+// listeningDiagnostic.js: a broken fixture edit can never deploy silently.
+const READING_FALLBACK_V2 = (() => {
+  const rawV2 = {
+      passage: {
+        title: "Working from Home",
+        paragraphs: [
+          { label: "A", text: "Working from home has become common for many people since the early 2020s. It offers flexibility, since employees can arrange their own schedule around personal commitments, and it removes the daily commute, which surveys suggest saves the average worker close to an hour a day." },
+          { label: "B", text: "However, the arrangement has clear drawbacks. Some workers report feeling isolated without daily contact with colleagues, and younger employees in particular say they miss the informal learning that happens in a shared office. A few studies also link long-term remote work with weaker professional networks." },
+          { label: "C", text: "Companies have responded in practical ways. Many have introduced regular video meetings, occasional in-person gatherings, and shared online documents to keep teams connected. Others rotate teams through the office on fixed days, an approach usually called hybrid working." },
+          { label: "D", text: "The long-term picture is still unsettled. Economists disagree about the effect of remote work on productivity, and governments are only beginning to study what widespread home working means for city centres, public transport, and the housing market." },
+        ],
+      },
+      questions: [
+        { id: "q1", text: "According to the passage, roughly how much time does removing the commute save per day?", options: ["Half an hour", "Close to an hour", "Two hours", "It is not mentioned"], correctAnswer: "Close to an hour", explanation: "Paragraf A menyebut hemat mendekati satu jam per hari." },
+        { id: "q2", text: "Who especially misses informal learning in the office?", options: ["Managers", "Younger employees", "Economists", "Government workers"], correctAnswer: "Younger employees", explanation: "Paragraf B menyebut karyawan muda." },
+        { id: "q3", text: "What is rotating teams through the office on fixed days called?", options: ["Flexible working", "Hybrid working", "Remote working", "Shift working"], correctAnswer: "Hybrid working", explanation: "Paragraf C menamainya hybrid working." },
+        { id: "q4", text: "Which group disagrees about remote work's effect on productivity?", options: ["Employees", "Economists", "Companies", "City councils"], correctAnswer: "Economists", explanation: "Paragraf D menyebut ekonom belum sepakat." },
+        { id: "q5", text: "What kind of professional effect do a few studies link to long-term remote work?", options: ["Stronger networks", "Weaker networks", "Higher salaries", "Faster promotion"], correctAnswer: "Weaker networks", explanation: "Paragraf B menyebut jejaring profesional melemah." },
+        { id: "q6", text: "All workers prefer working from home, according to the passage.", correctAnswer: "False", explanation: "Sebagian pekerja melaporkan merasa terisolasi." },
+        { id: "q7", text: "The passage says remote work became widespread for many people in the early 2020s.", correctAnswer: "True", explanation: "Paragraf A menyebut sejak awal 2020-an." },
+        { id: "q8", text: "The passage states that most companies have banned remote work.", correctAnswer: "False", explanation: "Yang disebut justru cara perusahaan beradaptasi." },
+        { id: "q9", text: "The passage mentions how remote work affects school schedules.", correctAnswer: "Not Given", explanation: "Sekolah tidak pernah disinggung." },
+        { id: "q10", text: "Governments have finished studying the effects of home working on cities.", correctAnswer: "False", explanation: "Paragraf D bilang baru mulai mempelajari." },
+        { id: "q11", text: "a mention of how much commuting time remote workers save each day", correctAnswer: "A", explanation: "Paragraf A menyebut penghematan hampir satu jam per hari." },
+        { id: "q12", text: "examples of practical measures companies use to keep teams connected", correctAnswer: "C", explanation: "Paragraf C berisi rapat video, pertemuan tatap muka, dan dokumen bersama." },
+        { id: "q13", text: "a claim linking long-term remote work with weaker professional networks", correctAnswer: "B", explanation: "Paragraf B menyebut beberapa studi soal jejaring yang melemah." },
+        { id: "q14", text: "a reference to disagreement among experts about productivity", correctAnswer: "D", explanation: "Paragraf D menyebut ekonom belum sepakat." },
+        { id: "q15", text: "a description of what younger employees feel they are missing", correctAnswer: "B", explanation: "Paragraf B menyebut pembelajaran informal yang hilang — satu paragraf boleh menjawab lebih dari satu soal." },
+        { id: "q16", text: "Companies introduced regular video ____ to keep teams connected.", correctAnswer: "meetings", explanation: "Paragraf C menyebut rapat video rutin." },
+        { id: "q17", text: "Remote work removes the daily ____.", correctAnswer: "commute", explanation: "Paragraf A menyebut perjalanan harian hilang." },
+        { id: "q18", text: "Some workers feel ____ without daily contact with colleagues.", correctAnswer: "isolated", explanation: "Paragraf B menyebut isolasi." },
+        { id: "q19", text: "Teams also stay connected through shared online ____.", correctAnswer: "documents", explanation: "Paragraf C menyebut dokumen online bersama." },
+        { id: "q20", text: "Governments are studying what home working means for public ____ and housing.", correctAnswer: "transport", explanation: "Paragraf D menyebut transportasi publik." },
+      ],
+    };
+  const cleaned = practiceTest.cleanReadingSprintPayload(rawV2, { minPassageWords: 0 });
+  if (!cleaned) throw new Error("READING_FALLBACK_V2 failed cleanReadingSprintPayload - fix the fixture before deploying");
+  return cleaned;
+})();
 
 async function generatePracticeTest(ctx) {
   if (!hasKey()) return fallbackPracticeTest(ctx);
@@ -585,6 +714,131 @@ async function generatePracticeTest(ctx) {
     console.error("generatePracticeTest failed, using fallback:", e.message);
     return fallbackPracticeTest(ctx);
   }
+}
+
+// Reading Half Diagnostic (round 42): generates ONE weekly 20-question
+// reading sprint in the exact 4-block IELTS structure. Unlike
+// generatePracticeTest this THROWS on failure instead of self-falling-back:
+// the caller (the generate route) caches successful content for the whole
+// week and must never cache the static fallback, so it needs to know the
+// difference. Content is weekly-GLOBAL (founder decision), so:
+// - no per-user level shaping (fixed mid difficulty; the level ratchet still
+//   runs for history/drills but no longer shapes sprint difficulty)
+// - topic dedup is global too: ctx.avoidTitles = recent weekly passage
+//   titles, not the per-user history note.
+async function generateReadingSprintContent(ctx) {
+  if (!hasKey()) throw new Error("no API key");
+  const blocksSpec = practiceTest.READING_SPRINT_BLOCKS;
+  const avoidNote = ctx.avoidTitles && ctx.avoidTitles.length
+    ? `\n\nTopik minggu-minggu sebelumnya (JANGAN pakai topik yang sama atau mirip): ${ctx.avoidTitles.map((t) => `"${t}"`).join(", ")}.`
+    : "";
+  const user = `Tugas: buatkan SATU paket "IELTS Academic Reading Half Diagnostic" - 1 bacaan + TEPAT 20 soal dalam 4 blok berurutan. Paket ini dipakai semua pengguna selama seminggu, jadi kualitas dan ketepatan format WAJIB tinggi.
+
+Balas JSON dengan bentuk PERSIS (tanpa teks lain):
+{"passage": {"title": string, "paragraphs": [{"label": "A", "text": string}, {"label": "B", "text": string}, {"label": "C", "text": string}, {"label": "D", "text": string}]}, "questions": [{"id": "q1", "text": string, "options": [string], "correctAnswer": string, "acceptableAnswers": [string], "explanation": string}]}
+
+BACAAN:
+- Gaya ${ctx.track === "general" ? "IELTS General Training (teks sehari-hari yang lebih panjang: artikel majalah/koran populer)" : "akademik IELTS Academic"}: prosa ekspositori/faktual dalam Bahasa Inggris, netral dan informatif - berisi perbandingan, sebab-akibat, dan ketidakpastian ("some researchers argue...", "the evidence remains mixed") supaya bisa dibuat soal inferensi dan Not Given. TANPA nada motivasional, TANPA bahasa kekanak-kanakan, JANGAN menyalin materi IELTS asli.
+- TEPAT 4 paragraf berlabel "A"-"D", total 650-900 kata (ideal 700-850). Tiap paragraf punya fokus ide sendiri tapi saling terhubung.
+- Topik: satu topik akademik netral yang menarik (sains, sejarah, teknologi, lingkungan, masyarakat, dsb).${avoidNote}
+
+SOAL - TEPAT 20, id "q1" sampai "q20" BERURUTAN, dalam 4 blok PERSIS:
+${blocksSpec.map((b, i) => `- q${i * 5 + 1}-q${i * 5 + 5}: ${b.label}`).join("\n")}
+- q1-q5 (Multiple Choice): "options" WAJIB 4 pilihan teks, "correctAnswer" persis salah satunya.
+- q6-q10 (True/False/Not Given): TANPA "options". "correctAnswer" persis "True", "False", atau "Not Given". Disiplin ketat: True = didukung bacaan; False = JELAS bertentangan dengan bacaan; Not Given = tidak dibahas bacaan TAPI pernyataannya masih satu topik dan menuntut pembacaan cermat - JANGAN Not Given yang topiknya jelas-jelas tidak nyambung.
+- q11-q15 (Matching Information): "text" berisi deskripsi informasi ("a mention of...", "an example of...", "a reason why..."), "correctAnswer" persis "A"/"B"/"C"/"D" (paragraf yang memuat informasinya). TANPA "options". Soal harus menuntut scanning/pencocokan ide, BUKAN sekadar mengulang topik utama paragraf. Satu paragraf BOLEH jadi jawaban lebih dari satu soal, dan boleh ada paragraf yang tidak terpakai.
+- q16-q20 (Sentence Completion): "text" kalimat rumpang dengan ____, "correctAnswer" kata-kata PERSIS dari bacaan, MAKSIMAL 2 kata (aturan "NO MORE THAN TWO WORDS" - divalidasi kode, jawaban 3+ kata DITOLAK). "acceptableAnswers" opsional berisi variasi wajar (mis. dengan/tanpa artikel) - juga maksimal 2 kata. TANPA "options".
+- SEMUA soal WAJIB parafrase dari bacaan (sinonim, transformasi gramatikal, inferensi terkontrol, resolusi referensi) - JANGAN mengutip kalimat bacaan kata-per-kata, tapi juga jangan inferensi terlalu jauh sampai jawabannya ambigu. Tiap soal punya TEPAT SATU jawaban benar yang tidak diperdebatkan.
+- Ramp kesulitan DI DALAM urutan blok: q1-q5 accessible→moderate, q6-q10 moderate, q11-q15 moderate→hard, q16-q20 hard. Jangan tiap soal mekanis lebih sulit dari sebelumnya - yang penting arah keseluruhan naik.
+- "explanation" WAJIB di semua soal: satu kalimat pendek Bahasa Indonesia kenapa itu jawabannya (menyebut paragraf mana).`;
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await callClaude(user, { maxTokens: 6000 });
+      const cleaned = practiceTest.cleanReadingSprintPayload(result);
+      if (cleaned) return cleaned;
+      lastError = new Error("reading sprint payload failed validation");
+      console.error(`generateReadingSprintContent attempt ${attempt + 1}: payload rejected by cleanReadingSprintPayload`);
+    } catch (e) {
+      lastError = e;
+      console.error(`generateReadingSprintContent attempt ${attempt + 1} failed:`, e.message);
+    }
+  }
+  throw lastError || new Error("reading sprint generation failed");
+}
+
+// --- Video Quest (video-quiz) ---
+
+const videoQuiz = require("./videoQuiz");
+
+// Keyless fallback: a generic "belajar efektif dari materi video" set that
+// matches server/youtube.js's stub transcript, so keyless dev + the e2e
+// suite exercise the full flow with a known answer key. Asserted through
+// the strict validator at module load, same pattern as READING_FALLBACK_V2.
+const VIDEO_QUIZ_FALLBACK = (() => {
+  const opt = (...texts) => texts.map((text, i) => ({ id: "abcdef"[i], text }));
+  const raw = { questions: [
+    { style: "conceptual", concept: "prinsip dasar", prompt: "Menurut materi, apa yang paling penting dipahami SEBELUM masuk ke praktik?", options: opt("Prinsip dan definisi dasarnya", "Alat yang paling mahal", "Kecepatan pengerjaan", "Jumlah jam menonton video"), correct: ["a"], explanation: "Materi menekankan memahami definisi dan prinsip dasar sebelum praktik." },
+    { style: "conceptual", concept: "prinsip dasar", prompt: "Apa tujuan utama memahami definisi sebuah konsep menurut materi?", options: opt("Supaya terlihat pintar", "Supaya tidak salah paham saat praktik", "Supaya cepat selesai", "Supaya tidak perlu dokumentasi"), correct: ["b"], explanation: "Banyak pemula salah paham karena melompati bagian definisi/tujuan." },
+    { style: "conceptual", concept: "verifikasi", prompt: "Dalam materi, verifikasi hasil dilakukan pada saat kapan?", options: opt("Hanya di akhir seluruh proses", "Di setiap langkah", "Hanya saat ada error", "Sebelum mulai bekerja"), correct: ["b"], explanation: "Praktik terbaiknya memverifikasi hasil di setiap langkah." },
+    { style: "scenario", concept: "verifikasi", prompt: "Kamu menemukan data yang tidak konsisten di tengah pekerjaan. Menurut materi, langkah PERTAMA yang tepat adalah?", options: opt("Menghapus data yang aneh", "Memeriksa sumber datanya", "Melanjutkan dan memperbaiki nanti", "Mengulang semua dari awal"), correct: ["b"], explanation: "Contoh skenario di materi: langkah pertama selalu memeriksa sumbernya." },
+    { style: "scenario", concept: "kasus kecil", prompt: "Kamu baru mempelajari teknik baru dari video ini. Cara memulai yang sesuai materi adalah?", options: opt("Langsung terapkan ke proyek besar", "Mulai dari kasus kecil dulu", "Tunggu sampai hafal semua teori", "Minta orang lain mengerjakan"), correct: ["b"], explanation: "Materi menyarankan mulai dari kasus kecil lalu naik bertahap." },
+    { style: "scenario", concept: "dokumentasi", prompt: "Setelah menyelesaikan satu tahap penting, sesuai materi kamu sebaiknya?", options: opt("Langsung lanjut tanpa catatan", "Mendokumentasikan prosesnya", "Menghapus file sementara", "Mengulang tahap itu sekali lagi"), correct: ["b"], explanation: "Dokumentasi proses adalah bagian dari praktik terbaik di materi." },
+    { style: "scenario", concept: "prinsip dasar", prompt: "Teman kerjamu langsung praktik tanpa memahami prinsip dasar dan hasilnya kacau. Menurut materi, akar masalahnya adalah?", options: opt("Kurang jam terbang", "Melompat ke praktik tanpa prinsip dasar", "Alatnya kurang bagus", "Terlalu banyak dokumentasi"), correct: ["b"], explanation: "Kesalahan umum di materi: melompat ke praktik tanpa prinsip dasar." },
+    { style: "scenario", concept: "verifikasi", prompt: "Hasil akhirmu berbeda dari perkiraan padahal langkahnya terasa benar. Sesuai materi, yang paling masuk akal dilakukan adalah?", options: opt("Menerima hasilnya apa adanya", "Memeriksa ulang hasil tiap langkah satu per satu", "Mengganti topik belajar", "Menyalahkan datanya"), correct: ["b"], explanation: "Verifikasi per langkah memungkinkan menemukan di mana hasil mulai menyimpang." },
+    { style: "error-identification", concept: "kesalahan umum", prompt: "Mana yang merupakan KESALAHAN menurut materi?", options: opt("Memverifikasi hasil di setiap langkah", "Melompat ke praktik tanpa memahami prinsip dasar", "Mulai dari kasus kecil", "Mendokumentasikan proses"), correct: ["b"], explanation: "Itu disebut eksplisit sebagai kesalahan umum pemula." },
+    { style: "error-identification", concept: "kasus kecil", prompt: "Seorang pemula langsung mengerjakan kasus paling besar dan kompleks lebih dulu. Kesalahannya terletak pada?", options: opt("Urutan skala latihan yang terbalik", "Kurangnya alat", "Terlalu banyak verifikasi", "Terlalu rajin mencatat"), correct: ["a"], explanation: "Materi menyarankan mulai dari kasus kecil, bukan langsung yang besar." },
+    { style: "error-identification", concept: "dokumentasi", prompt: "Proses kerja selesai tapi tidak ada yang bisa menjelaskan ulang langkahnya. Praktik yang TERLEWAT menurut materi adalah?", options: opt("Verifikasi", "Dokumentasi proses", "Memeriksa sumber", "Mulai dari kasus kecil"), correct: ["b"], explanation: "Tanpa dokumentasi, proses tidak bisa ditelusuri/diulang." },
+    { style: "best-practice", concept: "praktik terbaik", prompt: "Urutan kerja yang paling sesuai dengan praktik terbaik di materi adalah?", options: opt("Praktik besar → teori → dokumentasi", "Prinsip dasar → kasus kecil → verifikasi tiap langkah", "Verifikasi → praktik → definisi", "Dokumentasi → praktik → teori"), correct: ["b"], explanation: "Materi: pahami prinsip, mulai kecil, verifikasi tiap langkah." },
+    { style: "best-practice", concept: "verifikasi", prompt: "Kapan sebaiknya berhenti memverifikasi hasil menurut semangat materi ini?", options: opt("Setelah langkah pertama benar", "Tidak berhenti — verifikasi menyertai setiap langkah", "Saat deadline dekat", "Saat data terlihat rapi"), correct: ["b"], explanation: "Verifikasi bukan fase sekali jalan, melainkan kebiasaan di tiap langkah." },
+    { style: "best-practice", concept: "dokumentasi", prompt: "Manfaat utama mendokumentasikan proses menurut materi adalah?", options: opt("Membuat laporan terlihat tebal", "Proses bisa ditelusuri dan diulang dengan benar", "Menambah waktu kerja", "Menggantikan kebutuhan verifikasi"), correct: ["b"], explanation: "Dokumentasi membuat proses bisa dipertanggungjawabkan dan direproduksi." },
+    { style: "multi", concept: "praktik terbaik", prompt: "Pilih SEMUA yang termasuk praktik terbaik menurut materi.", options: opt("Mulai dari kasus kecil", "Verifikasi hasil di setiap langkah", "Dokumentasikan prosesnya", "Melompat langsung ke praktik", "Mengabaikan sumber data"), correct: ["a", "b", "c"], explanation: "Tiga praktik itu disebut eksplisit; dua lainnya justru kesalahan." },
+  ] };
+  const cleaned = videoQuiz.cleanVideoQuizPayload(raw);
+  if (!cleaned) throw new Error("VIDEO_QUIZ_FALLBACK failed cleanVideoQuizPayload - fix the fixture before deploying");
+  return cleaned;
+})();
+
+// Relevance judgment for the "Periksa Materi" step: does this video's
+// transcript substantively TEACH the quest's fixed topic (not just mention
+// it)? Boolean + one short user-facing Indonesian rationale. Keyless mode
+// is permissive (same spirit as every other keyless fallback here) - the
+// deterministic parts of the flow still hold, only the topical gate is off.
+async function judgeVideoRelevance({ topic, videoTitle, transcriptExcerpt }) {
+  if (!hasKey()) return { relevant: true, rationale: "Mode offline: relevansi materi tidak diperiksa." };
+  const user = `Topik quest (tetap, tidak bisa diganti): "${topic}"\nJudul video yang diajukan pengguna: "${videoTitle}"\nCuplikan transkrip video (awal):\n"""\n${String(transcriptExcerpt || "").slice(0, 6000)}\n"""\n\nTugas: nilai apakah video ini SECARA SUBSTANTIF MENGAJARKAN topik quest di atas (bukan sekadar menyebut atau menyerempet). Video yang membahas topik lebih luas tapi jelas mencakup topik ini secara berarti tetap dihitung relevan. Balas JSON dengan bentuk persis:\n{"relevant": boolean, "rationale": string}\n\nAturan: "rationale" satu kalimat Bahasa Indonesia maksimal 200 karakter, ditampilkan langsung ke pengguna — kalau relevant false, sebut dengan hangat KENAPA materinya belum cocok (mis. topiknya beda arah) supaya mereka bisa cari video lain yang tepat.`;
+  const result = await callClaude(user, { maxTokens: 300 });
+  if (typeof result?.relevant !== "boolean") throw new Error("bad relevance shape");
+  return { relevant: result.relevant, rationale: String(result.rationale || "").slice(0, 220) };
+}
+
+// Generates the 15-question HOTS set from the LOCKED video's transcript
+// (never generic topic trivia - every question must be answerable from the
+// transcript itself). Same contract as generateReadingSprintContent: strict
+// validation, 2 attempts, THROWS when keyed instead of self-falling-back
+// (the /start route must know generation failed so it doesn't lock the
+// video against a broken set). Keyless -> static fallback.
+async function generateVideoQuizQuestions({ topic, transcript, attempt = 1 }) {
+  if (!hasKey()) return VIDEO_QUIZ_FALLBACK;
+  const retryNote = attempt > 1
+    ? `\n\nIni attempt ke-${attempt} pengguna (mereka belum lulus): buat set soal BARU dari transkrip yang SAMA — sudut pertanyaan, skenario, dan opsi harus berbeda secara substansi dari set sebelumnya, jangan parafrase tipis.`
+    : "";
+  const user = `Topik quest: "${topic}"\nTranskrip video materi (satu-satunya sumber soal):\n"""\n${String(transcript || "").slice(0, 15000)}\n"""${retryNote}\n\nTugas: buatkan TEPAT 15 soal assessment HOTS (Higher-Order Thinking Skills: aplikasi/analisis/evaluasi, BUKAN sekadar mengingat fakta) dari transkrip di atas. SEMUA soal WAJIB bisa dijawab HANYA dari isi transkrip itu (boleh parafrase/inferensi terkontrol) — JANGAN pakai pengetahuan umum di luar transkrip, dan tiap soal punya TEPAT SATU set jawaban benar yang tidak diperdebatkan.\n\nBalas JSON dengan bentuk PERSIS (tanpa teks lain):\n{"questions": [{"style": "conceptual"|"scenario"|"error-identification"|"best-practice"|"multi", "concept": string, "prompt": string, "options": [{"id": "a", "text": string}], "correct": [string], "explanation": string}]}\n\nStruktur WAJIB berurutan persis (divalidasi kode, urutan salah = DITOLAK):\n- Soal 1-3: style "conceptual" (pemahaman konsep inti dari transkrip).\n- Soal 4-8: style "scenario" (situasi konkret baru, pengguna menerapkan isi transkrip).\n- Soal 9-11: style "error-identification" (mengenali kesalahan/praktik keliru menurut transkrip).\n- Soal 12-14: style "best-practice" (menilai pilihan/urutan tindakan terbaik menurut transkrip).\n- Soal 15: style "multi" — SATU-SATUNYA soal pilih-semua-yang-benar: 4-6 "options", "correct" berisi 2-4 id, dan minimal satu opsi salah.\n\nAturan: soal 1-14 WAJIB tepat 4 "options" (id "a"-"d") dengan "correct" berisi TEPAT 1 id; soal 15 id opsi "a"-"f" secukupnya. "concept" label skill/konsep pendek lowercase Bahasa Indonesia yang KONSISTEN — soal yang menguji konsep sama HARUS pakai label sama persis (dipakai untuk chip kuat/lemah di layar hasil, idealnya total 4-6 concept unik di seluruh set). "prompt" dan semua "options" dalam Bahasa Indonesia yang jelas. "explanation" satu kalimat Bahasa Indonesia kenapa itu jawabannya, merujuk isi transkrip (ditampilkan di pembahasan setelah lulus). Distraktor harus masuk akal (kesalahpahaman yang plausible), bukan asal salah.`;
+  let lastError = null;
+  for (let tryNo = 0; tryNo < 2; tryNo++) {
+    try {
+      const result = await callClaude(user, { maxTokens: 6000 });
+      const cleaned = videoQuiz.cleanVideoQuizPayload(result);
+      if (cleaned) return cleaned;
+      lastError = new Error("video quiz payload failed validation");
+      console.error(`generateVideoQuizQuestions attempt ${tryNo + 1}: payload rejected by cleanVideoQuizPayload`);
+    } catch (e) {
+      lastError = e;
+      console.error(`generateVideoQuizQuestions attempt ${tryNo + 1} failed:`, e.message);
+    }
+  }
+  throw lastError || new Error("video quiz generation failed");
 }
 
 // Task 10b (Job Match Analysis): the only multimodal generate* function in
@@ -1134,10 +1388,12 @@ function fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks) {
 module.exports = {
   generateQuest, processReflection, hasKey,
   generateScenarioCard, generateChapterAnalysis,
-  generateTargetOptions, generatePracticeTest, generateJobMatchAnalysis,
+  generateTargetOptions, generatePracticeTest, generateReadingSprintContent, fallbackPracticeTest, generateJobMatchAnalysis,
+  judgeVideoRelevance, generateVideoQuizQuestions, normalizeVideoQuizSchema,
   PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
   normalizeEvidenceSchema, generateSideQuest,
   normalizeCompletionType, fallbackReflection, looksRecoveryThemed, analyzeNutritionPhoto,
   fallbackInsightRows, fallbackPattern, generateGoalValidation, fallbackGoalValidation,
   normalizeMovementFields, normalizePlannedExercises,
+  normalizeMultiDomainQuest,
 };

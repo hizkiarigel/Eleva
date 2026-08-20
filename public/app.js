@@ -704,10 +704,63 @@ let jobApplicationFlow = null;
 //   submittedResult: null,       // { correct, total, answeredCount, wrong, byTaskType } | null - set by lstnDoSubmit() on success, read by lstnSubmittedHTML()
 // }
 let listeningDiagnosticFlow = null;
+// Round 42 (IELTS Reading Half Diagnostic): the Reading practice test's own
+// chrome-free test mode - replaces the old flat one-card quiz for EVERY
+// reading payload (sprint and drill alike, founder decision).
+// practiceTestFlow now only carries the META track-picker/error steps and
+// the unreachable listening-kind quiz (left in place per the "don't delete,
+// just unreachable" convention). Like listeningDiagnosticFlow, every step
+// except "intro" bypasses the normal .app-shell chrome entirely via
+// renderDashboard's early-return.
+// {
+//   questId, origin: "home" | "meta",   // where exit/finish returns to
+//   track: "academic" | "general",
+//   step: "intro" | "active" | "review" | "result",
+//   payload,                     // stripped payload from generate (v2 sprint: blocks + {title,paragraphs} passage; drill/legacy: flat questions, string passage)
+//   blocks,                      // rdgDeriveBlocks(payload) - always present client-side
+//   answers: {}, flags: {},      // flagged is a review marker, NEVER counts as unanswered; answers never erased (incl. timer expiry)
+//   activeTab: "passage" | "questions",
+//   blockIndex: 0,               // which block the Questions tab shows
+//   scrollMem: { passage: 0, questions: 0 },  // per-tab scroll memory, survives tab switches AND re-renders
+//   deadlineTs: null,            // set once by rdgStartCountdown (30min sprint / 20min drill)
+//   timerExpired: false,
+//   overviewOpen, exitConfirmOpen, submitConfirmOpen, timeUpOpen: false,
+//   error: "", result: null,     // result: {score,total,wrong,assessment,mentorReply} from submit
+// }
+let readingTestFlow = null;
+// Video Quest (video-quiz, LABORA design handoff): user learns from ONE
+// self-picked YouTube video, then proves understanding through a
+// source-locked 15-question HOTS assessment. Same chrome-free test-mode
+// architecture as readingTestFlow: every step except "intro" bypasses the
+// normal .app-shell via renderDashboard's early-return. In-flight answers
+// are client-only (a reload restarts answering, same trade-off as rdg);
+// the locked video + generated question set live server-side, so re-entry
+// resumes with the SAME set via the idempotent /api/video-quiz/start.
+// {
+//   questId, origin: "home" | "meta",
+//   topic, passThreshold, estimatedMinutes,   // from quest.videoQuiz
+//   step: "intro" | "pick" | "ready" | "locked" | "assessment" | "review" | "result" | "pembahasan",
+//   videoUrl: "",                // the pick step's input draft
+//   checking: false,             // "Memeriksa materi..." in flight
+//   checkError: "",              // validate-step error/not-relevant message
+//   materi: null,                // { videoMeta, videoId, rationale } after a relevant check (pre-lock)
+//   locked: null,                // { videoUrl, videoMeta, videoId } once the source lock exists
+//   lastResult: null,            // quest.videoQuizState.lastResult mirror (fail landing on re-entry)
+//   attempt: 1,
+//   questions: null,             // stripped set from /start (no correct/explanation)
+//   index: 0, answers: {},       // answers[qid] = array of option ids (even for single)
+//   navOpen, sourceOpen, submitConfirmOpen, exitConfirmOpen: false,
+//   result: null,                // submit response (pass: includes review[] for pembahasan)
+//   error: "",
+// }
+let videoQuizFlow = null;
 // Task 12 (META): true while the inline Cardio/Gym/Recovery picker for the
 // "Body" META box is showing (tapped but no kind chosen yet). Reset after
 // /api/meta/start succeeds or the user backs out.
 let metaBodyPicking = false;
+// Video Quest's LABORA row gets the same inline-card treatment as
+// metaBodyPicking: true while the "what topic?" input card is showing.
+let metaVideoQuestPicking = false;
 // Movement→Training spec item 2: Recovery (and fresh-start Nutrition) get
 // the same confirm-before-create step Movement's kind picker already gives -
 // "recovery" | "nutrition" while the inline confirm card is showing, null
@@ -769,6 +822,15 @@ let metaTargetBusy = false; // guards the confirm/add-goal buttons while a reque
 // evidence).
 let nutritionFlow = null;
 let nfSearchTimer = null; // debounce handle for the Nutrition page's live food search
+// Multi-Domain Quest Hub (design handoff, 19 Agustus) - same "separate flow,
+// not reflectOpen" pattern as nutritionFlow/jobMatchFlow above. Purely a
+// VIEW pointer, not a data cache - questHubFlowHTML always looks up the
+// live quest fresh from appState.openQuests by questId every render, same
+// "never cache, always re-derive from appState" convention used everywhere
+// else in this file, so a save (which refreshes appState) is instantly
+// reflected without questHubFlow needing to track the data itself.
+// { questId, view: "hub"|"recovery"|"nutrition", draft, error, saving, completing }
+let questHubFlow = null;
 // Task 10a (Artifacts library): sheet state, independent of any quest flow -
 // reachable any time via its own icon, not just from job-match-analysis.
 let artifactsOpen = false;
@@ -3617,6 +3679,264 @@ function nutritionFlowHTML() {
     </div>`;
 }
 
+// Multi-Domain Quest Hub (design handoff, 19 Agustus): a quest requiring
+// BOTH Recovery AND Nutrition sub-flows, completed in either order, routed
+// through this dedicated 3-view screen (overview -> a feature module ->
+// back to overview -> "Selesaikan Quest" once both are COMPLETE). Own field
+// vocabulary (sleep/energy/soreness/recovery_session,
+// protein/hydration/meals), deliberately NOT the pre-existing single-domain
+// recovery form (recoveryFieldsHTML above) or nutrition-log's PROGRESSIVE
+// system (nutritionFlow above) - see server/questHub.js's own comment for
+// why these stay separate. Requirement ids/labels/targets are hand-synced
+// with that module (no shared module system in this codebase, same
+// established pattern as SUB_PATHWAY_NAMES/PATHWAY_DESC elsewhere in this
+// file) - keep both in sync if either changes. CSS prefix deliberately
+// .mdq- (not .qh-) to avoid any confusion with the pre-existing --qh-*
+// custom properties/.qhub- classes belonging to the unrelated Home compact
+// quest carousel feature (see styles.css's own comment on this).
+const QH_FEATURE_META = {
+  RECOVERY: { label: "Recovery", accent: "#63e38b", icon: "heart", desc: "Tidur, kondisi tubuh, atau recovery session." },
+  NUTRITION: { label: "Nutrition", accent: "#c4d97a", icon: "droplet", desc: "Protein, hidrasi, dan asupan makan." },
+};
+const QH_SLEEP_OPTIONS = ["Kurang", "Cukup", "Baik"];
+const QH_ENERGY_OPTIONS = ["Rendah", "Normal", "Tinggi"];
+const QH_SORENESS_OPTIONS = ["Tidak ada", "Ringan", "Berat"];
+const QH_RECOVERY_SESSION_OPTIONS = ["Jalan pemulihan", "Stretching", "Mobility", "Meditasi"];
+
+function qhIconSVG(icon, color) {
+  const common = `width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.6" style="flex:none"`;
+  if (icon === "heart") return `<svg ${common}><path d="M12 20s-7-4.35-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 5c-2.5 4.65-9.5 9-9.5 9z"></path></svg>`;
+  return `<svg ${common}><path d="M12 2s6 7 6 12a6 6 0 0 1-12 0c0-5 6-12 6-12z"></path></svg>`; // droplet (Nutrition)
+}
+// "N dari M tercatat" - mirrors server/questHub.js's countRecorded exactly
+// (required-ids-with-a-recorded-value count), so the Hub card's bukti-ring
+// and the server's own gating never disagree about what's "recorded".
+function qhCountRecorded(requirements, data) {
+  const d = data || {};
+  const requiredIds = (requirements || []).filter((r) => r.required).map((r) => r.id);
+  return { recorded: requiredIds.filter((id) => d[id] != null).length, total: requiredIds.length };
+}
+function qhCtaLabel(state) {
+  return state === "COMPLETE" ? "Lihat/Ubah" : state === "IN_PROGRESS" ? "Lanjut" : "Isi";
+}
+function qhStatusPillHTML(state, recorded, total) {
+  const cls = state === "COMPLETE" ? "done" : state === "IN_PROGRESS" ? "partial" : "empty";
+  const text = state === "COMPLETE" ? "Selesai" : state === "IN_PROGRESS" ? `${recorded} dari ${total} tercatat` : "Belum lengkap";
+  return `<span class="mdq-pill mdq-pill-${cls}">${esc(text)}</span>`;
+}
+
+// "Recovery + Nutrition" style short label for a multi-domain quest -
+// generic over primaryFeature/supportingFeatures (not hardcoded to this
+// one template) so a future 2nd multi-domain template stays correct here
+// without a code change, same principle as questHub.js's own template
+// design. Used by both the compact carousel card's summary line and the
+// detail panel's eyebrow suffix (design handoff 01-01-home.png).
+function mdqFeatureLabelJoin(quest, upper) {
+  const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+  return keys.map((k) => {
+    const label = QH_FEATURE_META[k]?.label || k;
+    return upper ? label.toUpperCase() : label;
+  }).join(" + ");
+}
+
+// Home screen's 3-tile info row (design handoff 01-01-home.png, sits
+// between the description and "SELESAI KETIKA" on the detail panel) -
+// "area utama"/"waktu"/"tujuan" at a glance. Originally multi-domain-only;
+// widened to every quest type on founder request (20 Agustus) once a
+// plain single-feature quest was compared side by side and the founder
+// wanted one consistent card style everywhere, not just Recovery+Nutrition.
+// For a multi-domain quest, "area" is the real primaryFeature+supportingFeatures
+// count/labels and "tujuan" is the template's own tujuanSingkat. For every
+// other completionType there's no such structured breakdown, so "area"
+// falls back to the quest's single statFocus (still real data, just not
+// multi-part) and "tujuan" falls back to the active goal text (goalLabel -
+// user-supplied, must stay escaped same as every other use of it in this
+// file) since there's no per-quest short-purpose field outside the Hub
+// template.
+function mdqHomeInfoRowHTML(quest, goalLabel) {
+  const isMultiDomain = quest.completionType === "multi-domain";
+  const keys = isMultiDomain ? [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean) : [];
+  const areaCount = isMultiDomain ? keys.length : 1;
+  const areaSub = isMultiDomain ? mdqFeatureLabelJoin(quest, false) : esc(statLabel(quest.statFocus) || "Umum");
+  const tujuanSub = esc(quest.tujuanSingkat || goalLabel || "");
+  const common = `width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" style="flex:none"`;
+  const tiles = [
+    { icon: `<svg ${common}><path d="M5 3v18M5 4h11l-2.5 3.5L16 11H5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: `${areaCount} area utama`, sub: areaSub },
+    { icon: `<svg ${common}><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: "Est. waktu", sub: "±30 menit" },
+    { icon: `<svg ${common}><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="0.8" fill="var(--accent)"></circle></svg>`, label: "Tujuan", sub: tujuanSub },
+  ];
+  return `
+    <div class="mdq-info-row">
+      ${tiles.map((t) => `
+        <div class="mdq-info-tile">
+          ${t.icon}
+          <div class="mdq-info-label">${esc(t.label)}</div>
+          <div class="mdq-info-sub">${t.sub}</div>
+        </div>`).join("")}
+    </div>`;
+}
+
+// Home screen's "SELESAI KETIKA" checklist. For a multi-domain quest this
+// replaces the generic bullet list with a per-area radio-style checklist
+// reflecting REAL featureState - never a static preview that could drift
+// from what the Hub itself shows, same "evidence, not checkboxes, always
+// derived" rule as questHub.js's own computeFeatureState. Every other
+// completionType has no per-requirement completion tracking at all (the
+// quest resolves as one atomic event, not N independently-completable
+// parts), so widening this to all quest types (founder request, 20
+// Agustus) means the radios for those requirements stay permanently
+// unfilled here by construction - same honesty rule, just nothing to
+// report yet since there's no sub-state to read. That's still preferable
+// to inventing fake partial-completion data: it's the same information
+// the old bullet list carried, only visually unified with the Hub's style.
+function mdqHomeChecklistHTML(quest, dod) {
+  const isMultiDomain = quest.completionType === "multi-domain";
+  if (isMultiDomain) {
+    const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+    const featureState = quest.featureState || {};
+    return `
+      <div class="mdq-home-checklist">
+        ${keys.map((k) => {
+          const done = featureState[k] === "COMPLETE";
+          const label = QH_FEATURE_META[k]?.label || k;
+          return `
+          <div class="mdq-home-check-item">
+            <span class="mdq-home-check-radio ${done ? "done" : ""}"></span>
+            <span>${esc(label)} requirement terpenuhi</span>
+          </div>`;
+        }).join("")}
+      </div>`;
+  }
+  return `
+    <div class="mdq-home-checklist">
+      ${(dod || []).map((d) => `
+        <div class="mdq-home-check-item">
+          <span class="mdq-home-check-radio"></span>
+          <span>${esc(d)}</span>
+        </div>`).join("")}
+    </div>`;
+}
+
+function questHubFlowHTML() {
+  const f = questHubFlow;
+  if (!f) return "";
+  // Never cached in questHubFlow itself - always looked up fresh from
+  // appState.openQuests (refreshed after every save), same "single source
+  // of truth" convention every other flow in this file follows. This is
+  // also what makes a save's effect show up immediately without
+  // questHubFlow needing to track the data itself. Reads appState directly
+  // (not the allOpenQuests local var renderDashboard computes) - this
+  // function sits outside renderDashboard's scope, called from inside its
+  // homeBodyHTML dispatch ternary, so allOpenQuests itself isn't reachable
+  // here as a free variable.
+  const day = (appState.openQuests || []).find((q) => q.id === f.questId);
+  if (!day) {
+    return `<div class="quest-card fadeUp"><p class="why">Quest ini sudah tidak tersedia lagi.</p><button class="btn-primary full" id="mdqBackHome" style="margin-top:14px">← Kembali ke Home</button></div>`;
+  }
+  if (f.view === "recovery") return questHubFeatureHTML(day, f, "RECOVERY");
+  if (f.view === "nutrition") return questHubFeatureHTML(day, f, "NUTRITION");
+  return questHubOverviewHTML(day, f);
+}
+
+function questHubOverviewHTML(day, f) {
+  const quest = day.quest;
+  const primary = quest.primaryFeature;
+  const supporting = quest.supportingFeatures || [];
+  const featureKeys = [primary, ...supporting].filter(Boolean);
+  const featureState = quest.featureState || {};
+  const requirements = quest.featureRequirements || {};
+  const completeCount = featureKeys.filter((k) => featureState[k] === "COMPLETE").length;
+  const ready = quest.status === "READY_TO_COMPLETE";
+
+  return `
+    <div class="quest-card fadeUp mdq-card">
+      <button class="mdq-back" id="mdqBackHome">← Kembali</button>
+      <div class="mdq-eyebrow mono">SESSION QUEST · ${esc(quest.domain || "BODY")} • ${esc(mdqFeatureLabelJoin(quest, false))}</div>
+      <h2 class="fr mdq-title">${esc(quest.title)}</h2>
+      <p class="mdq-desc">Lengkapi Recovery dan Nutrition kapan pun selama hari ini. Kamu bebas mulai dari mana.</p>
+      <div class="mdq-meta mono">±30 menit · ${featureKeys.length} area perlu terpenuhi · Tujuan: Pulih &amp; bertenaga</div>
+
+      <div class="mdq-section-label mono">LENGKAPI KEDUA AREA</div>
+      ${featureKeys.map((key) => {
+        const meta = QH_FEATURE_META[key] || { label: key, accent: "#e8a33d", icon: "heart", desc: "" };
+        const reqs = requirements[key] || [];
+        const data = (quest.featureData || {})[key] || {};
+        const { recorded, total } = qhCountRecorded(reqs, data);
+        const state = featureState[key] || "NOT_STARTED";
+        return `
+        <div class="mdq-feature-card" style="border-color:${meta.accent}33">
+          <div class="mdq-feature-top">
+            <div class="mdq-feature-icon" style="border-color:${meta.accent}55">${qhIconSVG(meta.icon, meta.accent)}</div>
+            <div class="mdq-feature-info">
+              <div class="mdq-feature-name fr">${esc(meta.label)}</div>
+              <div class="mdq-feature-desc">${esc(meta.desc)}</div>
+            </div>
+            <div class="mdq-ring" style="--mdq-ring-color:${meta.accent};--mdq-ring-pct:${total ? Math.round((recorded / total) * 100) : 0}%">
+              <span class="mdq-ring-frac">${total ? `${recorded}/${total}` : "–"}</span><span class="mdq-ring-label mono">BUKTI</span>
+            </div>
+          </div>
+          ${qhStatusPillHTML(state, recorded, total)}
+          <button class="btn-primary full mdq-feature-cta" style="background:${meta.accent}" data-mdq-open="${key.toLowerCase()}">${esc(qhCtaLabel(state))} ${esc(meta.label)} ›</button>
+        </div>`;
+      }).join("")}
+
+      <div class="mdq-progress-label mono">${completeCount} / ${featureKeys.length} area selesai</div>
+      <div class="mdq-progress-bar"><div class="mdq-progress-fill" style="width:${featureKeys.length ? (completeCount / featureKeys.length) * 100 : 0}%"></div></div>
+
+      ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:10px 0 0">${esc(f.error)}</p>` : ""}
+      <button class="btn-primary full" id="mdqComplete" style="margin-top:16px" ${ready && !f.completing ? "" : "disabled"}>${f.completing ? "Menyelesaikan..." : "Selesaikan Quest"}</button>
+      ${!ready ? `<p class="mdq-helper mono">Lengkapi Recovery dan Nutrition dulu.</p>` : ""}
+    </div>`;
+}
+
+// Shared shell for both feature modules - RECOVERY's chip-pick fields and
+// NUTRITION's numeric steppers are different enough in kind that they don't
+// share field-rendering code, but the surrounding card/back-button/save-
+// button/draft-init logic is identical, so that part is unified here rather
+// than duplicated per feature.
+function questHubFeatureHTML(day, f, featureKey) {
+  const meta = QH_FEATURE_META[featureKey];
+  const draft = f.draft || {};
+  const chipRow = (label, key, options) => `
+    <div class="field">
+      <label class="mdq-field-label mono">${esc(label)}</label>
+      <div class="status-row">
+        ${options.map((v) => `<button class="status-btn ${draft[key] === v ? "active" : ""}" data-mdq-chip="${key}" data-mdq-value="${esc(v)}">${esc(v)}</button>`).join("")}
+      </div>
+    </div>`;
+  const stepperRow = (label, key, target, unit, step, decimals) => {
+    const val = typeof draft[key] === "number" ? draft[key] : 0;
+    return `
+    <div class="mdq-stepper-row">
+      <div class="mdq-stepper-top"><span>${esc(label)}</span><span class="mono mdq-stepper-val">${val.toFixed(decimals)} / ${target}${unit}</span></div>
+      <div class="mdq-stepper-controls">
+        <button class="mdq-stepper-btn" data-mdq-step="${key}" data-mdq-delta="-${step}" data-mdq-max="999">−</button>
+        <div class="mdq-stepper-track"><div class="mdq-stepper-fill" style="width:${Math.min(100, (val / target) * 100)}%;background:${meta.accent}"></div></div>
+        <button class="mdq-stepper-btn" data-mdq-step="${key}" data-mdq-delta="${step}" data-mdq-max="999">+</button>
+      </div>
+    </div>`;
+  };
+  const bodyHTML = featureKey === "RECOVERY"
+    ? `<h2 class="fr mdq-title">Body Check &amp; Recovery Session</h2>
+       ${chipRow("TIDUR SEMALAM", "sleep", QH_SLEEP_OPTIONS)}
+       ${chipRow("ENERGI", "energy", QH_ENERGY_OPTIONS)}
+       ${chipRow("SORENESS", "soreness", QH_SORENESS_OPTIONS)}
+       <div class="mdq-divider"></div>
+       ${chipRow("RECOVERY SESSION", "recovery_session", QH_RECOVERY_SESSION_OPTIONS)}`
+    : `<h2 class="fr mdq-title">Protein, Hidrasi &amp; Makan</h2>
+       ${stepperRow("Protein", "protein", 80, "g", 5, 0)}
+       ${stepperRow("Hidrasi", "hydration", 2.5, "L", 0.25, 2)}
+       ${stepperRow("Meals dicatat", "meals", 3, "", 1, 0)}`;
+  return `
+    <div class="quest-card fadeUp mdq-card">
+      <button class="mdq-back" id="mdqBackHub">← Kembali</button>
+      <div class="mdq-eyebrow mono" style="color:${meta.accent}">${meta.label.toUpperCase()}</div>
+      ${bodyHTML}
+      ${f.error ? `<p style="color:var(--rust);font-size:13px;margin:12px 0 0">${esc(f.error)}</p>` : ""}
+      <button class="btn-primary full" id="mdqSaveFeature" data-mdq-feature="${featureKey}" style="margin-top:18px;background:${meta.accent}">${f.saving ? "Menyimpan..." : `Simpan ${esc(meta.label)}`}</button>
+    </div>`;
+}
+
 // Task 10a: Artifacts library sheet - reachable any time via its own icon,
 // independent of any quest flow (spec: "lihat, tambah, ATAU GANTI artifact
 // kapan saja"). artifactsList is metadata-only (no file bytes - see
@@ -3989,6 +4309,1197 @@ function wireListeningDiagnosticHandlers() {
   });
 }
 
+// ==== Round 42: IELTS Reading Half Diagnostic ======================
+// Test-mode shell for the Reading practice test (sprint AND drill),
+// mirroring the listening diagnostic's architecture: chrome bypass via
+// renderDashboard early-return, direct-DOM timer, surgical answer updates
+// (no full re-render on taps - the .lstn-scroll scroll-reset lesson), and
+// .help-overlay confirm sheets. New here vs listening: Passage/Questions
+// tabs with independent scroll memory, one block at a time, per-question
+// flagging, an overview sheet, a Review screen before submit, and an
+// in-shell structured result (band range + per-block breakdown).
+
+const RDG_CATEGORY_LABEL = {
+  "multiple choice": "Multiple Choice",
+  "true/false/not given": "True / False / Not Given",
+  "matching information": "Matching Information",
+  "sentence completion": "Sentence Completion",
+};
+function rdgCategoryLabel(cat) {
+  return RDG_CATEGORY_LABEL[cat] || (cat ? cat.replace(/\b\w/g, (c) => c.toUpperCase()) : "Lainnya");
+}
+
+// v2 sprints ship server-built blocks; drills/legacy payloads are flat, so
+// derive 5-question groups client-side (a 12-question drill becomes 5/5/2)
+// with the drill category as the label.
+function rdgDeriveBlocks(payload) {
+  if (Array.isArray(payload.blocks) && payload.blocks.length) return payload.blocks;
+  const qs = payload.questions || [];
+  const label = payload.focusCategory ? rdgCategoryLabel(payload.focusCategory) : "Drill";
+  const blocks = [];
+  for (let i = 0; i < qs.length; i += 5) {
+    const group = qs.slice(i, i + 5);
+    blocks.push({
+      blockType: "drill", label,
+      range: `${i + 1}-${i + group.length}`,
+      instruction: "Jawab pertanyaan berikut berdasarkan bacaan.",
+      questionIds: group.map((q) => q.id),
+    });
+  }
+  return blocks;
+}
+
+// Single constructor for the flow - every reading payload (v2 sprint from
+// the weekly cache, per-attempt drill, keyless fallback) enters the shell
+// through here after a successful /api/practice-test/generate.
+function startReadingTest(questId, track, payload, origin) {
+  readingTestFlow = {
+    questId, origin: origin || "home", track,
+    step: "intro", payload,
+    blocks: rdgDeriveBlocks(payload),
+    answers: {}, flags: {},
+    activeTab: "passage", blockIndex: 0,
+    scrollMem: { passage: 0, questions: 0 },
+    deadlineTs: null, timerExpired: false,
+    overviewOpen: false, exitConfirmOpen: false, submitConfirmOpen: false, timeUpOpen: false,
+    error: "", result: null,
+  };
+}
+
+function rdgAnsweredCount(f) {
+  return f.payload.questions.filter((q) => String(f.answers[q.id] || "").trim()).length;
+}
+function rdgFlaggedCount(f) {
+  return f.payload.questions.filter((q) => f.flags[q.id]).length;
+}
+function rdgTotal(f) {
+  return f.payload.questions.length;
+}
+function rdgDurationMs(f) {
+  // 30:00 for the 20-question sprint (design spec); 20:00 for a 12-question
+  // drill (same ~1.5 min/question pacing).
+  return (f.payload.entryType === "drill" ? 20 : 30) * 60 * 1000;
+}
+
+// Same direct-DOM-write countdown pattern as lstnStartCountdown. At 0:00 the
+// timer NEVER erases answers and NEVER auto-submits (founder decision):
+// it stops, freezes at 00:00 and opens the "Time is up" sheet, whose only
+// action is Review & Submit.
+let rdgTimerInterval = null;
+function rdgStartCountdown() {
+  if (rdgTimerInterval || !readingTestFlow || readingTestFlow.timerExpired) return;
+  const f = readingTestFlow;
+  if (!f.deadlineTs) f.deadlineTs = Date.now() + rdgDurationMs(f);
+  rdgTimerInterval = setInterval(() => {
+    const el = document.getElementById("rdgTimer");
+    if (!el || !readingTestFlow) return rdgStopCountdown();
+    const remaining = Math.max(0, readingTestFlow.deadlineTs - Date.now());
+    el.textContent = lstnFormatMMSS(remaining);
+    el.classList.toggle("rdg-timer-red", remaining <= 5 * 60 * 1000);
+    if (remaining <= 0) {
+      rdgStopCountdown();
+      readingTestFlow.timerExpired = true;
+      readingTestFlow.timeUpOpen = true;
+      rdgSaveScroll();
+      renderDashboard();
+    }
+  }, 1000);
+}
+function rdgStopCountdown() {
+  clearInterval(rdgTimerInterval);
+  rdgTimerInterval = null;
+}
+
+// Scroll memory: both tab panes stay in the DOM (hidden via .rdg-hidden), so
+// a tab switch is a pure class toggle. Any handler that DOES re-render must
+// call rdgSaveScroll() first; renderReadingTest() restores from scrollMem.
+function rdgSaveScroll() {
+  const f = readingTestFlow;
+  if (!f) return;
+  const pp = document.getElementById("rdgPassagePane");
+  const qp = document.getElementById("rdgQuestionsPane");
+  // Only the visible pane has a real scrollTop - a display:none pane reads 0
+  // and would clobber the position saved when it was last visible.
+  if (pp && !pp.classList.contains("rdg-hidden")) f.scrollMem.passage = pp.scrollTop;
+  if (qp && !qp.classList.contains("rdg-hidden")) f.scrollMem.questions = qp.scrollTop;
+}
+
+// Intro - renders INSIDE the normal chrome (same as the listening intro).
+function readingTestIntroHTML() {
+  const f = readingTestFlow;
+  const p = f.payload;
+  const drill = p.entryType === "drill";
+  const total = rdgTotal(f);
+  const minutes = rdgDurationMs(f) / 60000;
+  return `
+    <div class="rdg-intro fadeUp">
+      <div class="eyebrow mono" style="color:#6EA8FF">META · LINGUA</div>
+      <h1 class="fr rdg-intro-title">${drill ? "Reading Drill" : `IELTS ${esc(PRACTICE_LABELS[f.track] || "Academic")} Reading`}</h1>
+      <p class="rdg-intro-subtitle">${drill ? `Drill Terfokus · ${total} Questions` : `Half Diagnostic · ${total} Questions`}</p>
+      ${drill && p.focusCategory ? `<p class="why" style="margin:6px 0 0">Latihan kategori terlemahmu dari attempt sebelumnya: ${esc(rdgCategoryLabel(p.focusCategory))}.</p>` : ""}
+      <div class="rdg-intro-stats">
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">${total}</div><div class="rdg-intro-stat-label">pertanyaan</div></div>
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">1</div><div class="rdg-intro-stat-label">passage</div></div>
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">${minutes}</div><div class="rdg-intro-stat-label">menit</div></div>
+      </div>
+      <div class="rdg-intro-instr-label mono">KAMU AKAN MENJAWAB</div>
+      <div class="rdg-intro-qlist">
+        ${f.blocks.map((b) => `<div class="rdg-intro-qrow"><span class="mono rdg-intro-qrange">Q${esc(b.range)}</span><span>${esc(b.label)}</span></div>`).join("")}
+      </div>
+      <button class="btn-primary full rdg-intro-cta" id="rdgStart">Start Test</button>
+      <button class="btn-ghost full" id="rdgCancel" style="margin-top:10px">← Batal</button>
+    </div>`;
+}
+
+function rdgTopBarHTML(f) {
+  return `
+    <div class="rdg-topbar">
+      <button class="rdg-back" id="rdgBack" aria-label="Keluar">‹</button>
+      <div class="rdg-topbar-title">Reading Practice</div>
+      <div class="rdg-timer mono" id="rdgTimer">${f.timerExpired ? "00:00" : lstnFormatMMSS(f.deadlineTs ? Math.max(0, f.deadlineTs - Date.now()) : rdgDurationMs(f))}</div>
+    </div>`;
+}
+
+function rdgTabsHTML(f) {
+  return `
+    <div class="rdg-tabs">
+      <button class="rdg-tab ${f.activeTab === "passage" ? "active" : ""}" data-rdg-tab="passage">Passage</button>
+      <button class="rdg-tab ${f.activeTab === "questions" ? "active" : ""}" data-rdg-tab="questions">Questions</button>
+    </div>`;
+}
+
+// Passage pane: paragraph-labelled long-form reading, no per-paragraph card
+// chrome (design spec). Handles both the v2 {title, paragraphs} object and
+// the flat string passages of drills/legacy payloads.
+function rdgPassagePaneHTML(f) {
+  const p = f.payload.passage;
+  let inner;
+  if (p && typeof p === "object" && Array.isArray(p.paragraphs)) {
+    inner = `
+      <div class="eyebrow mono rdg-passage-eyebrow">PASSAGE 1</div>
+      <h2 class="fr rdg-passage-title">${esc(p.title)}</h2>
+      ${p.paragraphs.map((par) => `
+        <div class="rdg-para-label">Paragraph ${esc(par.label)}</div>
+        <p class="rdg-para-text">${esc(par.text)}</p>`).join("")}`;
+  } else {
+    inner = `
+      <div class="eyebrow mono rdg-passage-eyebrow">PASSAGE</div>
+      <p class="rdg-para-text" style="white-space:pre-wrap">${esc(String(p || ""))}</p>`;
+  }
+  return `<div class="rdg-pane ${f.activeTab === "passage" ? "" : "rdg-hidden"}" id="rdgPassagePane">${inner}</div>`;
+}
+
+function rdgQuestionNumber(f, qid) {
+  return f.payload.questions.findIndex((q) => q.id === qid) + 1;
+}
+
+function rdgQuestionHTML(f, q) {
+  const num = rdgQuestionNumber(f, q.id);
+  const chosen = f.answers[q.id];
+  const flagged = !!f.flags[q.id];
+  let answerHTML;
+  if (q.type === "fill") {
+    answerHTML = `
+      <input type="text" class="rdg-input" data-rdg-fill="${esc(q.id)}" maxlength="60"
+        placeholder="${q.maxWords ? `Maks. ${q.maxWords} kata` : "Jawabanmu..."}" value="${esc(chosen || "")}" />`;
+  } else if (q.type === "matching") {
+    answerHTML = `
+      <div class="rdg-match-letters">
+        ${(q.options || []).map((o) => `<button class="rdg-letter-badge ${chosen === o ? "active" : ""}" data-rdg-opt="${esc(q.id)}" data-rdg-value="${esc(o)}">${esc(o)}</button>`).join("")}
+      </div>`;
+  } else {
+    const letters = ["A", "B", "C", "D", "E", "F"];
+    answerHTML = `
+      <div class="rdg-options">
+        ${(q.options || []).map((o, i) => `
+          <button class="rdg-option ${chosen === o ? "active" : ""}" data-rdg-opt="${esc(q.id)}" data-rdg-value="${esc(o)}">
+            <span class="rdg-letter-badge">${q.type === "tf" ? esc(o[0]) : letters[i]}</span><span class="rdg-option-text">${esc(o)}</span>
+          </button>`).join("")}
+      </div>`;
+  }
+  return `
+    <div class="rdg-question" id="rdgQ${num}">
+      <div class="rdg-question-head">
+        <span class="mono rdg-qnum">${num}</span>
+        <p class="rdg-question-text">${esc(q.text)}</p>
+        <button class="rdg-flag ${flagged ? "flagged" : ""}" data-rdg-flag="${esc(q.id)}" aria-label="Tandai untuk review">⚑</button>
+      </div>
+      ${answerHTML}
+    </div>`;
+}
+
+// Questions pane: ONE block at a time (instruction header + its questions),
+// "Question N of 20" + thin progress bar + overview icon at the top.
+function rdgQuestionsPaneHTML(f) {
+  const block = f.blocks[f.blockIndex];
+  const total = rdgTotal(f);
+  const answered = rdgAnsweredCount(f);
+  const qs = block.questionIds.map((id) => f.payload.questions.find((q) => q.id === id)).filter(Boolean);
+  const firstNum = rdgQuestionNumber(f, block.questionIds[0]);
+  return `
+    <div class="rdg-pane ${f.activeTab === "questions" ? "" : "rdg-hidden"}" id="rdgQuestionsPane">
+      <div class="rdg-progress-row">
+        <span class="rdg-progress-label">Question ${firstNum} of ${total}</span>
+        <div class="rdg-progress-track"><div class="rdg-progress-fill" id="rdgProgressFill" style="width:${Math.round((answered / total) * 100)}%"></div></div>
+        <button class="rdg-overview-btn" id="rdgOverviewBtn" aria-label="Ringkasan soal">▦</button>
+      </div>
+      <div class="rdg-block-head">
+        <span class="mono rdg-block-eyebrow">QUESTIONS ${esc(block.range).replace("-", "–")}</span>
+        <span class="rdg-block-chip">${esc(block.label)}</span>
+      </div>
+      <p class="rdg-instruction">${esc(block.instruction)}</p>
+      ${qs.map((q) => rdgQuestionHTML(f, q)).join("")}
+      ${f.error ? `<p class="rdg-error">${esc(f.error)}</p>` : ""}
+    </div>`;
+}
+
+function rdgFooterHTML(f) {
+  const total = rdgTotal(f);
+  const last = f.blockIndex >= f.blocks.length - 1;
+  return `
+    <div class="rdg-foot">
+      <span class="rdg-foot-count mono" id="rdgFootCount">${rdgAnsweredCount(f)}/${total} answered</span>
+      <button class="rdg-foot-next" id="rdgFootNext">${last ? "Review Answers" : "Next →"}</button>
+    </div>`;
+}
+
+// Overview sheet - compact per-block dot grid (answered/flagged/unanswered),
+// tap a block to jump back to it. A sheet, not a permanent 20-circle grid
+// (design spec).
+function rdgOverviewSheetHTML(f) {
+  return `
+    <div class="help-overlay" id="rdgOverviewOverlay">
+      <div class="help-sheet fadeUp rdg-sheet">
+        <div class="eyebrow mono" style="margin:0 0 10px">RINGKASAN SOAL</div>
+        ${f.blocks.map((b, bi) => `
+          <button class="rdg-ov-block" data-rdg-jump="${bi}">
+            <div class="rdg-ov-block-head">
+              <span><b>Q${esc(b.range).replace("-", "–")}</b> ${esc(b.label)}</span>
+              <span class="mono rdg-ov-count">${b.questionIds.filter((id) => String(f.answers[id] || "").trim()).length}/${b.questionIds.length}</span>
+            </div>
+            <div class="rdg-dots">
+              ${b.questionIds.map((id) => `<span class="rdg-dot ${String(f.answers[id] || "").trim() ? "answered" : ""} ${f.flags[id] ? "flagged" : ""}">${rdgQuestionNumber(f, id)}</span>`).join("")}
+            </div>
+          </button>`).join("")}
+        <p class="rdg-ov-legend mono">⚑ ${rdgFlaggedCount(f)} ditandai</p>
+        <button class="btn-ghost full" id="rdgOverviewClose">Tutup</button>
+      </div>
+    </div>`;
+}
+
+// Review screen - the pre-submit step (design spec): answered/unanswered/
+// flagged counts, per-block status dots, tap to jump back, then submit.
+function rdgReviewHTML(f) {
+  const total = rdgTotal(f);
+  const answered = rdgAnsweredCount(f);
+  const flagged = rdgFlaggedCount(f);
+  return `
+    <div class="rdg-review">
+      <h1 class="fr rdg-review-title">Review Answers</h1>
+      <p class="rdg-review-sub">Periksa sebelum submit. Kamu bisa kembali dan ubah jawaban.</p>
+      ${f.timerExpired ? `<p class="rdg-error" style="margin:0 0 12px">Waktu habis — jawabanmu tetap tersimpan, cek lalu submit.</p>` : ""}
+      <div class="rdg-review-stats">
+        <div class="rdg-review-stat"><div class="rdg-review-stat-num fr" style="color:#8fbf9f">${answered}</div><div class="rdg-review-stat-label">Answered</div></div>
+        <div class="rdg-review-stat"><div class="rdg-review-stat-num fr" style="color:#e8b768">${total - answered}</div><div class="rdg-review-stat-label">Unanswered</div></div>
+        <div class="rdg-review-stat"><div class="rdg-review-stat-num fr" style="color:#c9564f">${flagged}</div><div class="rdg-review-stat-label">Flagged</div></div>
+      </div>
+      ${f.blocks.map((b, bi) => `
+        <button class="rdg-ov-block" data-rdg-jump="${bi}">
+          <div class="rdg-ov-block-head">
+            <span><b>Q${esc(b.range).replace("-", "–")}</b> ${esc(b.label)}</span>
+            <span class="mono rdg-ov-count">${b.questionIds.filter((id) => String(f.answers[id] || "").trim()).length}/${b.questionIds.length} dijawab</span>
+          </div>
+          <div class="rdg-dots">
+            ${b.questionIds.map((id) => `<span class="rdg-dot ${String(f.answers[id] || "").trim() ? "answered" : ""} ${f.flags[id] ? "flagged" : ""}">${rdgQuestionNumber(f, id)}</span>`).join("")}
+          </div>
+        </button>`).join("")}
+      ${f.error ? `<p class="rdg-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="rdg-foot">
+      <button class="btn-ghost" id="rdgReviewBack" style="flex:0 0 auto">← Kembali</button>
+      <button class="rdg-foot-next" id="rdgReviewSubmit">Submit jawaban</button>
+    </div>`;
+}
+
+// In-shell structured result (design spec: score, band RANGE + confidence -
+// never a point score - per-block strong/weak, Eleva note, collapsible
+// wrong-answer review). Replaces the Home-chrome completedResult card for
+// reading tests; the server-side reflection/Task 13 pipeline already ran.
+function rdgResultHTML(f) {
+  const r = f.result || {};
+  const a = r.assessment || null;
+  const cats = a?.categories?.breakdown || {};
+  const catRow = (c) => {
+    const b = cats[c];
+    return `<div class="rdg-result-cat"><span>${esc(rdgCategoryLabel(c))}</span><span class="mono">${b ? `${b.correct}/${b.total}` : ""}</span></div>`;
+  };
+  const strong = a?.categories?.strong || [];
+  const unstable = a?.categories?.unstable || [];
+  const wrong = r.wrong || [];
+  const note = r.mentorReply || a?.decision?.currentTarget || "";
+  return `
+    <div class="rdg-result">
+      <div class="eyebrow mono rdg-result-eyebrow">READING RESULT</div>
+      <div class="rdg-result-score fr">${r.score ?? "–"} / ${r.total ?? rdgTotal(f)}</div>
+      ${a && a.band ? `
+        <p class="rdg-result-band">Estimated Reading: <b>${a.band.rangeLow}–${a.band.rangeHigh}</b></p>
+        <p class="rdg-result-band-meta mono">Confidence: ${esc(a.confidence || "Low")} · ${a.totalQuestions} questions observed</p>` : ""}
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label" style="color:#8fbf9f">WHAT YOU DID WELL</div>
+        ${strong.length ? strong.map(catRow).join("") : `<p class="rdg-result-neutral">Belum ada kategori yang menonjol di attempt ini.</p>`}
+      </div>
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label" style="color:#c9564f">NEEDS WORK</div>
+        ${unstable.length ? unstable.map(catRow).join("") : `<p class="rdg-result-neutral">Tidak ada kategori yang jatuh di attempt ini.</p>`}
+      </div>
+      ${note ? `
+      <div class="rdg-result-note">
+        <div class="eyebrow mono" style="color:#e8a33d">YANG ELEVA LIHAT</div>
+        <p>${esc(note)}</p>
+        ${a?.decision?.nextTrial ? `<p class="rdg-result-next mono">Next: ${esc(a.decision.nextTrial)}</p>` : ""}
+      </div>` : ""}
+      ${wrong.length ? `
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label">PEMBAHASAN SOAL YANG SALAH</div>
+        ${wrong.map((w) => `
+          <details class="rdg-wrong">
+            <summary><span class="mono rdg-qnum">${rdgQuestionNumber(f, w.id) || ""}</span> ${esc(w.text.length > 80 ? w.text.slice(0, 80) + "…" : w.text)}</summary>
+            <div class="rdg-wrong-body">
+              <p class="mono">Jawabanmu: ${esc(w.yourAnswer || "-")} · Benar: ${esc(w.correctAnswer)}</p>
+              ${w.explanation ? `<p>${esc(w.explanation)}</p>` : ""}
+            </div>
+          </details>`).join("")}
+      </div>` : `<p class="rdg-result-neutral" style="text-align:center">Semua benar — mantap.</p>`}
+      <button class="btn-primary full" id="rdgExit" style="margin-top:16px">Selesai</button>
+    </div>`;
+}
+
+// Confirm sheets - same .help-overlay reuse as the listening diagnostic,
+// with the same z-index override need (see styles.css #rdg*Overlay).
+function rdgExitConfirmSheetHTML() {
+  return `
+    <div class="help-overlay" id="rdgExitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p>Keluar dari tes? Progres sesi ini tidak akan dinilai.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="rdgExitStay" style="flex:1">Lanjutkan tes</button>
+          <button class="btn-primary" id="rdgExitConfirm" style="flex:1">Keluar</button>
+        </div>
+      </div>
+    </div>`;
+}
+function rdgSubmitConfirmSheetHTML(f) {
+  const unanswered = rdgTotal(f) - rdgAnsweredCount(f);
+  return `
+    <div class="help-overlay" id="rdgSubmitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p>${unanswered} soal belum dijawab. Kamu masih bisa kembali dan melengkapinya.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="rdgSubmitBack" style="flex:1">Kembali cek</button>
+          <button class="btn-primary" id="rdgSubmitAnyway" style="flex:1">Submit anyway</button>
+        </div>
+      </div>
+    </div>`;
+}
+function rdgTimeUpSheetHTML() {
+  return `
+    <div class="help-overlay" id="rdgTimeUpOverlay">
+      <div class="help-sheet fadeUp">
+        <p><b>Time is up.</b> Jawabanmu tetap tersimpan — lanjut ke review lalu submit.</p>
+        <button class="btn-primary full" id="rdgTimeUpReview">Review & Submit</button>
+      </div>
+    </div>`;
+}
+
+// Full chrome bypass, same pattern as renderListeningDiagnosticTest. Both
+// tab panes render together (hidden via .rdg-hidden) so tab switches are
+// pure class toggles that keep each pane's scrollTop; after any re-render,
+// scroll positions are restored from scrollMem.
+function renderReadingTest() {
+  const f = readingTestFlow;
+  let inner;
+  if (f.step === "result") inner = rdgResultHTML(f);
+  else if (f.step === "review") inner = rdgReviewHTML(f);
+  else inner = `${rdgTopBarHTML(f)}${rdgTabsHTML(f)}${rdgPassagePaneHTML(f)}${rdgQuestionsPaneHTML(f)}${rdgFooterHTML(f)}`;
+  root.innerHTML = `
+    <div class="rdg-shell">
+      ${f.step === "review" ? rdgTopBarHTML(f) : ""}
+      ${inner}
+    </div>
+    ${f.overviewOpen ? rdgOverviewSheetHTML(f) : ""}
+    ${f.exitConfirmOpen ? rdgExitConfirmSheetHTML() : ""}
+    ${f.submitConfirmOpen ? rdgSubmitConfirmSheetHTML(f) : ""}
+    ${f.timeUpOpen ? rdgTimeUpSheetHTML() : ""}`;
+  wireReadingTestHandlers();
+  if (f.step === "active") {
+    const pp = document.getElementById("rdgPassagePane");
+    const qp = document.getElementById("rdgQuestionsPane");
+    if (pp) pp.scrollTop = f.scrollMem.passage;
+    if (qp) qp.scrollTop = f.scrollMem.questions;
+    if (!f.timerExpired) rdgStartCountdown();
+  }
+}
+
+function rdgUpdateFooterCount() {
+  const f = readingTestFlow;
+  if (!f) return;
+  const el = document.getElementById("rdgFootCount");
+  if (el) el.textContent = `${rdgAnsweredCount(f)}/${rdgTotal(f)} answered`;
+  const fill = document.getElementById("rdgProgressFill");
+  if (fill) fill.style.width = `${Math.round((rdgAnsweredCount(f) / rdgTotal(f)) * 100)}%`;
+}
+
+async function rdgDoSubmit() {
+  const f = readingTestFlow;
+  if (!f) return;
+  rdgStopCountdown();
+  f.submitConfirmOpen = false;
+  f.error = "";
+  root.innerHTML = spinnerHTML("Menilai jawaban...");
+  try {
+    const resp = await api("/api/practice-test/submit", { method: "POST", body: { questId: f.questId, answers: f.answers } });
+    questCtaState.set(f.questId, "completed");
+    // The structured result renders IN the shell (design spec) - do NOT set
+    // completedResult, that would repeat the same data as a Home card. The
+    // server already saved the reflection + Task 13 state; the exit button
+    // refetches /api/state so Home/META reflect it.
+    f.result = { score: resp.score, total: resp.total, wrong: resp.wrong || [], assessment: resp.assessment || null, mentorReply: resp.mentorReply || "" };
+    f.step = "result";
+  } catch (e) {
+    f.error = e.message;
+    f.step = "review";
+  }
+  renderDashboard();
+}
+
+function wireReadingTestHandlers() {
+  const f = readingTestFlow;
+  if (!f) return;
+
+  // Intro (inside normal chrome)
+  document.getElementById("rdgStart")?.addEventListener("click", () => {
+    f.step = "active";
+    renderDashboard();
+  });
+  document.getElementById("rdgCancel")?.addEventListener("click", () => {
+    // Same convention as ptCancel/lstnCancel: client state only, the open
+    // quest row stays open and never blocks anything.
+    readingTestFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+
+  // Top bar
+  document.getElementById("rdgBack")?.addEventListener("click", () => {
+    rdgSaveScroll();
+    f.exitConfirmOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("rdgExitStay")?.addEventListener("click", () => {
+    f.exitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("rdgExitConfirm")?.addEventListener("click", () => {
+    rdgStopCountdown();
+    readingTestFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+
+  // Tabs: pure class toggle - saves the outgoing pane's scrollTop, restores
+  // the incoming one's. NO re-render, so neither pane loses its position.
+  document.querySelectorAll("[data-rdg-tab]").forEach((btn) => btn.addEventListener("click", () => {
+    const tab = btn.dataset.rdgTab;
+    if (tab === f.activeTab) return;
+    rdgSaveScroll();
+    f.activeTab = tab;
+    document.querySelectorAll("[data-rdg-tab]").forEach((b) => b.classList.toggle("active", b === btn));
+    const pp = document.getElementById("rdgPassagePane");
+    const qp = document.getElementById("rdgQuestionsPane");
+    if (pp) { pp.classList.toggle("rdg-hidden", tab !== "passage"); pp.scrollTop = f.scrollMem.passage; }
+    if (qp) { qp.classList.toggle("rdg-hidden", tab !== "questions"); qp.scrollTop = f.scrollMem.questions; }
+  }));
+
+  // Answers: surgical updates only (the listening scroll-reset lesson) -
+  // mutate state, toggle .active in the tapped group, refresh counters.
+  document.querySelectorAll("[data-rdg-opt]").forEach((btn) => btn.addEventListener("click", () => {
+    const qid = btn.dataset.rdgOpt;
+    f.answers[qid] = btn.dataset.rdgValue;
+    document.querySelectorAll(`[data-rdg-opt="${qid}"]`).forEach((b) => b.classList.toggle("active", b === btn));
+    rdgUpdateFooterCount();
+  }));
+  document.querySelectorAll("[data-rdg-fill]").forEach((input) => input.addEventListener("input", (e) => {
+    f.answers[input.dataset.rdgFill] = e.target.value;
+    rdgUpdateFooterCount();
+  }));
+  document.querySelectorAll("[data-rdg-flag]").forEach((btn) => btn.addEventListener("click", () => {
+    const qid = btn.dataset.rdgFlag;
+    f.flags[qid] = !f.flags[qid];
+    btn.classList.toggle("flagged", !!f.flags[qid]);
+  }));
+
+  // Footer: next block (Questions scroll resets to top, Passage keeps its
+  // position) or Review on the last block.
+  document.getElementById("rdgFootNext")?.addEventListener("click", () => {
+    rdgSaveScroll();
+    if (f.blockIndex < f.blocks.length - 1) {
+      f.blockIndex += 1;
+      f.activeTab = "questions";
+      f.scrollMem.questions = 0;
+    } else {
+      f.step = "review";
+    }
+    renderDashboard();
+  });
+
+  // Overview sheet
+  document.getElementById("rdgOverviewBtn")?.addEventListener("click", () => {
+    rdgSaveScroll();
+    f.overviewOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("rdgOverviewClose")?.addEventListener("click", () => {
+    f.overviewOpen = false;
+    renderDashboard();
+  });
+  document.querySelectorAll("[data-rdg-jump]").forEach((btn) => btn.addEventListener("click", () => {
+    rdgSaveScroll();
+    f.blockIndex = Number(btn.dataset.rdgJump) || 0;
+    f.activeTab = "questions";
+    f.scrollMem.questions = 0;
+    f.overviewOpen = false;
+    f.step = "active";
+    renderDashboard();
+  }));
+
+  // Review + submit
+  document.getElementById("rdgReviewBack")?.addEventListener("click", () => {
+    f.step = "active";
+    f.activeTab = "questions";
+    renderDashboard();
+  });
+  document.getElementById("rdgReviewSubmit")?.addEventListener("click", () => {
+    if (rdgTotal(f) - rdgAnsweredCount(f) > 0) {
+      f.submitConfirmOpen = true;
+      renderDashboard();
+      return;
+    }
+    rdgDoSubmit();
+  });
+  document.getElementById("rdgSubmitBack")?.addEventListener("click", () => {
+    f.submitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("rdgSubmitAnyway")?.addEventListener("click", () => rdgDoSubmit());
+
+  // Timer expiry sheet - single path: review, never auto-submit.
+  document.getElementById("rdgTimeUpReview")?.addEventListener("click", () => {
+    f.timeUpOpen = false;
+    f.step = "review";
+    renderDashboard();
+  });
+
+  // Result exit: refetch state so Home/META reflect the saved reflection.
+  document.getElementById("rdgExit")?.addEventListener("click", async () => {
+    readingTestFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state").catch(() => appState);
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+}
+
+// ==== Video Quest (video-quiz) =====================================
+// Test-mode shell for the source-locked video assessment (LABORA design
+// handoff), cloned from the rdg* family's architecture: chrome bypass via
+// renderDashboard early-return, surgical answer updates, .help-overlay
+// sheets (with the same z-index override need, see styles.css #vq*Overlay).
+// One question per screen (design spec) instead of rdg's block panes.
+
+function vqQuestionCount(f) {
+  return f.questions ? f.questions.length : 15;
+}
+function vqAnswersFor(f, qid) {
+  return Array.isArray(f.answers[qid]) ? f.answers[qid] : [];
+}
+function vqAnsweredCount(f) {
+  return (f.questions || []).filter((q) => vqAnsweredCount.one(f, q.id)).length;
+}
+vqAnsweredCount.one = (f, qid) => vqAnswersFor(f, qid).length > 0;
+
+// Flow constructor from an open quest day. A quest whose videoQuizState
+// already carries a lock skips intro/pick entirely and lands on the locked
+// view (design spec: re-entry never re-validates, never allows a swap).
+function startVideoQuiz(day, origin) {
+  const quest = day.quest || {};
+  const vq = quest.videoQuiz || {};
+  const st = quest.videoQuizState || null;
+  videoQuizFlow = {
+    questId: day.id, origin: origin || "home",
+    topic: vq.topic || quest.title || "",
+    passThreshold: vq.passThreshold ?? 11,
+    estimatedMinutes: vq.estimatedMinutes ?? 25,
+    step: st?.lockedVideoUrl ? "locked" : "intro",
+    videoUrl: "", checking: false, checkError: "",
+    materi: null,
+    locked: st?.lockedVideoUrl ? { videoUrl: st.lockedVideoUrl, videoMeta: st.lockedVideoMeta || {}, videoId: st.lockedVideoId || null } : null,
+    lastResult: st?.lastResult || null,
+    attempt: st?.attempt || 1,
+    questions: null, index: 0, answers: {},
+    navOpen: false, sourceOpen: false, submitConfirmOpen: false, exitConfirmOpen: false,
+    result: null, error: "",
+  };
+}
+
+function vqVideoId(f) {
+  const source = f.locked || f.materi;
+  if (source?.videoId) return source.videoId;
+  const m = String(source?.videoUrl || f.videoUrl || "").match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+// The locked/candidate video card - thumbnail + title + external link (the
+// design shows a thumbnail with "Buka Video", never an embedded player;
+// closest existing precedent is the listening diagnostic's audio card).
+function vqVideoCardHTML(f, videoMeta, videoUrl) {
+  const vid = vqVideoId(f);
+  const mins = videoMeta?.durationSec ? Math.round(videoMeta.durationSec / 60) : null;
+  return `
+    <div class="vq-video-card">
+      <div class="vq-thumb">
+        ${vid ? `<img src="https://img.youtube.com/vi/${esc(vid)}/hqdefault.jpg" alt="" loading="lazy" />` : ""}
+        <span class="vq-thumb-play">▶</span>
+      </div>
+      <div class="vq-video-title">${esc(videoMeta?.title || "Video materi")}</div>
+      ${videoMeta?.channel ? `<div class="vq-video-meta">${esc(videoMeta.channel)}${mins ? ` · ±${mins} menit` : ""}</div>` : ""}
+      ${videoUrl ? `<a class="vq-video-link" href="${esc(videoUrl)}" target="_blank" rel="noopener noreferrer">Buka Video</a>` : ""}
+    </div>`;
+}
+
+// Intro - renders INSIDE the normal chrome, same as the rdg/lstn intros.
+function vqIntroHTML() {
+  const f = videoQuizFlow;
+  return `
+    <div class="rdg-intro fadeUp">
+      <div class="eyebrow mono" style="color:#FFC46E">META · LABORA</div>
+      <h1 class="fr rdg-intro-title">Video Quest</h1>
+      <p class="rdg-intro-subtitle">${esc(f.topic)}</p>
+      <div class="rdg-intro-stats">
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">15</div><div class="rdg-intro-stat-label">soal</div></div>
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">≥${f.passThreshold}</div><div class="rdg-intro-stat-label">buat lulus</div></div>
+        <div class="rdg-intro-stat"><div class="rdg-intro-stat-num fr">±${f.estimatedMinutes}</div><div class="rdg-intro-stat-label">menit</div></div>
+      </div>
+      <div class="rdg-intro-instr-label mono">CARA MAINNYA</div>
+      <div class="rdg-intro-qlist">
+        <div class="rdg-intro-qrow"><span class="mono rdg-intro-qrange">1</span><span>Cari satu video YouTube yang membahas topik ini</span></div>
+        <div class="rdg-intro-qrow"><span class="mono rdg-intro-qrange">2</span><span>Pelajari videonya — setelah assessment dimulai, video dikunci sampai lulus</span></div>
+        <div class="rdg-intro-qrow"><span class="mono rdg-intro-qrange">3</span><span>Jawab 15 soal dari isi video itu (${f.passThreshold}/15 buat lulus)</span></div>
+      </div>
+      <button class="btn-primary full rdg-intro-cta" id="vqStart">Mulai Quest</button>
+      <button class="btn-ghost full" id="vqCancel" style="margin-top:10px">← Batal</button>
+    </div>`;
+}
+
+function vqTopBarHTML(f, { lock = false, backId = "vqBack" } = {}) {
+  return `
+    <div class="vq-topbar">
+      ${lock
+        ? `<button class="vq-lock-btn" id="vqLockBtn" aria-label="Lihat materi terkunci">🔒</button>`
+        : `<button class="rdg-back" id="${backId}" aria-label="Kembali">‹</button>`}
+      <div class="vq-topbar-title">Assessment</div>
+      <span style="width:34px;flex:none"></span>
+    </div>`;
+}
+
+// "Pilih materi belajarmu" - URL input + Periksa Materi. A not-relevant
+// verdict keeps the input so the user can paste a different link.
+function vqPickHTML() {
+  const f = videoQuizFlow;
+  return `
+    <div class="vq-topbar">
+      <button class="rdg-back" id="vqPickBack" aria-label="Kembali">‹</button>
+      <div class="vq-topbar-title"></div>
+      <span style="width:34px;flex:none"></span>
+    </div>
+    <div class="vq-body">
+      <h1 class="fr vq-h1">Pilih materi belajarmu</h1>
+      <p class="vq-sub">Cari satu video YouTube yang membahas:</p>
+      <p class="vq-topic">${esc(f.topic)}</p>
+      <div class="eyebrow mono vq-field-label">LINK YOUTUBE</div>
+      <input type="url" class="vq-input" id="vqUrlInput" placeholder="Tempel link YouTube..." value="${esc(f.videoUrl)}" ${f.checking ? "disabled" : ""} inputmode="url" autocomplete="off" />
+      <div class="vq-note">Setelah assessment dimulai, video ini tidak dapat diganti sampai quest selesai.</div>
+      ${f.checkError ? `<p class="vq-error">${esc(f.checkError)}</p>` : ""}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-primary full" id="vqCheckBtn" ${f.checking ? "disabled" : ""}>${f.checking ? "Memeriksa materi..." : "Periksa Materi"}</button>
+    </div>`;
+}
+
+// "Materi siap" - relevance confirmed, one last chance to swap before the
+// lock. Starting the assessment here is what locks the source server-side.
+function vqReadyHTML() {
+  const f = videoQuizFlow;
+  return `
+    <div class="vq-topbar">
+      <button class="rdg-back" id="vqPickBack" aria-label="Kembali">‹</button>
+      <div class="vq-topbar-title"></div>
+      <span style="width:34px;flex:none"></span>
+    </div>
+    <div class="vq-body">
+      <h1 class="fr vq-h1">Materi siap</h1>
+      <p class="vq-sub vq-relevant">✓ Materi relevan dengan topik "${esc(f.topic)}"</p>
+      ${f.materi?.rationale ? `<p class="vq-rationale">${esc(f.materi.rationale)}</p>` : ""}
+      ${vqVideoCardHTML(f, f.materi?.videoMeta, f.videoUrl)}
+      <div class="vq-note">Setelah assessment dimulai, video ini dikunci — tidak bisa diganti sampai kamu lulus.</div>
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-primary full" id="vqBeginAssessment">Saya Sudah Belajar → Mulai Assessment</button>
+      <button class="btn-ghost full" id="vqSwap" style="margin-top:10px">Ganti Video</button>
+    </div>`;
+}
+
+// Source-locked landing: reachable on any re-entry while the quest is
+// locked, and via "Pelajari Lagi" after a fail. Same video every time.
+function vqLockedHTML() {
+  const f = videoQuizFlow;
+  const r = f.lastResult;
+  return `
+    <div class="vq-topbar">
+      <button class="rdg-back" id="vqLockedBack" aria-label="Kembali">‹</button>
+      <div class="vq-topbar-title"></div>
+      <span style="width:34px;flex:none"></span>
+    </div>
+    <div class="vq-body vq-center">
+      <div class="vq-lock-badge">🔒</div>
+      <h1 class="fr vq-h1" style="text-align:center">Materi dikunci untuk quest ini</h1>
+      <p class="vq-sub" style="text-align:center">Kamu akan menggunakan materi yang sama sampai lulus.</p>
+      ${vqVideoCardHTML(f, f.locked?.videoMeta, f.locked?.videoUrl)}
+      ${r && !r.passed && (r.weakConcepts || []).length ? `
+        <div class="eyebrow mono vq-chips-label" style="color:var(--rust)">FOKUS ULANG</div>
+        <div class="chip-row vq-chip-row">${r.weakConcepts.map((c) => `<span class="vq-chip vq-chip-weak">${esc(c)}</span>`).join("")}</div>` : ""}
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+      <p class="vq-muted">Materi bermasalah?</p>
+    </div>
+    <div class="vq-foot-single">
+      ${r && !r.passed
+        ? `<button class="btn-primary full" id="vqRetry">↻ Ulang Assessment</button>`
+        : `<button class="btn-primary full" id="vqResume">Mulai Assessment</button>`}
+    </div>`;
+}
+
+// One question per screen (design spec). format "single" renders radio-
+// style rows; "multi" (exactly one per set) renders checkbox-style rows
+// with a "pilih semua yang benar" helper - the app's first multi-select.
+function vqAssessmentHTML() {
+  const f = videoQuizFlow;
+  const total = vqQuestionCount(f);
+  const q = f.questions[f.index];
+  const chosen = vqAnswersFor(f, q.id);
+  const multi = q.format === "multi";
+  return `
+    ${vqTopBarHTML(f, { lock: true })}
+    <div class="vq-progress-head">
+      <button class="vq-progress-label" id="vqNavBtn">${esc(f.topic)} · <b>Soal ${f.index + 1} dari ${total}</b> ▾</button>
+      <div class="rdg-progress-track vq-progress-track"><div class="rdg-progress-fill" style="width:${Math.round(((f.index + 1) / total) * 100)}%"></div></div>
+    </div>
+    <div class="vq-body" id="vqQuestionPane">
+      <p class="vq-question-text">${esc(q.prompt)}</p>
+      ${multi ? `<p class="vq-multi-hint mono">PILIH SEMUA JAWABAN YANG BENAR</p>` : ""}
+      <div class="vq-options">
+        ${q.options.map((o) => `
+          <button class="vq-option ${chosen.includes(o.id) ? "active" : ""}" data-vq-opt="${esc(q.id)}" data-vq-value="${esc(o.id)}" data-vq-multi="${multi ? "1" : ""}">
+            <span class="vq-indicator ${multi ? "vq-indicator-box" : ""}"></span>
+            <span class="vq-option-text">${esc(o.text)}</span>
+          </button>`).join("")}
+      </div>
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="vq-foot">
+      <button class="btn-ghost" id="vqPrev" style="flex:0 0 auto" ${f.index === 0 ? "disabled" : ""}>←</button>
+      <button class="rdg-foot-next" id="vqNext">${f.index >= total - 1 ? "Review Jawaban" : "Lanjutkan"}</button>
+    </div>`;
+}
+
+// Question navigator sheet - the rdg overview idea, flattened to one
+// 15-dot grid (no blocks here).
+function vqNavigatorSheetHTML(f) {
+  return `
+    <div class="help-overlay" id="vqNavOverlay">
+      <div class="help-sheet fadeUp rdg-sheet">
+        <div class="eyebrow mono" style="margin:0 0 10px">NAVIGASI SOAL</div>
+        <div class="vq-grid">
+          ${f.questions.map((q, i) => `<button class="vq-cell ${vqAnsweredCount.one(f, q.id) ? "answered" : ""} ${i === f.index ? "current" : ""}" data-vq-jump="${i}">${i + 1}</button>`).join("")}
+        </div>
+        <p class="rdg-ov-legend mono">${vqAnsweredCount(f)}/${vqQuestionCount(f)} dijawab</p>
+        <button class="btn-ghost full" id="vqNavClose">Tutup</button>
+      </div>
+    </div>`;
+}
+
+// Source-locked bottom sheet: the lock icon's target during the assessment.
+function vqSourceSheetHTML(f) {
+  return `
+    <div class="help-overlay" id="vqSourceOverlay">
+      <div class="help-sheet fadeUp rdg-sheet">
+        <div class="eyebrow mono" style="margin:0 0 10px">🔒 MATERI TERKUNCI</div>
+        <p class="vq-sub" style="margin:0 0 12px">Kamu akan menggunakan materi yang sama sampai lulus.</p>
+        ${vqVideoCardHTML(f, f.locked?.videoMeta, f.locked?.videoUrl)}
+        <button class="btn-ghost full" id="vqSourceClose" style="margin-top:12px">Kembali ke soal</button>
+      </div>
+    </div>`;
+}
+
+function vqExitConfirmSheetHTML() {
+  return `
+    <div class="help-overlay" id="vqExitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p>Keluar dari assessment? Jawaban sesi ini tidak tersimpan, tapi materimu tetap terkunci untuk quest ini.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="vqExitStay" style="flex:1">Lanjutkan</button>
+          <button class="btn-primary" id="vqExitConfirm" style="flex:1">Keluar</button>
+        </div>
+      </div>
+    </div>`;
+}
+function vqSubmitConfirmSheetHTML() {
+  return `
+    <div class="help-overlay" id="vqSubmitConfirmOverlay">
+      <div class="help-sheet fadeUp">
+        <p><b>Kirim jawaban?</b> Setelah dikirim, jawaban tidak dapat diubah.</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="vqSubmitBack" style="flex:1">Kembali cek</button>
+          <button class="btn-primary" id="vqSubmitConfirm" style="flex:1">Kirim Jawaban</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// "Review Jawaban" - answered-status grid, submit gated on 15/15 (design
+// spec: no partial submits, unlike rdg's "Submit anyway").
+function vqReviewHTML() {
+  const f = videoQuizFlow;
+  const total = vqQuestionCount(f);
+  const answered = vqAnsweredCount(f);
+  return `
+    ${vqTopBarHTML(f, { lock: true })}
+    <div class="vq-body">
+      <h1 class="fr vq-h1">Review Jawaban</h1>
+      <p class="vq-sub">${answered} dari ${total} soal telah dijawab.</p>
+      <div class="vq-grid vq-grid-review">
+        ${f.questions.map((q, i) => `<button class="vq-cell ${vqAnsweredCount.one(f, q.id) ? "answered" : ""}" data-vq-jump="${i}">${i + 1}</button>`).join("")}
+      </div>
+      <div class="vq-note">Setelah dikirim, jawaban tidak dapat diubah.</div>
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-primary full" id="vqSubmit" ${answered < total ? "disabled" : ""}>Kirim Jawaban</button>
+      <button class="btn-ghost full" id="vqReviewBack" style="margin-top:10px">← Kembali ke soal</button>
+    </div>`;
+}
+
+// Result: pass (score, strong/weak chips, pembahasan, finish) or fail
+// (BELUM LULUS, FOKUS ULANG chips, Pelajari Lagi / Ulang Assessment).
+function vqResultHTML() {
+  const f = videoQuizFlow;
+  const r = f.result;
+  const chips = (list, cls) => `<div class="chip-row vq-chip-row">${list.map((c) => `<span class="vq-chip ${cls}">${esc(c)}</span>`).join("")}</div>`;
+  if (r.passed) {
+    return `
+      <div class="vq-body vq-result">
+        <div class="vq-result-score"><span class="fr vq-score-big" style="color:var(--growth)">${r.score}</span><span class="fr vq-score-total"> / ${r.total}</span></div>
+        <div class="eyebrow mono vq-verdict" style="color:var(--growth)">LULUS</div>
+        ${r.mentorReply ? `<p class="vq-sub">${esc(r.mentorReply)}</p>` : `<p class="vq-sub">Kamu membuktikan pemahamanmu dari materi yang kamu pilih sendiri.</p>`}
+        ${(r.strongConcepts || []).length ? `<div class="eyebrow mono vq-chips-label" style="color:var(--growth)">KONSEP KUAT</div>${chips(r.strongConcepts, "vq-chip-strong")}` : ""}
+        ${(r.weakConcepts || []).length ? `<div class="eyebrow mono vq-chips-label" style="color:var(--rust)">MASIH BISA DIPERKUAT</div>${chips(r.weakConcepts, "vq-chip-weak")}` : ""}
+      </div>
+      <div class="vq-foot-single">
+        <button class="btn-ghost full" id="vqPembahasan">Lihat Pembahasan</button>
+        <button class="btn-primary full" id="vqFinish" style="margin-top:10px">Selesaikan Quest</button>
+      </div>`;
+  }
+  return `
+    <div class="vq-body vq-result">
+      <div class="vq-result-score"><span class="fr vq-score-big" style="color:var(--rust)">${r.score}</span><span class="fr vq-score-total"> / ${r.total}</span></div>
+      <div class="eyebrow mono vq-verdict" style="color:var(--rust)">BELUM LULUS</div>
+      <p class="vq-sub">Kamu sudah dekat. Perkuat beberapa konsep sebelum mencoba lagi.</p>
+      ${(r.weakConcepts || []).length ? `<div class="eyebrow mono vq-chips-label" style="color:var(--rust)">FOKUS ULANG</div>${chips(r.weakConcepts, "vq-chip-weak")}` : ""}
+      ${f.error ? `<p class="vq-error">${esc(f.error)}</p>` : ""}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-ghost full" id="vqStudyAgain">▶ Pelajari Lagi</button>
+      <button class="btn-primary full" id="vqRetry" style="margin-top:10px">↻ Ulang Assessment</button>
+    </div>`;
+}
+
+// Pembahasan (pass only): per-question review from the submit response -
+// same <details> treatment as rdg's wrong-answer review, but covering all
+// 15 (correct ones collapsed too, the design's full answer review).
+function vqPembahasanHTML() {
+  const f = videoQuizFlow;
+  const review = f.result?.review || [];
+  const optText = (q, ids) => (ids || []).map((id) => {
+    const o = (q.options || []).find((x) => x.id === id);
+    return o ? o.text : id;
+  }).join(" · ") || "-";
+  return `
+    ${vqTopBarHTML(f, { backId: "vqPembahasanBack" })}
+    <div class="vq-body">
+      <h1 class="fr vq-h1">Pembahasan</h1>
+      <p class="vq-sub">${esc(f.topic)} · ${f.result.score}/${f.result.total}</p>
+      ${review.map((w, i) => `
+        <details class="rdg-wrong ${w.isCorrect ? "vq-correct" : ""}">
+          <summary><span class="mono rdg-qnum" style="${w.isCorrect ? "color:var(--growth)" : "color:var(--rust)"}">${i + 1}</span> ${esc(w.prompt.length > 80 ? w.prompt.slice(0, 80) + "…" : w.prompt)}</summary>
+          <div class="rdg-wrong-body">
+            <p class="mono">Jawabanmu: ${esc(optText(w, w.yourAnswer))}</p>
+            <p class="mono">Benar: ${esc(optText(w, w.correct))}</p>
+            ${w.explanation ? `<p>${esc(w.explanation)}</p>` : ""}
+          </div>
+        </details>`).join("")}
+    </div>
+    <div class="vq-foot-single">
+      <button class="btn-primary full" id="vqFinish">Selesaikan Quest</button>
+    </div>`;
+}
+
+// Full chrome bypass, same pattern as renderReadingTest.
+function renderVideoQuiz() {
+  const f = videoQuizFlow;
+  let inner;
+  if (f.step === "pick") inner = vqPickHTML();
+  else if (f.step === "ready") inner = vqReadyHTML();
+  else if (f.step === "locked") inner = vqLockedHTML();
+  else if (f.step === "review") inner = vqReviewHTML();
+  else if (f.step === "result") inner = vqResultHTML();
+  else if (f.step === "pembahasan") inner = vqPembahasanHTML();
+  else inner = vqAssessmentHTML();
+  root.innerHTML = `
+    <div class="rdg-shell vq-shell">${inner}</div>
+    ${f.navOpen ? vqNavigatorSheetHTML(f) : ""}
+    ${f.sourceOpen ? vqSourceSheetHTML(f) : ""}
+    ${f.submitConfirmOpen ? vqSubmitConfirmSheetHTML() : ""}
+    ${f.exitConfirmOpen ? vqExitConfirmSheetHTML() : ""}`;
+  wireVideoQuizHandlers();
+}
+
+// "Periksa Materi": server fetches the transcript + judges relevance. A
+// not-relevant verdict keeps the pick step (rationale shown, input kept).
+async function vqDoValidate() {
+  const f = videoQuizFlow;
+  if (!f || f.checking) return;
+  const url = String(document.getElementById("vqUrlInput")?.value || "").trim();
+  f.videoUrl = url;
+  if (!url) {
+    f.checkError = "Tempel link video YouTube dulu.";
+    renderDashboard();
+    return;
+  }
+  f.checking = true;
+  f.checkError = "";
+  renderDashboard();
+  try {
+    const resp = await api("/api/video-quiz/validate", { method: "POST", body: { questId: f.questId, videoUrl: url } });
+    f.checking = false;
+    if (!resp.relevant) {
+      f.checkError = resp.rationale || `Video ini belum membahas "${f.topic}". Coba video lain.`;
+    } else {
+      f.materi = { videoMeta: resp.videoMeta, videoId: resp.videoMeta?.videoId || null, rationale: resp.rationale || "" };
+      f.step = "ready";
+    }
+  } catch (e) {
+    f.checking = false;
+    f.checkError = e.message;
+  }
+  renderDashboard();
+}
+
+// /start: FIRST START locks the candidate video server-side; RESUME returns
+// the same set idempotently; retry=true regenerates from the same locked
+// transcript ("Ulang Assessment").
+async function vqDoStart(retry) {
+  const f = videoQuizFlow;
+  if (!f) return;
+  f.error = "";
+  root.innerHTML = spinnerHTML(retry ? "Menyusun set soal baru dari materimu..." : "Menyusun soal dari materimu...");
+  try {
+    const resp = await api("/api/video-quiz/start", { method: "POST", body: { questId: f.questId, ...(retry ? { retry: true } : {}) } });
+    f.locked = resp.locked;
+    f.attempt = resp.attempt;
+    f.passThreshold = resp.passThreshold ?? f.passThreshold;
+    f.questions = resp.questions;
+    f.index = 0;
+    f.answers = {};
+    f.result = null;
+    f.step = "assessment";
+  } catch (e) {
+    f.error = e.message;
+    // A failed FIRST start leaves the video unlocked server-side - stay
+    // where the user was so they can retry or swap.
+    if (f.step !== "locked" && f.step !== "result") f.step = f.materi ? "ready" : "pick";
+  }
+  renderDashboard();
+}
+
+async function vqDoSubmit() {
+  const f = videoQuizFlow;
+  if (!f) return;
+  f.submitConfirmOpen = false;
+  f.error = "";
+  root.innerHTML = spinnerHTML("Menilai jawaban...");
+  try {
+    const resp = await api("/api/video-quiz/submit", { method: "POST", body: { questId: f.questId, answers: f.answers } });
+    f.result = resp;
+    f.lastResult = { score: resp.score, total: resp.total, passed: resp.passed, strongConcepts: resp.strongConcepts, weakConcepts: resp.weakConcepts };
+    if (resp.passed) questCtaState.set(f.questId, "completed");
+    f.step = "result";
+  } catch (e) {
+    f.error = e.message;
+    f.step = "review";
+  }
+  renderDashboard();
+}
+
+function wireVideoQuizHandlers() {
+  const f = videoQuizFlow;
+  if (!f) return;
+
+  // Intro (inside normal chrome)
+  document.getElementById("vqStart")?.addEventListener("click", () => {
+    f.step = f.locked ? "locked" : "pick";
+    renderDashboard();
+  });
+  document.getElementById("vqCancel")?.addEventListener("click", () => {
+    videoQuizFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+
+  // Pick / ready / locked navigation. Backing out is client-state only -
+  // the open quest row stays open (same convention as rdgCancel).
+  document.getElementById("vqPickBack")?.addEventListener("click", () => {
+    if (f.step === "ready") { f.step = "pick"; renderDashboard(); return; }
+    f.step = "intro";
+    renderDashboard();
+  });
+  document.getElementById("vqLockedBack")?.addEventListener("click", () => {
+    videoQuizFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+  document.getElementById("vqCheckBtn")?.addEventListener("click", () => vqDoValidate());
+  document.getElementById("vqUrlInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") vqDoValidate();
+  });
+  document.getElementById("vqSwap")?.addEventListener("click", () => {
+    f.materi = null;
+    f.step = "pick";
+    renderDashboard();
+  });
+  document.getElementById("vqBeginAssessment")?.addEventListener("click", () => vqDoStart(false));
+  document.getElementById("vqResume")?.addEventListener("click", () => vqDoStart(false));
+  document.getElementById("vqRetry")?.addEventListener("click", () => vqDoStart(true));
+
+  // Assessment top bar: back = exit confirm, lock = source sheet.
+  document.getElementById("vqBack")?.addEventListener("click", () => {
+    f.exitConfirmOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqExitStay")?.addEventListener("click", () => {
+    f.exitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("vqExitConfirm")?.addEventListener("click", () => {
+    videoQuizFlow = null;
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+  document.getElementById("vqLockBtn")?.addEventListener("click", () => {
+    f.sourceOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqSourceClose")?.addEventListener("click", () => {
+    f.sourceOpen = false;
+    renderDashboard();
+  });
+
+  // Answers: surgical updates only (the rdg scroll lesson). Single-select
+  // replaces the choice; the multi question toggles membership.
+  document.querySelectorAll("[data-vq-opt]").forEach((btn) => btn.addEventListener("click", () => {
+    const qid = btn.dataset.vqOpt;
+    const value = btn.dataset.vqValue;
+    if (btn.dataset.vqMulti) {
+      const current = vqAnswersFor(f, qid);
+      f.answers[qid] = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+      btn.classList.toggle("active", f.answers[qid].includes(value));
+    } else {
+      f.answers[qid] = [value];
+      document.querySelectorAll(`[data-vq-opt="${qid}"]`).forEach((b) => b.classList.toggle("active", b === btn));
+    }
+  }));
+
+  // Footer: prev/next; last question's next goes to Review.
+  document.getElementById("vqPrev")?.addEventListener("click", () => {
+    if (f.index > 0) { f.index -= 1; renderDashboard(); }
+  });
+  document.getElementById("vqNext")?.addEventListener("click", () => {
+    if (f.index < vqQuestionCount(f) - 1) f.index += 1;
+    else f.step = "review";
+    renderDashboard();
+  });
+
+  // Navigator sheet + jump cells (also on the Review grid).
+  document.getElementById("vqNavBtn")?.addEventListener("click", () => {
+    f.navOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqNavClose")?.addEventListener("click", () => {
+    f.navOpen = false;
+    renderDashboard();
+  });
+  document.querySelectorAll("[data-vq-jump]").forEach((btn) => btn.addEventListener("click", () => {
+    f.index = Number(btn.dataset.vqJump) || 0;
+    f.navOpen = false;
+    f.step = "assessment";
+    renderDashboard();
+  }));
+
+  // Review + submit (gated on 15/15 via the disabled attribute).
+  document.getElementById("vqReviewBack")?.addEventListener("click", () => {
+    f.step = "assessment";
+    renderDashboard();
+  });
+  document.getElementById("vqSubmit")?.addEventListener("click", () => {
+    f.submitConfirmOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqSubmitBack")?.addEventListener("click", () => {
+    f.submitConfirmOpen = false;
+    renderDashboard();
+  });
+  document.getElementById("vqSubmitConfirm")?.addEventListener("click", () => vqDoSubmit());
+
+  // Result paths.
+  document.getElementById("vqStudyAgain")?.addEventListener("click", () => {
+    f.step = "locked";
+    renderDashboard();
+  });
+  document.getElementById("vqPembahasan")?.addEventListener("click", () => {
+    f.step = "pembahasan";
+    renderDashboard();
+  });
+  document.getElementById("vqPembahasanBack")?.addEventListener("click", () => {
+    f.step = "result";
+    renderDashboard();
+  });
+  document.getElementById("vqFinish")?.addEventListener("click", async () => {
+    videoQuizFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state").catch(() => appState);
+    activeScreen = f.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
+}
+
 // Task 9: score + per-wrong-answer explanation, folded into the same
 // completedResultCardHTML acknowledgment used for every other quest type -
 // same "Lanjut" dismiss/refetch flow, no separate results screen to build.
@@ -4192,6 +5703,10 @@ function questCategoryIconSVG(quest, size, color) {
       return `<svg ${common}><path d="M22 2L11 13"></path><path d="M22 2l-7 20-4-9-9-4z"></path></svg>`;
     case "nutrition-log":
       return `<svg ${common}><path d="M6 2v6a2 2 0 0 0 4 0V2M7 2v6" stroke-linecap="round"></path><line x1="7" y1="8" x2="7" y2="22"></line><path d="M17 2v9c0 1.5-1 2-1 2v9" stroke-linecap="round"></path></svg>`;
+    case "video-quiz":
+      return `<svg ${common}><rect x="2.5" y="5" width="19" height="14" rx="2"></rect><path d="M10 9.5l5 2.5-5 2.5z" stroke-linejoin="round"></path></svg>`;
+    case "multi-domain":
+      return `<svg ${common}><path d="M12 20s-6-3.8-8.5-8A5 5 0 0 1 12 6a5 5 0 0 1 8.5 6c-2.5 4.2-8.5 8-8.5 8z"></path><path d="M9 11h6M12 8v6" stroke-linecap="round"></path></svg>`;
     case "reflective":
     default:
       return `<svg ${common}><circle cx="12" cy="12" r="9"></circle><path d="M15 9l-2 5-5 2 2-5z"></path></svg>`;
@@ -4218,6 +5733,11 @@ function deriveDoDChecklist(quest) {
     items.push("Lengkapi detail lamaran dan submit");
   } else if (quest.completionType === "nutrition-log") {
     items.push("Catat semua makan hari ini sampai target tercapai");
+  } else if (quest.completionType === "video-quiz") {
+    items.push("Pilih & kunci satu video YouTube yang relevan dengan topiknya");
+    items.push(`Jawab 15 soal dari materi video itu (lulus ≥ ${quest.videoQuiz?.passThreshold ?? 11}/15)`);
+  } else if (quest.completionType === "multi-domain") {
+    items.push("2 area utama · Recovery + Nutrition");
   }
   if (!items.length) items.push(quest.description);
   return items;
@@ -4253,6 +5773,8 @@ function questHubCardsHTML(quests) {
         // before the Home redesign, just relocated to the compact card.
         const summary = q.quest.completionType === "nutrition-log" && q.quest.progressive
           ? nutritionProgressLabel(q.quest.progressive)
+          : q.quest.completionType === "multi-domain"
+          ? mdqFeatureLabelJoin(q.quest, false)
           : (q.quest.description || "").split(/(?<=[.!?])\s/)[0];
         return `
         <button class="qhub-card ${i === activeIdx ? "selected" : ""}" data-qhub-idx="${i}">
@@ -4275,13 +5797,18 @@ function questHubCardsHTML(quests) {
 // nothing about quest completion itself changes, only what feeds the
 // button's label/disabled state is new.
 // SOMA Training feedback brief (20 Agustus), item 3: this eyebrow used to be
-// built inline here only - every other Movement screen rolled its own
-// separate/inconsistent header (or none at all). Extracted so Preview/Pre-
-// Start/Active Session/Evidence/Submitted all render the exact same string,
-// with a chain-badge branch (quest.chain, set by the Recovery->Nutrition->
-// Training chain feature) taking priority when present.
+// built inline (questDetailPanelHTML only) with a separate, independently-
+// added "Body: Training" SOMA sub-label and multi-domain feature suffix -
+// every other Movement screen rolled its own separate/inconsistent header
+// (or none at all). Extracted so questDetailPanelHTML/Preview/Pre-Start/
+// Active Session/Evidence/Submitted all render the exact same string,
+// keeping the multi-domain suffix and Training sub-label intact, with a
+// chain-badge branch (quest.chain, set by the Recovery->Nutrition->Training
+// chain feature) taking priority over all of it when present.
 function questEyebrowHTML(quest) {
-  const base = `QUEST HARI INI${quest.statFocus ? " · " + esc(statLabel(quest.statFocus)).toUpperCase() : ""}`;
+  const isMultiDomain = quest.completionType === "multi-domain";
+  const somaSubLabel = quest.primaryFeature === "MOVEMENT" ? "Training" : "";
+  const base = `QUEST HARI INI${quest.statFocus ? " · " + esc(statLabel(quest.statFocus)).toUpperCase() + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(quest, true)) : ""}`;
   const text = quest.chain ? `BODY · ${esc(quest.chain.label).toUpperCase()} · Langkah ${quest.chain.step}/${quest.chain.total}` : base;
   return `<div class="qhub-eyebrow mono">${text}</div>`;
 }
@@ -4296,8 +5823,9 @@ function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
       <h2 class="fr qhub-detail-title">${esc(q.quest.title)}</h2>
       <p class="qhub-detail-desc">${esc(q.quest.description)}</p>
       ${q.quest.completionType === "nutrition-log" && q.quest.progressive ? `<p class="qhub-target mono" style="color:var(--qh-gold)">${esc(nutritionProgressLabel(q.quest.progressive))}</p>` : ""}
+      ${mdqHomeInfoRowHTML(q.quest, goalLabel)}
       <div class="qhub-dod-label mono">SELESAI KETIKA</div>
-      <ul class="qhub-dod-list">${dod.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>
+      ${mdqHomeChecklistHTML(q.quest, dod)}
       <div class="qhub-detail-foot">
         <span class="qhub-duration mono">±30 menit</span>
         <button class="btn-primary" data-reflect-id="${q.id}" ${ctaDisabled ? "disabled" : ""}>${esc(ctaLabel)}</button>
@@ -4406,6 +5934,7 @@ function completedResultCardHTML(r) {
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
       ${r.structuredData?.kind === "gym-session" ? gymSessionEvalHTML(r.structuredData.evaluation) : ""}
       ${r.jobApplication ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(jobApplicationSummary(r.jobApplication))}</div>` : ""}
+      ${r.multiDomainSummary ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">Recovery ✓ / Nutrition ✓</div>` : ""}
       ${r.practiceTest ? practiceTestResultHTML(r.practiceTest) : ""}
       ${r.jobMatch ? jobMatchResultHTML(r.jobMatch) : ""}
       ${r.mentorReply ? `<p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>` : ""}
@@ -4719,6 +6248,7 @@ function metaRealmToolsHTML(realm, s) {
   }
   return [
     realmProgressCardHTML("#FFC46E", "labora", 22, "Job Match", `${counts.labora} sesi bulan ini`, metaSessionPct(counts.labora), `data-meta-tool="job-match"`),
+    realmProgressCardHTML("#FFC46E", "labora", 22, "Video Quest", `Belajar dari video pilihanmu · ${counts.labora} sesi bulan ini`, metaSessionPct(counts.labora), `data-meta-tool="video-quest"`),
     `<div class="meta-realm-card meta-realm-card-info" style="border:1px solid #FFC46E44">
       ${realmIconSVG("labora", 22, "#FFC46E")}
       <div class="meta-realm-card-content">
@@ -4764,6 +6294,16 @@ function metaRealmDetailHTML(realm, s) {
           </div>
         </div>
         <button class="btn-ghost" id="metaBodyCancel">← Batal</button>
+      </div>` : ""}
+      ${metaVideoQuestPicking ? `
+      <div class="quest-card fadeUp" style="margin-top:16px">
+        <div class="field">
+          <label>Topik apa yang mau kamu pelajari?</label>
+          <p style="color:var(--muted);font-size:13px;margin:6px 0 8px">Kamu akan cari satu video YouTube tentang topik ini, lalu diuji 15 soal dari materi video itu.</p>
+          <input type="text" class="meta-goal-add-input" id="metaVideoQuestTopic" placeholder="Mis. Data Entry Fundamentals" maxlength="160" style="width:100%" />
+        </div>
+        <button class="btn-primary full" id="metaVideoQuestStart">Mulai Video Quest</button>
+        <button class="btn-ghost" id="metaVideoQuestCancel" style="margin-top:10px">← Batal</button>
       </div>` : ""}
       ${metaSomaConfirm ? `
       <div class="quest-card fadeUp" style="margin-top:16px">
@@ -5794,6 +7334,16 @@ function renderDashboard() {
   if (listeningDiagnosticFlow?.step === "active" || listeningDiagnosticFlow?.step === "submitted") {
     return renderListeningDiagnosticTest();
   }
+  // Round 42: the Reading Half Diagnostic gets the same chrome bypass -
+  // every step except "intro" (which renders inside the normal chrome
+  // below, like the listening intro).
+  if (readingTestFlow && readingTestFlow.step !== "intro") {
+    return renderReadingTest();
+  }
+  // Video Quest: same chrome bypass for every step except "intro".
+  if (videoQuizFlow && videoQuizFlow.step !== "intro") {
+    return renderVideoQuiz();
+  }
   // BODY · MOVEMENT execution flow: its own state machine, own shell (no
   // bottom tab bar, minimal header), same "bypass renderDashboard's normal
   // assembly entirely" pattern as the listening diagnostic's test mode
@@ -6013,10 +7563,13 @@ function renderDashboard() {
   // treatment as artifactsSheetHTML below).
   const homeBodyHTML = completedResult ? completedResultCardHTML(completedResult)
     : listeningDiagnosticFlow ? listeningDiagnosticIntroHTML() // only reached for step==="intro" - "active"/"submitted" are already intercepted at the top of this function
+    : readingTestFlow ? readingTestIntroHTML() // same: only "intro" reaches here
+    : videoQuizFlow ? vqIntroHTML() // same: only "intro" reaches here
     : practiceTestFlow ? practiceTestFlowHTML()
     : jobMatchFlow ? jobMatchFlowHTML()
     : jobApplicationFlow ? jobApplicationFlowHTML()
     : nutritionFlow ? nutritionFlowHTML()
+    : questHubFlow ? questHubFlowHTML()
     : reflectOpen && targetDay ? questDetailPanelHTML(targetDay, goalLabel(targetDay.goalIndex), questCtaLabel(targetDay.quest, targetDay.id), false) + reflectFormHTML
     : !homeQuests.length ? `<div class="quest-card">${spinnerHTML("AI sedang menyusun quest...")}</div>`
     : `
@@ -6091,14 +7644,22 @@ function renderDashboard() {
       const pts = quest.practiceTestSchema || {};
       const kind = pts.kind || "reading";
       const track = pts.track || "academic";
-      practiceTestFlow = { questId: id, kind, track, answers: {} };
+      practiceTestFlow = { questId: id, kind, track, answers: {}, origin: "home" };
       root.innerHTML = spinnerHTML("Menyusun soal...");
       try {
         const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: id, kind, track } });
-        practiceTestFlow.payload = resp;
-        practiceTestFlow.plays = 0;
-        practiceTestFlow.step = "test";
-        practiceTestFlow.error = "";
+        // Round 42: every reading payload (sprint AND drill) opens in the
+        // dedicated test-mode shell; the old flat quiz card only remains for
+        // the unreachable listening kind.
+        if (kind === "reading") {
+          startReadingTest(id, track, resp, "home");
+          practiceTestFlow = null;
+        } else {
+          practiceTestFlow.payload = resp;
+          practiceTestFlow.plays = 0;
+          practiceTestFlow.step = "test";
+          practiceTestFlow.error = "";
+        }
       } catch (e) {
         // Rare (generatePracticeTest already falls back to static content on
         // any AI failure - this only fires on a real server/network error).
@@ -6106,6 +7667,22 @@ function renderDashboard() {
         practiceTestFlow.step = "error";
         practiceTestFlow.error = e.message;
       }
+      renderDashboard();
+      return;
+    }
+    // Video Quest: same "own flow, not reflectOpen" pattern. One fresh
+    // /api/state refresh first (the MOVEMENT staleness lesson) - the lock
+    // in quest.videoQuizState may have been created on another tab/device,
+    // and re-entry must land on the locked view, never back on pick.
+    if (quest?.completionType === "video-quiz") {
+      root.innerHTML = spinnerHTML("Memuat quest...");
+      appState = await api("/api/state").catch(() => appState);
+      const fresh = (appState.openQuests || []).find((q) => q.id === id);
+      if (!fresh) {
+        renderDashboard();
+        return;
+      }
+      startVideoQuiz(fresh, "home");
       renderDashboard();
       return;
     }
@@ -6172,6 +7749,18 @@ function renderDashboard() {
       renderDashboard();
       return;
     }
+    // Multi-Domain Quest Hub: "Mulai Quest" always opens the Hub overview -
+    // never jumps straight into Recovery or Nutrition, per the handoff's
+    // explicit rule (the Hub is the only place quest-level status lives).
+    // Keyed on completionType (not primaryFeature, unlike the MOVEMENT
+    // check just above) - this quest's primaryFeature is "RECOVERY", never
+    // the literal string "MOVEMENT", so the two checks can never collide
+    // regardless of which runs first.
+    if (quest?.completionType === "multi-domain") {
+      questHubFlow = { questId: id, view: "hub", error: "", saving: false, completing: false };
+      renderDashboard();
+      return;
+    }
     beginStructuredOrReflectiveFlow(id, quest);
     renderDashboard();
   }));
@@ -6188,6 +7777,16 @@ function renderDashboard() {
   document.querySelectorAll("[data-meta-tool]").forEach((b) => b.addEventListener("click", async () => {
     const tool = b.dataset.metaTool;
     metaError = "";
+    // Video Quest needs a topic first - show the inline topic card (same
+    // confirm-before-create treatment as metaBodyPicking/metaSomaConfirm:
+    // no quest exists server-side until the user actually starts).
+    if (tool === "video-quest") {
+      metaVideoQuestPicking = true;
+      metaBodyPicking = false;
+      metaSomaConfirm = null;
+      renderDashboard();
+      return;
+    }
     root.innerHTML = spinnerHTML("Menyiapkan sesi...");
     try {
       const { quest } = await api("/api/meta/start", { method: "POST", body: { tool } });
@@ -6263,6 +7862,29 @@ function renderDashboard() {
     renderDashboard();
   });
   document.getElementById("metaSomaCancel")?.addEventListener("click", () => { metaSomaConfirm = null; renderDashboard(); });
+  // Video Quest's confirmed start: create the META quest with the typed
+  // topic, refresh state (the metaSomaConfirmBtn stale-appState lesson),
+  // then hand into the same videoQuizFlow a Today's Trial quest would use.
+  document.getElementById("metaVideoQuestStart")?.addEventListener("click", async () => {
+    const topic = String(document.getElementById("metaVideoQuestTopic")?.value || "").trim();
+    if (topic.length < 3) {
+      metaError = "Tulis topik yang mau kamu pelajari dulu.";
+      renderDashboard();
+      return;
+    }
+    root.innerHTML = spinnerHTML("Menyiapkan sesi...");
+    try {
+      const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "video-quest", topic } });
+      appState = await api("/api/state");
+      metaVideoQuestPicking = false;
+      startVideoQuiz(quest, "meta");
+      activeScreen = "home";
+    } catch (e) {
+      metaError = e.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("metaVideoQuestCancel")?.addEventListener("click", () => { metaVideoQuestPicking = false; renderDashboard(); });
   // LINGUA's Reading row starts the generic AI-quiz Practice Test flow with
   // the track PRESET (skips straight to practiceTestFlow's "track" step
   // instead of asking kind first). The Listening row now launches the round
@@ -6285,7 +7907,7 @@ function renderDashboard() {
         };
       } else {
         const { quest } = await api("/api/meta/start", { method: "POST", body: { tool: "practice-test" } });
-        practiceTestFlow = { questId: quest.id, step: "track", kind, answers: {} };
+        practiceTestFlow = { questId: quest.id, step: "track", kind, answers: {}, origin: "meta" };
       }
       activeScreen = "home";
     } catch (e) {
@@ -6299,6 +7921,11 @@ function renderDashboard() {
   // lstnReplay/etc., all safe no-ops here since those ids don't exist on
   // the intro screen, only lstnStart/lstnCancel do.
   if (listeningDiagnosticFlow?.step === "intro") wireListeningDiagnosticHandlers();
+  // Same intro-in-chrome wiring for the Reading Half Diagnostic - only
+  // rdgStart/rdgCancel exist on that screen, the rest are safe no-ops.
+  if (readingTestFlow?.step === "intro") wireReadingTestHandlers();
+  // And for the Video Quest intro - only vqStart/vqCancel exist there.
+  if (videoQuizFlow?.step === "intro") wireVideoQuizHandlers();
   // META target-recommendation follow-up: tapping an ACTIVE target card
   // opens that realm's tool list ("World Map shows Target, Realm page shows
   // Tools" - founder framing) instead of jumping straight into a flow.
@@ -6311,6 +7938,7 @@ function renderDashboard() {
     metaRealmOpen = null;
     metaBodyPicking = false;
     metaSomaConfirm = null;
+    metaVideoQuestPicking = false;
     renderDashboard();
   });
   // META target-recommendation follow-up: the founder explicitly wants a
@@ -6398,11 +8026,19 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyusun soal...");
     try {
       const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: practiceTestFlow.questId, kind: practiceTestFlow.kind, track: practiceTestFlow.track } });
-      practiceTestFlow.payload = resp;
-      practiceTestFlow.answers = {};
-      practiceTestFlow.plays = 0;
-      practiceTestFlow.step = "test";
-      practiceTestFlow.error = "";
+      // Round 42: reading goes to the dedicated test shell (see the quest
+      // handler above); only the unreachable listening kind still uses the
+      // flat quiz card.
+      if (practiceTestFlow.kind === "reading") {
+        startReadingTest(practiceTestFlow.questId, practiceTestFlow.track, resp, practiceTestFlow.origin || "meta");
+        practiceTestFlow = null;
+      } else {
+        practiceTestFlow.payload = resp;
+        practiceTestFlow.answers = {};
+        practiceTestFlow.plays = 0;
+        practiceTestFlow.step = "test";
+        practiceTestFlow.error = "";
+      }
     } catch (e) {
       practiceTestFlow.step = "track";
       practiceTestFlow.error = e.message;
@@ -6456,10 +8092,15 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyusun soal...");
     try {
       const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: f.questId, kind: f.kind, track: f.track } });
-      f.payload = resp;
-      f.plays = 0;
-      f.step = "test";
-      f.error = "";
+      if (f.kind === "reading") {
+        startReadingTest(f.questId, f.track, resp, f.origin || "home");
+        practiceTestFlow = null;
+      } else {
+        f.payload = resp;
+        f.plays = 0;
+        f.step = "test";
+        f.error = "";
+      }
     } catch (e) {
       f.step = "error";
       f.error = e.message;
@@ -6685,6 +8326,80 @@ function renderDashboard() {
     nutritionFlow = null;
     root.innerHTML = spinnerHTML("Memuat...");
     appState = await api("/api/state");
+    renderDashboard();
+  });
+  // Multi-Domain Quest Hub (design handoff, 19 Agustus).
+  document.getElementById("mdqBackHome")?.addEventListener("click", async () => {
+    questHubFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state");
+    renderDashboard();
+  });
+  // "Kembali" from a feature module is a pure cancel back to the Hub
+  // overview, not a save - only what was already persisted via "Simpan"
+  // survives; the in-progress draft is discarded, matching the handoff's
+  // explicit "Back vs. cancel are separate" rule (this button never loses
+  // ALREADY-SAVED progress, since that lives server-side, not in the draft).
+  document.getElementById("mdqBackHub")?.addEventListener("click", () => {
+    questHubFlow.view = "hub"; questHubFlow.draft = null; questHubFlow.error = "";
+    renderDashboard();
+  });
+  // Opens a feature module, seeding the draft from whatever's already saved
+  // server-side for that feature - so re-opening an in-progress or COMPLETE
+  // feature shows the previous picks, not a blank form (brief: editing an
+  // already-complete feature back to incomplete must be possible).
+  document.querySelectorAll("[data-mdq-open]").forEach((b) => b.addEventListener("click", () => {
+    const featureKey = b.dataset.mdqOpen.toUpperCase();
+    const day = (appState.openQuests || []).find((q) => q.id === questHubFlow.questId);
+    questHubFlow.view = featureKey.toLowerCase();
+    questHubFlow.draft = { ...((day?.quest?.featureData || {})[featureKey] || {}) };
+    questHubFlow.error = "";
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-mdq-chip]").forEach((b) => b.addEventListener("click", () => {
+    questHubFlow.draft = { ...(questHubFlow.draft || {}), [b.dataset.mdqChip]: b.dataset.mdqValue };
+    questHubFlow.error = "";
+    renderDashboard();
+  }));
+  document.querySelectorAll("[data-mdq-step]").forEach((b) => b.addEventListener("click", () => {
+    const key = b.dataset.mdqStep;
+    const delta = Number(b.dataset.mdqDelta);
+    const current = typeof questHubFlow.draft?.[key] === "number" ? questHubFlow.draft[key] : 0;
+    const next = Math.round(Math.max(0, current + delta) * 100) / 100; // avoid float drift on 0.25 steps
+    questHubFlow.draft = { ...(questHubFlow.draft || {}), [key]: next };
+    questHubFlow.error = "";
+    renderDashboard();
+  }));
+  document.getElementById("mdqSaveFeature")?.addEventListener("click", async (e) => {
+    if (questHubFlow.saving) return; // duplicate-submit guard
+    const featureKey = e.currentTarget.dataset.mdqFeature;
+    questHubFlow.saving = true; questHubFlow.error = "";
+    renderDashboard();
+    try {
+      const path = featureKey === "RECOVERY" ? "/api/quest-hub/recovery" : "/api/quest-hub/nutrition";
+      await api(path, { method: "POST", body: { questId: questHubFlow.questId, ...questHubFlow.draft } });
+      appState = await api("/api/state");
+      questHubFlow.saving = false; questHubFlow.view = "hub"; questHubFlow.draft = null;
+    } catch (err) {
+      questHubFlow.saving = false; questHubFlow.error = err.message;
+    }
+    renderDashboard();
+  });
+  document.getElementById("mdqComplete")?.addEventListener("click", async () => {
+    if (!questHubFlow || questHubFlow.completing) return; // duplicate-submit guard
+    questHubFlow.completing = true; questHubFlow.error = "";
+    renderDashboard();
+    try {
+      const resp = await api("/api/quest-hub/complete", { method: "POST", body: { questId: questHubFlow.questId } });
+      questHubFlow = null;
+      completedResult = {
+        questTitle: resp.questTitle, status: "COMPLETED", interpretation: resp.interpretation,
+        safetyNote: resp.safetyNote, deltas: resp.deltas, mentorReply: resp.mentorReply,
+        multiDomainSummary: true,
+      };
+    } catch (err) {
+      questHubFlow.completing = false; questHubFlow.error = err.message;
+    }
     renderDashboard();
   });
   // Task 10a: Artifacts sheet.

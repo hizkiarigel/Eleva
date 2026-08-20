@@ -122,6 +122,36 @@ async function init() {
     ALTER TABLE days ADD COLUMN IF NOT EXISTS practice_test_payload JSONB;
   `);
 
+  // Video Quest (video-quiz): same answer-key isolation rule as
+  // practice_test_payload - the locked video's transcript, the candidate
+  // video under validation, and the generated 15-question set (with correct
+  // ids + explanations) live HERE, never inside `quest` (which ships to the
+  // browser verbatim via rowToQuest). Only the /api/video-quiz routes read
+  // this column; the client sees questions only through stripQuestions and
+  // the answer key only in the pass response (pembahasan).
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS video_quiz_payload JSONB;
+  `);
+
+  // Reading Half Diagnostic (round 42): ONE reading sprint per Monday-start
+  // week per track, shared GLOBALLY across users (founder decision - a
+  // diagnostic stays comparable within the week; the Listening diagnostic
+  // uses the same consistency reasoning with fully fixed content). The
+  // payload here INCLUDES the answer key, same isolation rule as
+  // days.practice_test_payload: it is only ever sent to the client through
+  // stripAnswers. The static keyless fallback is deliberately never cached
+  // here (see the generate route). Invalidation = delete the row; the next
+  // generate recreates it.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS weekly_reading_tests (
+      week_key TEXT NOT NULL,
+      track TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (week_key, track)
+    );
+  `);
+
   // Task 10a (Artifacts library): persistent per-user document library, not
   // tied to any single quest - "CV" is the first real type, schema stays
   // generic (portfolio/certificate/etc. can reuse the same table later
@@ -656,6 +686,48 @@ async function getPracticeTestPayload(userId, dayId) {
   return rows[0]?.practice_test_payload || null;
 }
 
+// Video Quest: candidate/locked video + transcript + generated question set
+// (with answer key). Full replace like setPracticeTestPayload - each save
+// writes the whole attempt state. See the column comment in init().
+async function setVideoQuizPayload(userId, dayId, payload) {
+  await pool.query(`UPDATE days SET video_quiz_payload = $3 WHERE user_id = $1 AND id = $2`, [userId, dayId, payload]);
+}
+async function getVideoQuizPayload(userId, dayId) {
+  const { rows } = await pool.query(`SELECT video_quiz_payload FROM days WHERE user_id = $1 AND id = $2`, [userId, dayId]);
+  return rows[0]?.video_quiz_payload || null;
+}
+
+// --- Reading Half Diagnostic: weekly global content cache ---
+
+async function getWeeklyReadingTest(weekKey, track) {
+  const { rows } = await pool.query(`SELECT payload FROM weekly_reading_tests WHERE week_key = $1 AND track = $2`, [weekKey, track]);
+  return rows[0]?.payload || null;
+}
+
+// Race-safe first-writer-wins: two simultaneous fresh-week generates may
+// both call the AI, but ON CONFLICT DO NOTHING means exactly one insert
+// lands and BOTH callers are served the winning row (re-SELECT on conflict).
+async function insertWeeklyReadingTestIfAbsent(weekKey, track, payload) {
+  const { rows } = await pool.query(
+    `INSERT INTO weekly_reading_tests (week_key, track, payload) VALUES ($1, $2, $3)
+     ON CONFLICT (week_key, track) DO NOTHING RETURNING payload`,
+    [weekKey, track, payload]
+  );
+  if (rows[0]) return rows[0].payload;
+  return getWeeklyReadingTest(weekKey, track);
+}
+
+// Recent weekly passage titles (newest first) - the global topic-dedup list
+// fed to the generator so a new week doesn't repeat a recent topic.
+async function recentWeeklyReadingTitles(track, limit = 8) {
+  const { rows } = await pool.query(
+    `SELECT payload->'passage'->>'title' AS title FROM weekly_reading_tests
+     WHERE track = $1 ORDER BY week_key DESC LIMIT $2`,
+    [track, limit]
+  );
+  return rows.map((r) => r.title).filter(Boolean);
+}
+
 async function activatePathway(userId) {
   await pool.query(`UPDATE character_state SET pathway_status = 'active' WHERE user_id = $1`, [userId]);
 }
@@ -968,6 +1040,8 @@ module.exports = {
   getState, createState, updateState, setGoalTarget, activatePathway, resetUser,
   getOpenQuests, getQuestById, createQuest, saveReflection, recentDays, allHistory,
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
+  setVideoQuizPayload, getVideoQuizPayload,
+  getWeeklyReadingTest, insertWeeklyReadingTestIfAbsent, recentWeeklyReadingTitles,
   listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
   updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
   touchStatActivity, applyDecayIfDue, setShortfallReason, listPendingShortfalls,

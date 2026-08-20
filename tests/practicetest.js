@@ -203,6 +203,124 @@ test("caps at 20 questions", () => {
   assert.strictEqual(clean.questions.length, 20);
 });
 
+// --- Round 42: Reading Half Diagnostic (v2 sprint schema) ---
+
+console.log("Unit: checkWordLimit");
+test("within limit ok, over limit rejected, empty rejected", () => {
+  assert.strictEqual(pt.checkWordLimit("two words", 2), true);
+  assert.strictEqual(pt.checkWordLimit(" one ", 2), true);
+  assert.strictEqual(pt.checkWordLimit("three whole words", 2), false);
+  assert.strictEqual(pt.checkWordLimit("", 2), false);
+});
+
+console.log("Unit: cleanReadingSprintPayload (strict all-or-null)");
+function makeReadingRaw(mutate) {
+  // 9 words x 16 = 144 words per paragraph, 576 total - inside the 550-1000
+  // validation bounds.
+  const para = (label) => ({ label, text: "surveys conducted across several major cities suggest that this ".repeat(16).trim() });
+  const questions = [];
+  for (let i = 1; i <= 5; i++) questions.push({ id: `q${i}`, text: `mc ${i}`, options: ["opt A", "opt B", "opt C", "opt D"], correctAnswer: "opt B", explanation: "e" });
+  for (let i = 6; i <= 10; i++) questions.push({ id: `q${i}`, text: `tf ${i}`, correctAnswer: "True", explanation: "e" });
+  for (let i = 11; i <= 15; i++) questions.push({ id: `q${i}`, text: `match ${i}`, correctAnswer: "B", explanation: "e" });
+  for (let i = 16; i <= 20; i++) questions.push({ id: `q${i}`, text: `fill ${i}`, correctAnswer: "two words", acceptableAnswers: ["word"], explanation: "e" });
+  const raw = { passage: { title: "Test Passage", paragraphs: ["A", "B", "C", "D"].map(para) }, questions };
+  if (mutate) mutate(raw);
+  return raw;
+}
+test("valid v2 payload normalizes: 4 blocks, sections, categories, maxWords stamped", () => {
+  const clean = pt.cleanReadingSprintPayload(makeReadingRaw());
+  assert.ok(clean, "valid payload must pass");
+  assert.strictEqual(clean.blocks.length, 4);
+  assert.deepStrictEqual(clean.blocks.map((b) => b.range), ["1-5", "6-10", "11-15", "16-20"]);
+  assert.strictEqual(clean.questions.length, 20);
+  assert.strictEqual(clean.questions[0].type, "mc");
+  assert.strictEqual(clean.questions[0].section, "multiple_choice");
+  assert.strictEqual(clean.questions[0].category, "multiple choice");
+  assert.deepStrictEqual(clean.questions[5].options, ["True", "False", "Not Given"]);
+  assert.deepStrictEqual(clean.questions[10].options, ["A", "B", "C", "D"]);
+  assert.strictEqual(clean.questions[15].maxWords, 2);
+  assert.deepStrictEqual(clean.blocks[3].questionIds, ["q16", "q17", "q18", "q19", "q20"]);
+});
+test("3 paragraphs → null", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => r.passage.paragraphs.pop())), null);
+});
+test("paragraph labels out of order → null", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => { r.passage.paragraphs[0].label = "B"; r.passage.paragraphs[1].label = "A"; })), null);
+});
+test("mc correctAnswer not among options → null (check cleanPayload never had)", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => { r.questions[0].correctAnswer = "not an option"; })), null);
+});
+test("tf answer outside True/False/Not Given → null", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => { r.questions[6].correctAnswer = "Yes"; })), null);
+});
+test("matching answer outside A-D → null", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => { r.questions[11].correctAnswer = "E"; })), null);
+});
+test("completion key over the 2-word limit → null (server-side NO MORE THAN TWO WORDS)", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => { r.questions[16].correctAnswer = "three whole words"; })), null);
+});
+test("acceptableAnswers variant over the word limit → null", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => { r.questions[17].acceptableAnswers = ["three whole words"]; })), null);
+});
+test("19 questions → null (exactly 20 required)", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => r.questions.pop())), null);
+});
+test("ids out of order → null", () => {
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw((r) => { r.questions[0].id = "q2"; })), null);
+});
+test("short passage rejected by default, allowed with minPassageWords: 0 (fallback fixture rule)", () => {
+  const shorten = (r) => r.passage.paragraphs.forEach((p) => { p.text = "short paragraph text here"; });
+  assert.strictEqual(pt.cleanReadingSprintPayload(makeReadingRaw(shorten)), null);
+  assert.ok(pt.cleanReadingSprintPayload(makeReadingRaw(shorten), { minPassageWords: 0 }));
+});
+
+console.log("Unit: gradeAnswers v2 additions (acceptableAnswers, word limit, section)");
+test("acceptableAnswers widen the key; over-limit answer is wrong even on a match", () => {
+  const qs = [
+    { id: "q1", type: "fill", section: "sentence_completion", text: "x", correctAnswer: "two words", acceptableAnswers: ["word"], maxWords: 2, category: "sentence completion" },
+    { id: "q2", type: "fill", section: "sentence_completion", text: "y", correctAnswer: "two words", maxWords: 1, category: "sentence completion" },
+  ];
+  const g = pt.gradeAnswers(qs, { q1: " Word ", q2: "two words" });
+  assert.strictEqual(g.correct, 1, "acceptable variant must count");
+  const w = g.wrong.find((x) => x.id === "q2");
+  assert.ok(w, "over-limit answer must be wrong despite matching the key");
+  assert.strictEqual(w.section, "sentence_completion");
+});
+test("old flat payloads grade identically (no maxWords/acceptableAnswers/section)", () => {
+  const qs = [{ id: "a", type: "fill", text: "x", correctAnswer: "word", category: "completion" }];
+  const g = pt.gradeAnswers(qs, { a: "WORD " });
+  assert.strictEqual(g.correct, 1);
+});
+
+console.log("Unit: stripAnswers v2 whitelist");
+test("keeps blocks/section/maxWords/weekKey, still strips every answer field", () => {
+  const cleaned = pt.cleanReadingSprintPayload(makeReadingRaw());
+  const stripped = pt.stripAnswers({ kind: "reading", track: "academic", entryType: "sprint", schemaVersion: 2, weekKey: "2026-08-17", ...cleaned });
+  assert.strictEqual(stripped.schemaVersion, 2);
+  assert.strictEqual(stripped.weekKey, "2026-08-17");
+  assert.strictEqual(stripped.blocks.length, 4);
+  assert.strictEqual(stripped.questions[0].section, "multiple_choice");
+  assert.strictEqual(stripped.questions[15].maxWords, 2);
+  const s = JSON.stringify(stripped);
+  assert.ok(!s.includes("correctAnswer") && !s.includes("acceptableAnswers") && !s.includes("explanation") && !s.includes("category"), "answer key fields must not leak");
+});
+
+console.log("Unit: reading fallback fixture is a valid v2 sprint");
+test("fallbackPracticeTest reading = 4 labelled paragraphs + exact 5/5/5/5 blocks", () => {
+  const ai = require("../server/claude");
+  const fb = ai.fallbackPracticeTest({ kind: "reading", track: "academic", drill: null });
+  assert.strictEqual(fb.passage.paragraphs.length, 4);
+  assert.deepStrictEqual(fb.passage.paragraphs.map((p) => p.label), ["A", "B", "C", "D"]);
+  assert.strictEqual(fb.blocks.length, 4);
+  assert.deepStrictEqual(fb.questions.map((q) => q.type), [
+    ...Array(5).fill("mc"), ...Array(5).fill("tf"), ...Array(5).fill("matching"), ...Array(5).fill("fill"),
+  ]);
+  const drill = ai.fallbackPracticeTest({ kind: "reading", track: "academic", drill: { category: "sentence completion" } });
+  assert.strictEqual(drill.questions.length, pt.DRILL_QUESTIONS);
+  assert.ok(!drill.blocks, "drill payload must not carry the 4x5 sprint blocks");
+  assert.strictEqual(drill.questions[0].category, "sentence completion");
+});
+
 // ---------------------------------------------------------------------------
 // Part 2: API-level tests (needs a running Postgres; boots the app itself).
 // ---------------------------------------------------------------------------
@@ -377,6 +495,100 @@ async function apiTests() {
   await atest("regression: reflective quest flow untouched (state still serves goal quest)", async () => {
     const { json } = await call("/api/state", null, "GET");
     assert.ok(json.openQuests.length >= 1, "open quests must survive");
+  });
+
+  // --- Round 42: Reading Half Diagnostic (v2 sprint + weekly global cache) ---
+
+  // Same Monday-start week key the server derives (startOfWeekKey,
+  // server/index.js) - the test process shares the spawned server's TZ.
+  function testWeekKey(d = new Date()) {
+    const day = (d.getDay() + 6) % 7;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - day);
+    return monday.toLocaleDateString("en-CA");
+  }
+
+  const readingQuestA = await insertQuest({ kind: "reading", track: "academic" });
+  const readingQuestB = await insertQuest({ kind: "reading", track: "academic" });
+
+  // The weekly cache is GLOBAL (not per-user like everything else this
+  // script creates), so leftovers from a previous run on the same scratch DB
+  // must be cleared or the empty-cache/seed assertions below break.
+  await sql.query("DELETE FROM weekly_reading_tests");
+
+  await atest("keyless reading sprint serves the v2 fallback and never caches it", async () => {
+    const { json } = await call("/api/practice-test/generate", { questId: readingQuestA, kind: "reading", track: "academic" });
+    assert.strictEqual(json.entryType, "sprint");
+    assert.strictEqual(json.schemaVersion, 2);
+    assert.strictEqual(json.weekKey, testWeekKey());
+    assert.ok(json.passage && Array.isArray(json.passage.paragraphs), "passage must be paragraph-labelled");
+    assert.strictEqual(json.passage.paragraphs.length, 4);
+    assert.strictEqual(json.blocks.length, 4);
+    assert.strictEqual(json.questions.length, 20);
+    assert.ok(json.questions.every((q) => !("correctAnswer" in q) && !("acceptableAnswers" in q)), "answer key must not leak");
+    const { rows } = await sql.query("SELECT count(*)::int AS n FROM weekly_reading_tests");
+    assert.strictEqual(rows[0].n, 0, "fallback must NOT be cached as the week's content");
+  });
+
+  // Seed this week's global content directly (stands in for a successful AI
+  // generation - keyless mode can't produce one).
+  const seeded = pt.cleanReadingSprintPayload((() => {
+    const para = (label) => ({ label, text: "the seeded weekly passage text repeats to reach length here ".repeat(16).trim() });
+    const questions = [];
+    for (let i = 1; i <= 5; i++) questions.push({ id: `q${i}`, text: `mc ${i}`, options: ["opt A", "opt B", "opt C", "opt D"], correctAnswer: "opt B", explanation: "e" });
+    for (let i = 6; i <= 10; i++) questions.push({ id: `q${i}`, text: `tf ${i}`, correctAnswer: "True", explanation: "e" });
+    for (let i = 11; i <= 15; i++) questions.push({ id: `q${i}`, text: `match ${i}`, correctAnswer: "B", explanation: "e" });
+    for (let i = 16; i <= 20; i++) questions.push({ id: `q${i}`, text: `fill ${i}`, correctAnswer: "two words", explanation: "e" });
+    return { passage: { title: "Seeded Weekly Topic", paragraphs: ["A", "B", "C", "D"].map(para) }, questions };
+  })());
+
+  await atest("seeded weekly content is served to every attempt that week (global cache)", async () => {
+    assert.ok(seeded, "seed fixture must pass the strict validator");
+    await sql.query(
+      `INSERT INTO weekly_reading_tests (week_key, track, payload) VALUES ($1, 'academic', $2)`,
+      [testWeekKey(), seeded]
+    );
+    const { json: genB } = await call("/api/practice-test/generate", { questId: readingQuestB, kind: "reading", track: "academic" });
+    assert.strictEqual(genB.passage.title, "Seeded Weekly Topic");
+    // Re-generate on the other open quest: same weekly content, same title.
+    const { json: genA } = await call("/api/practice-test/generate", { questId: readingQuestA, kind: "reading", track: "academic" });
+    assert.strictEqual(genA.passage.title, "Seeded Weekly Topic");
+  });
+
+  await atest("ON CONFLICT DO NOTHING keeps the first writer's content (race idiom)", async () => {
+    const { rows } = await sql.query(
+      `INSERT INTO weekly_reading_tests (week_key, track, payload) VALUES ($1, 'academic', $2)
+       ON CONFLICT (week_key, track) DO NOTHING RETURNING payload`,
+      [testWeekKey(), { passage: { title: "Loser Topic" } }]
+    );
+    assert.strictEqual(rows.length, 0, "second insert must be a no-op");
+    const { rows: check } = await sql.query(`SELECT payload->'passage'->>'title' AS t FROM weekly_reading_tests WHERE week_key = $1 AND track = 'academic'`, [testWeekKey()]);
+    assert.strictEqual(check[0].t, "Seeded Weekly Topic");
+  });
+
+  await atest("reading submit grades v2 (word limit enforced) and schedules a reading drill", async () => {
+    // All-wrong sheet: every choice off-key, and q16-20 answered over the
+    // word limit to prove the NO MORE THAN TWO WORDS rule grades server-side.
+    const answers = {};
+    for (let i = 1; i <= 5; i++) answers[`q${i}`] = "opt A";
+    for (let i = 6; i <= 10; i++) answers[`q${i}`] = "False";
+    for (let i = 11; i <= 15; i++) answers[`q${i}`] = "A";
+    for (let i = 16; i <= 20; i++) answers[`q${i}`] = "yes two words"; // 3 words - over the limit, must be wrong
+    const { json } = await call("/api/practice-test/submit", { questId: readingQuestB, answers });
+    assert.strictEqual(json.score, 0, "every answer must grade wrong (incl. over-limit completions)");
+    assert.strictEqual(json.assessment.trackKey, "reading");
+    assert.strictEqual(json.wrong.length, 20);
+    assert.ok(json.wrong.some((w) => w.section === "sentence_completion"), "wrong entries carry section");
+    const { rows } = await sql.query("SELECT practice_test FROM character_state WHERE user_id = $1", [userId]);
+    assert.ok(rows[0].practice_test["0"].tracks.reading.nextDrill, "weak reading sprint must schedule a drill");
+  });
+
+  await atest("reading drill stays per-attempt (flat payload, no weekly cache, no blocks)", async () => {
+    const { json } = await call("/api/practice-test/generate", { questId: readingQuestA, kind: "reading", track: "academic" });
+    assert.strictEqual(json.entryType, "drill");
+    assert.ok(json.focusCategory, "drill focusCategory missing");
+    assert.ok(json.questions.length <= 12, "drill must be 12 questions or fewer");
+    assert.ok(!json.blocks, "drill must not carry sprint blocks");
   });
 
   await sql.end();
