@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "test": "node tests/practicetest.js && node tests/practicetest.e2e.js && node tests/gymsession.js && node tests/movement-strength-session.js && node tests/movement-evidence-photo.js && node tests/movement-attempt.js && node tests/chain-flow.js && node tests/videoquiz.js && node tests/videoquiz.e2e.js"
+    "test": "node tests/practicetest.js && node tests/practicetest.e2e.js && node tests/gymsession.js && node tests/movement-strength-session.js && node tests/movement-evidence-photo.js && node tests/movement-attempt.js && node tests/chain-flow.js && node tests/videoquiz.js && node tests/videoquiz.e2e.js && node tests/laborachain.js && node tests/laborachain.e2e.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

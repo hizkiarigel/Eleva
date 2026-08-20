@@ -5079,6 +5079,7 @@ function startVideoQuiz(day, origin) {
     estimatedMinutes: vq.estimatedMinutes ?? 25,
     step: st?.lockedVideoUrl ? "locked" : "intro",
     videoUrl: "", checking: false, checkError: "",
+    manualOffered: false, manualOpen: false, manualText: "",
     materi: null,
     locked: st?.lockedVideoUrl ? { videoUrl: st.lockedVideoUrl, videoMeta: st.lockedVideoMeta || {}, videoId: st.lockedVideoId || null } : null,
     lastResult: st?.lastResult || null,
@@ -5167,9 +5168,14 @@ function vqPickHTML() {
       <input type="url" class="vq-input" id="vqUrlInput" placeholder="Tempel link YouTube..." value="${esc(f.videoUrl)}" ${f.checking ? "disabled" : ""} inputmode="url" autocomplete="off" />
       <div class="vq-note">Setelah assessment dimulai, video ini tidak dapat diganti sampai quest selesai.</div>
       ${f.checkError ? `<p class="vq-error">${esc(f.checkError)}</p>` : ""}
+      ${f.manualOffered && !f.manualOpen ? `<button class="btn-ghost full" id="vqManualToggle" style="margin-top:14px">Tempel transkrip manual</button>` : ""}
+      ${f.manualOpen ? `
+      <div class="eyebrow mono vq-field-label">TRANSKRIP MANUAL</div>
+      <textarea class="vq-input" id="vqManualText" rows="7" ${f.checking ? "disabled" : ""} placeholder="Buka videonya di YouTube → deskripsi → 'Show transcript' → salin semua teksnya, lalu tempel di sini.">${esc(f.manualText)}</textarea>
+      <div class="vq-note" style="margin-top:8px">Timestamp kayak 0:00 boleh ikut ke-copy — nanti dibersihkan otomatis. Link YouTube di atas tetap wajib diisi.</div>` : ""}
     </div>
     <div class="vq-foot-single">
-      <button class="btn-primary full" id="vqCheckBtn" ${f.checking ? "disabled" : ""}>${f.checking ? "Memeriksa materi..." : "Periksa Materi"}</button>
+      <button class="btn-primary full" id="vqCheckBtn" ${f.checking ? "disabled" : ""}>${f.checking ? "Memeriksa materi..." : (f.manualOpen ? "Periksa Materi (transkrip manual)" : "Periksa Materi")}</button>
     </div>`;
 }
 
@@ -5353,7 +5359,7 @@ function vqResultHTML() {
       </div>
       <div class="vq-foot-single">
         <button class="btn-ghost full" id="vqPembahasan">Lihat Pembahasan</button>
-        <button class="btn-primary full" id="vqFinish" style="margin-top:10px">Selesaikan Quest</button>
+        <button class="btn-primary full" id="vqFinish" style="margin-top:10px">${f.chainNext ? `Lanjut: ${esc(LABORA_FEATURE_LABEL[f.chainNext] || f.chainNext)}` : "Selesaikan Quest"}</button>
       </div>`;
   }
   return `
@@ -5427,6 +5433,7 @@ async function vqDoValidate() {
   if (!f || f.checking) return;
   const url = String(document.getElementById("vqUrlInput")?.value || "").trim();
   f.videoUrl = url;
+  f.manualText = String(document.getElementById("vqManualText")?.value || f.manualText || "");
   if (!url) {
     f.checkError = "Tempel link video YouTube dulu.";
     renderDashboard();
@@ -5436,7 +5443,9 @@ async function vqDoValidate() {
   f.checkError = "";
   renderDashboard();
   try {
-    const resp = await api("/api/video-quiz/validate", { method: "POST", body: { questId: f.questId, videoUrl: url } });
+    const body = { questId: f.questId, videoUrl: url };
+    if (f.manualOpen && f.manualText.trim()) body.manualTranscript = f.manualText;
+    const resp = await api("/api/video-quiz/validate", { method: "POST", body });
     f.checking = false;
     if (!resp.relevant) {
       f.checkError = resp.rationale || `Video ini belum membahas "${f.topic}". Coba video lain.`;
@@ -5447,6 +5456,9 @@ async function vqDoValidate() {
   } catch (e) {
     f.checking = false;
     f.checkError = e.message;
+    // Server says the transcript couldn't be fetched (blocked or truly no
+    // captions) - reveal the paste-it-yourself fallback.
+    if (e.data?.manualAllowed) f.manualOffered = true;
   }
   renderDashboard();
 }
@@ -5488,7 +5500,10 @@ async function vqDoSubmit() {
     const resp = await api("/api/video-quiz/submit", { method: "POST", body: { questId: f.questId, answers: f.answers } });
     f.result = resp;
     f.lastResult = { score: resp.score, total: resp.total, passed: resp.passed, strongConcepts: resp.strongConcepts, weakConcepts: resp.weakConcepts };
-    if (resp.passed) questCtaState.set(f.questId, "completed");
+    // Under a LABORA chain a pass is one STEP done, not the quest - the
+    // dashboard CTA should read "Lanjut: <next feature>", not "Lihat Hasil".
+    f.chainNext = resp.passed && resp.chain && !resp.chain.completed ? resp.chain.nextFeature : null;
+    if (resp.passed) questCtaState.set(f.questId, f.chainNext ? "started" : "completed");
     f.step = "result";
   } catch (e) {
     f.error = e.message;
@@ -5527,6 +5542,13 @@ function wireVideoQuizHandlers() {
   document.getElementById("vqCheckBtn")?.addEventListener("click", () => vqDoValidate());
   document.getElementById("vqUrlInput")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") vqDoValidate();
+  });
+  document.getElementById("vqManualToggle")?.addEventListener("click", () => {
+    f.manualOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqManualText")?.addEventListener("input", (e) => {
+    f.manualText = e.target.value;
   });
   document.getElementById("vqSwap")?.addEventListener("click", () => {
     f.materi = null;
@@ -5851,6 +5873,24 @@ function questCategoryIconSVG(quest, size, color) {
   }
 }
 
+// LABORA feature display names - shared by the chain checklist, the chain
+// CTA label, and the detail-panel eyebrow (founder request 19 Agustus:
+// "QUEST HARI INI · LIVELIHOOD" harus menyebut fiturnya, mis. JOB MATCH).
+const LABORA_FEATURE_LABEL = {
+  "video-quiz": "Video Quest",
+  "job-match-analysis": "Job Match",
+  "job-application-submit": "Submit Application",
+};
+const LABORA_FEATURE_EYEBROW = {
+  "video-quiz": "VIDEO QUEST",
+  "job-match-analysis": "JOB MATCH",
+  "job-application-submit": "SUBMIT APPLICATION",
+};
+function chainCurrentStep(quest) {
+  const c = quest?.laboraChain;
+  return c ? c.steps?.[c.currentIndex] || null : null;
+}
+
 // "Selesai ketika" checklist (design handoff) - derived from evidenceSchema/
 // completionType since no dod:string[] field exists server-side. Always
 // returns at least one bullet (falls back to the quest's own description)
@@ -5874,6 +5914,18 @@ function deriveDoDChecklist(quest) {
   } else if (quest.completionType === "video-quiz") {
     items.push("Pilih & kunci satu video YouTube yang relevan dengan topiknya");
     items.push(`Jawab 15 soal dari materi video itu (lulus ≥ ${quest.videoQuiz?.passThreshold ?? 11}/15)`);
+  } else if (quest.completionType === "labora-chain" && quest.laboraChain) {
+    // One line per chain step with live status - the quest card doubles as
+    // the chain's progress checklist.
+    quest.laboraChain.steps.forEach((s, i) => {
+      const label = LABORA_FEATURE_LABEL[s.feature] || s.feature;
+      const glyph = s.status === "done" ? "✓" : s.status === "skipped" ? "⤼" : s.status === "active" ? "▶" : "○";
+      let suffix = "";
+      if (s.status === "done" && s.feature === "video-quiz" && s.result) suffix = ` — lulus ${s.result.score}/${s.result.total}`;
+      else if (s.status === "done" && s.feature === "job-match-analysis" && s.result) suffix = ` — ${s.result.qualified ? "qualified" : "belum qualified"}`;
+      else if (s.status === "skipped") suffix = " — dilewati (job match belum lolos)";
+      items.push(`${glyph} Langkah ${i + 1}: ${label}${suffix}`);
+    });
   } else if (quest.completionType === "multi-domain") {
     items.push("2 area utama · Recovery + Nutrition");
   }
@@ -5888,6 +5940,10 @@ function deriveDoDChecklist(quest) {
 // isNutrition branch above.
 function questCtaLabel(quest, id) {
   if (quest?.completionType === "nutrition-log") return "Lanjut Catat";
+  if (quest?.completionType === "labora-chain") {
+    const step = chainCurrentStep(quest);
+    if (step) return `${quest.laboraChain.currentIndex === 0 ? "Mulai" : "Lanjut"}: ${LABORA_FEATURE_LABEL[step.feature] || step.feature}`;
+  }
   const st = questCtaState.get(id);
   if (st === "completed") return "Lihat Hasil";
   if (st === "started") return "Lanjutkan";
@@ -5952,7 +6008,18 @@ function questEyebrowHTML(quest) {
   const somaSubLabel = quest.primaryFeature === "MOVEMENT" ? "Training"
     : quest.completionType === "practice-test" ? (PRACTICE_LABELS[quest.practiceTestSchema?.kind || "reading"] || "Reading")
     : "";
-  const base = `QUEST HARI INI${quest.statFocus ? " · " + esc(statLabel(quest.statFocus)).toUpperCase() + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(quest, true)) : ""}`;
+  const statTag = quest.statFocus ? esc(statLabel(quest.statFocus)).toUpperCase() : "";
+  let base = `QUEST HARI INI${statTag ? " · " + statTag + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(quest, true)) : ""}`;
+  // Founder request 19 Agustus: name the LABORA feature in the eyebrow -
+  // single quest: "QUEST HARI INI · LIVELIHOOD · JOB MATCH"; chain quest:
+  // "QUEST HARI INI · LIVELIHOOD: JOB MATCH · LANGKAH 2/3".
+  if (quest.completionType === "labora-chain" && quest.laboraChain) {
+    const c = quest.laboraChain;
+    const step = chainCurrentStep(quest);
+    if (step) base = `QUEST HARI INI · ${statTag || "LIVELIHOOD"}: ${LABORA_FEATURE_EYEBROW[step.feature] || ""} · LANGKAH ${c.currentIndex + 1}/${c.steps.length}`;
+  } else if (LABORA_FEATURE_EYEBROW[quest.completionType]) {
+    base += ` · ${LABORA_FEATURE_EYEBROW[quest.completionType]}`;
+  }
   const text = quest.chain ? `BODY · ${esc(quest.chain.label).toUpperCase()} · Langkah ${quest.chain.step}/${quest.chain.total}` : base;
   return `<div class="qhub-eyebrow mono">${text}</div>`;
 }
@@ -6085,7 +6152,8 @@ function completedResultCardHTML(r) {
       ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k]) => `<span class="delta-chip">${statLabel(k)} · Evidence tercatat</span>`).join("")}</div>` : ""}
       ${shortfallPromptHTML(r)}
       ${targetPickerHTML(r.target)}
-      <button class="btn-primary full" id="dismissCompleted" style="margin-top:18px">Lanjut</button>
+      ${r.chainNext ? `<div class="mono" style="font-size:12px;color:var(--accent);margin:12px 0 0">Langkah berikutnya: ${esc(LABORA_FEATURE_LABEL[r.chainNext] || r.chainNext)} — buka quest-nya lagi dari beranda.</div>` : ""}
+      <button class="btn-primary full" id="dismissCompleted" style="margin-top:18px">${r.chainNext ? `Lanjut: ${esc(LABORA_FEATURE_LABEL[r.chainNext] || r.chainNext)}` : "Lanjut"}</button>
     </div>`;
 }
 
@@ -7468,6 +7536,33 @@ function gymSessionEvalHTML(ev) {
     </div>`;
 }
 
+// Flow launchers extracted from the [data-reflect-id] handler so the
+// labora-chain branch can dispatch to them per current step - bodies are
+// the original branches verbatim (Task 10b / Task 14 point 5).
+async function launchJobMatchFlow(id) {
+  root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
+  let cv = null;
+  try {
+    const { artifacts } = await api("/api/artifacts");
+    cv = artifacts.find((a) => a.type === "cv") || null;
+  } catch (e) { /* fall through to upload-cv either way */ }
+  jobMatchFlow = { questId: id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
+  renderDashboard();
+}
+async function launchJobApplicationFlow(id) {
+  root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
+  let cv = null;
+  try {
+    const { artifacts } = await api("/api/artifacts");
+    cv = artifacts.find((a) => a.type === "cv") || null;
+  } catch (e) { /* fall through to cv step either way */ }
+  jobApplicationFlow = {
+    questId: id, step: cv ? "form" : "cv", cvArtifact: cv,
+    form: { companyName: "", roleTitle: "", dateApplied: "", submissionProof: "" }, error: "",
+  };
+  renderDashboard();
+}
+
 function renderDashboard() {
   // Round 41: the IELTS Listening Half Diagnostic's active exam/submitted
   // screens are the one flow in this app that hides the normal header+tab
@@ -7838,29 +7933,28 @@ function renderDashboard() {
     // a returning user with a CV already on file skips straight to the job
     // posting upload step, never asked to re-upload the same CV.
     if (quest?.completionType === "job-match-analysis") {
-      root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
-      let cv = null;
-      try {
-        const { artifacts } = await api("/api/artifacts");
-        cv = artifacts.find((a) => a.type === "cv") || null;
-      } catch (e) { /* fall through to upload-cv either way */ }
-      jobMatchFlow = { questId: id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
-      renderDashboard();
+      await launchJobMatchFlow(id);
       return;
     }
     // Task 14 point 5: job-application-submit quests check the Artifacts
     // library first, same pattern as job-match-analysis just above.
     if (quest?.completionType === "job-application-submit") {
-      root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
-      let cv = null;
-      try {
-        const { artifacts } = await api("/api/artifacts");
-        cv = artifacts.find((a) => a.type === "cv") || null;
-      } catch (e) { /* fall through to cv step either way */ }
-      jobApplicationFlow = {
-        questId: id, step: cv ? "form" : "cv", cvArtifact: cv,
-        form: { companyName: "", roleTitle: "", dateApplied: "", submissionProof: "" }, error: "",
-      };
+      await launchJobApplicationFlow(id);
+      return;
+    }
+    // LABORA Chain: one quest, 2-3 LABORA steps in sequence - dispatch to
+    // the CURRENT step's existing flow. Fresh /api/state first (the same
+    // staleness lesson as video-quiz/MOVEMENT: a step may have advanced on
+    // another tab).
+    if (quest?.completionType === "labora-chain") {
+      root.innerHTML = spinnerHTML("Memuat quest...");
+      appState = await api("/api/state").catch(() => appState);
+      const fresh = (appState.openQuests || []).find((q) => q.id === id);
+      if (!fresh) { renderDashboard(); return; }
+      const step = chainCurrentStep(fresh.quest);
+      if (step?.feature === "video-quiz") { startVideoQuiz(fresh, "home"); renderDashboard(); return; }
+      if (step?.feature === "job-match-analysis") { await launchJobMatchFlow(id); return; }
+      if (step?.feature === "job-application-submit") { await launchJobApplicationFlow(id); return; }
       renderDashboard();
       return;
     }
@@ -8302,14 +8396,19 @@ function renderDashboard() {
         body: { questId: jobMatchFlow.questId, cvArtifactId: jobMatchFlow.cvArtifact.id, images: jobMatchFlow.images },
       });
       const qd = openQuests.find((q) => q.id === jobMatchFlow.questId);
-      questCtaState.set(jobMatchFlow.questId, "completed");
+      // LABORA Chain: a not-yet-finished chain means this analysis was one
+      // STEP - the quest stays open with the next step's CTA, so the label
+      // state stays "started" and the result card points to what's next.
+      const chainOngoing = resp.chain && !resp.chain.completed;
+      questCtaState.set(jobMatchFlow.questId, chainOngoing ? "started" : "completed");
       completedResult = {
-        // Task 14 point 6: no more delta chip (deltas always empty here) -
-        // resp.target is the Milestone progress line instead (reuses
-        // targetPickerHTML, same component the structured-physical flow
-        // uses for its own Target Berikutnya line).
+        // Task 14 point 6: no more delta chip (deltas always empty here for
+        // plain quests) - resp.target is the Milestone progress line instead
+        // (reuses targetPickerHTML, same component the structured-physical
+        // flow uses for its own Target Berikutnya line).
         questTitle: qd?.quest?.title || "", status: "COMPLETED", goalIndex: qd?.goalIndex,
-        mentorReply: "", deltas: {}, jobMatch: resp.result, target: resp.target,
+        mentorReply: resp.mentorReply || "", deltas: resp.deltas || {}, jobMatch: resp.result, target: resp.target,
+        chainNext: chainOngoing ? resp.chain.nextFeature : null,
       };
       jobMatchFlow = null;
     } catch (e) {
@@ -8360,8 +8459,10 @@ function renderDashboard() {
       questCtaState.set(jobApplicationFlow.questId, "completed");
       completedResult = {
         questTitle: qd?.quest?.title || "", status: "COMPLETED", goalIndex: qd?.goalIndex,
-        mentorReply: resp.jobApplication ? `Lamaran ke ${resp.jobApplication.companyName} untuk ${resp.jobApplication.roleTitle} tercatat.` : "",
-        deltas: {}, jobApplication: resp.jobApplication, target: resp.target,
+        // A chain completion carries the AI mentorReply summarizing all
+        // steps; a plain submit keeps the deterministic one-liner.
+        mentorReply: resp.mentorReply || (resp.jobApplication ? `Lamaran ke ${resp.jobApplication.companyName} untuk ${resp.jobApplication.roleTitle} tercatat.` : ""),
+        deltas: resp.deltas || {}, jobApplication: resp.jobApplication, target: resp.target,
       };
       jobApplicationFlow = null;
     } catch (e) {
