@@ -4274,13 +4274,24 @@ function questHubCardsHTML(quests) {
 // (beginStructuredOrReflectiveFlow + the 4 special-flow branches) -
 // nothing about quest completion itself changes, only what feeds the
 // button's label/disabled state is new.
+// SOMA Training feedback brief (20 Agustus), item 3: this eyebrow used to be
+// built inline here only - every other Movement screen rolled its own
+// separate/inconsistent header (or none at all). Extracted so Preview/Pre-
+// Start/Active Session/Evidence/Submitted all render the exact same string,
+// with a chain-badge branch (quest.chain, set by the Recovery->Nutrition->
+// Training chain feature) taking priority when present.
+function questEyebrowHTML(quest) {
+  const base = `QUEST HARI INI${quest.statFocus ? " · " + esc(statLabel(quest.statFocus)).toUpperCase() : ""}`;
+  const text = quest.chain ? `BODY · ${esc(quest.chain.label).toUpperCase()} · Langkah ${quest.chain.step}/${quest.chain.total}` : base;
+  return `<div class="qhub-eyebrow mono">${text}</div>`;
+}
+
 function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
   const reasonOpen = reasonOpenIds.has(q.id);
-  const eyebrow = `QUEST HARI INI${q.quest.statFocus ? " · " + esc(statLabel(q.quest.statFocus)).toUpperCase() : ""}`;
   const dod = deriveDoDChecklist(q.quest);
   return `
     <div class="qhub-detail">
-      <div class="qhub-eyebrow mono">${eyebrow}</div>
+      ${questEyebrowHTML(q.quest)}
       ${goalLabel ? `<div class="qhub-target">Menuju target: <span class="qhub-target-value">${esc(goalLabel)}</span></div>` : ""}
       <h2 class="fr qhub-detail-title">${esc(q.quest.title)}</h2>
       <p class="qhub-detail-desc">${esc(q.quest.description)}</p>
@@ -4984,10 +4995,6 @@ async function mvAbandonAttempt() {
   renderDashboard();
 }
 
-function movementLabel(quest, withExecutionMode) {
-  const base = "BODY · MOVEMENT";
-  return withExecutionMode && quest.executionMode ? `${base} · ${quest.executionMode}` : base;
-}
 
 // SELESAI KETIKA checklist content - concrete minimum output, not a repeat
 // of quest.description (design handoff's explicit rule). Cardio reads off
@@ -5027,7 +5034,7 @@ function movementPreviewHTML() {
   const goalLabel = (appState.goals || [])[movementFlow.goalIndex] || quest.title;
   return `
     <div class="quest-card fadeUp">
-      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:6px">${esc(movementLabel(quest))}</div>
+      ${questEyebrowHTML(quest)}
       <p style="color:var(--muted);font-size:12.5px;margin:0 0 10px">Menuju target: <span style="color:var(--text)">${esc(goalLabel)}</span></p>
       <h2 class="fr" style="font-size:21px;margin:0 0 10px;line-height:1.3">${esc(quest.title)}</h2>
       <p style="color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 16px">${esc(quest.description)}</p>
@@ -5055,7 +5062,7 @@ function movementPreStartHTML() {
     <h2 class="fr" style="font-size:20px;margin:0 0 6px">Siap mulai quest?</h2>
     <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Pastikan semua sudah siap sebelum mulai.</p>
     <div class="quest-card">
-      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:6px">${esc(movementLabel(quest))}</div>
+      ${questEyebrowHTML(quest)}
       <div style="font-size:16px;margin-bottom:14px">${esc(quest.title)}</div>
       ${isStrength ? `
       <div class="mono" style="font-size:10.5px;color:var(--muted-dim);letter-spacing:1px;margin-bottom:6px">HARI INI</div>
@@ -5219,7 +5226,7 @@ function movementActiveSessionHTML() {
     </div>`;
   }).join("");
   return `
-      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:4px">${esc(movementLabel(quest, true))}</div>
+      ${questEyebrowHTML(quest)}
       <h2 class="fr" style="font-size:19px;margin:0 0 16px">${esc(quest.title)}</h2>
       ${cardsHTML}
       <div style="display:flex;gap:12px;margin-top:18px">
@@ -5456,6 +5463,7 @@ function movementEvidenceHTML() {
   const attempt = movementFlow.attempt;
   if (quest.executionMode === "STRENGTH") {
     return `
+      ${questEyebrowHTML(quest)}
       <h2 class="fr" style="font-size:20px;margin:0 0 4px">Kirim bukti latihan</h2>
       <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Data set/reps/beban yang barusan kamu catat sudah cukup jadi bukti.</p>
       <div class="quest-card" style="display:flex;align-items:center;gap:12px">
@@ -5463,7 +5471,7 @@ function movementEvidenceHTML() {
         <span style="font-size:13.5px">Sistem sudah mencatat sets, reps, dan beban dari sesi latihanmu — nggak perlu screenshot tambahan.</span>
       </div>
       ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
-      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>Kirim Bukti</button>`;
+      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? "Mengirim…" : "Kirim Bukti"}</button>`;
   }
   const choices = [
     ["activity-data", "Data aktivitas", "Durasi + jarak yang sudah dicatat"],
@@ -5471,6 +5479,7 @@ function movementEvidenceHTML() {
     ["treadmill-photo", "Foto treadmill", "Jika lari di treadmill"],
   ];
   return `
+    ${questEyebrowHTML(quest)}
     <h2 class="fr" style="font-size:20px;margin:0 0 4px">Kirim bukti aktivitas</h2>
     <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px">Pilih bukti yang ingin kamu kirim.</p>
     <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:8px">BUKTI UTAMA (PILIH SALAH SATU)</div>
@@ -5485,7 +5494,7 @@ function movementEvidenceHTML() {
         ${attempt.evidencePhotoName ? `<p style="color:var(--muted);font-size:12px;margin:6px 0 0">✓ ${esc(attempt.evidencePhotoName)}</p>` : ""}
       </div>` : ""}
     ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
-    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>Kirim Bukti</button>`;
+    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? "Mengirim…" : "Kirim Bukti"}</button>`;
 }
 
 function wireMovementEvidenceHandlers() {
@@ -5624,10 +5633,12 @@ async function mvSubmitStrength() {
 // and feed the next quest/Riwayat as usual, just not echoed verbatim here.
 function movementSubmittedHTML() {
   return `
+    ${questEyebrowHTML(movementFlow.quest)}
     <div style="text-align:center;padding:20px 0 0">
       <div style="width:56px;height:56px;border-radius:50%;border:1px solid var(--growth);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;color:var(--growth);font-size:24px">✓</div>
       <h2 class="fr" style="font-size:19px;margin:0 0 6px">Bukti terkirim!</h2>
-      <p style="color:var(--muted);font-size:13.5px;margin:0 0 22px">Eleva sedang menganalisis progresmu.</p>
+      <p style="color:var(--muted);font-size:13.5px;margin:0 0 6px">Eleva sedang menganalisis progresmu.</p>
+      <p style="color:var(--muted);font-size:12.5px;margin:0 0 22px">Analisis lengkapnya akan muncul di quest berikutnya sebagai "Eleva Observed."</p>
     </div>
     <div class="quest-card" style="text-align:left">
       ${[
