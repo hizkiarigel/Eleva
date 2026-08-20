@@ -692,6 +692,12 @@ let jobApplicationFlow = null;
 // .app-shell chrome entirely (see renderDashboard's early-return) - the
 // design's own "test mode" requirement (header+tab bar hidden during the
 // exam). null when inactive.
+// Round 43: this same shell now also serves quest-driven weekly listening
+// sprints - extra fields when mode === "quest": { mode, origin, track,
+// payload (stripped weekly practice-test payload), questResult } - and the
+// assessment is built client-side via lstnAssessmentFromPayload. mode
+// undefined/"meta" = the original fixed META diagnostic, byte-identical
+// behavior.
 // {
 //   questId, step: "intro" | "active" | "submitted",
 //   assessment: { recordings, questions, matchingLegend } | null,  // stripped package from POST /api/meta/start
@@ -3263,6 +3269,15 @@ function lstnStop() {
 
 // "Start Listening" and "Putar sekali lagi" both call this. Never touches
 // .answers - a replay must never reset what the user has already typed.
+// Round 43: weekly quest content carries its own per-recording announcement
+// text; the fixed META diagnostic package has none and keeps the original
+// hardcoded lines - so that path's spoken output is byte-identical.
+function lstnAnnouncement(recordingId) {
+  const rec = listeningDiagnosticFlow?.assessment?.recordings?.find((r) => r.recordingId === recordingId);
+  if (rec?.announcement) return rec.announcement;
+  return recordingId === 1 ? LSTN_ANNOUNCE_REC1 : LSTN_ANNOUNCE_REC2;
+}
+
 function lstnStartRun() {
   const f = listeningDiagnosticFlow;
   if (!f || f.runsCompleted >= 2) return;
@@ -3270,7 +3285,7 @@ function lstnStartRun() {
   const gen = lstnGen;
   f.playback = { state: "playing-rec1", gen, recordingId: 1 };
   renderDashboard();
-  lstnSpeakOne(LSTN_ANNOUNCE_REC1, gen, 1, () => lstnBeginScript(1, gen));
+  lstnSpeakOne(lstnAnnouncement(1), gen, 1, () => lstnBeginScript(1, gen));
 }
 
 // One SpeechSynthesisUtterance - the single choke point every spoken step
@@ -3322,8 +3337,7 @@ function lstnRetry() {
   const gen = lstnGen;
   f.playback = { state: recordingId === 1 ? "playing-rec1" : "playing-rec2", gen, recordingId };
   renderDashboard();
-  const announce = recordingId === 1 ? LSTN_ANNOUNCE_REC1 : LSTN_ANNOUNCE_REC2;
-  lstnSpeakOne(announce, gen, recordingId, () => lstnBeginScript(recordingId, gen));
+  lstnSpeakOne(lstnAnnouncement(recordingId), gen, recordingId, () => lstnBeginScript(recordingId, gen));
 }
 
 // The spoken (not just visual) transition between recordings. The
@@ -3343,7 +3357,7 @@ function lstnBeginRecording2(gen) {
   if (gen !== lstnGen || !f) return;
   f.playback = { state: "playing-rec2", gen, recordingId: 2 };
   renderDashboard();
-  lstnSpeakOne(LSTN_ANNOUNCE_REC2, gen, 2, () => lstnBeginScript(2, gen));
+  lstnSpeakOne(lstnAnnouncement(2), gen, 2, () => lstnBeginScript(2, gen));
 }
 
 // The ONE place runsCompleted changes - only reached after recording 2's
@@ -3967,6 +3981,46 @@ function artifactsSheetHTML() {
 }
 
 // ==== Round 41: IELTS Listening Half Diagnostic ====================
+// Round 43: the same shell now serves TWO modes - the fixed META diagnostic
+// (mode "meta", unchanged) and the quest-driven weekly Listening sprint
+// (mode "quest"): weekly-generated content in the identical format, graded
+// through the practice-test pipeline so band/history/drills keep working.
+
+// Adapter: stripped weekly practice-test payload → the assessment shape the
+// lstn renderers/playback already consume. Flat question ids ("q1".."q20")
+// double as questionIds, so the answers map submits to
+// /api/practice-test/submit unchanged.
+function lstnAssessmentFromPayload(p) {
+  return {
+    recordings: p.recordings.map((r) => ({
+      ...r, audioSrc: null,
+      orderedQuestionRange: r.recordingId === 1 ? [1, 10] : [11, 20],
+    })),
+    questions: p.questions.map((q, i) => ({
+      questionId: q.id, questionNumber: i + 1,
+      recordingId: q.recordingId || (i < 10 ? 1 : 2),
+      taskType: q.section, prompt: q.text,
+      ...(q.options ? { options: q.options } : {}),
+      ...(q.maxWords ? { maxWords: q.maxWords } : {}),
+    })),
+    matchingLegend: p.matchingLegend || [],
+  };
+}
+
+// Entry point for a quest-driven listening sprint (practice-test quest,
+// kind "listening", v2 weekly payload with recordings). Mirrors
+// startReadingTest's role for the reading shell.
+function startListeningQuestTest(questId, track, payload, origin) {
+  listeningDiagnosticFlow = {
+    mode: "quest", questId, origin: origin || "home", track,
+    step: "intro",
+    assessment: lstnAssessmentFromPayload(payload), payload,
+    answers: {}, runsCompleted: 0,
+    playback: { state: "idle", gen: 0, recordingId: null },
+    deadlineTs: null, submitConfirmOpen: false, error: "",
+    submittedResult: null, questResult: null,
+  };
+}
 
 function lstnAnsweredCount(f) {
   return Object.values(f.answers).filter((v) => String(v || "").trim()).length;
@@ -4069,7 +4123,9 @@ function lstnNoteCompletionBlockHTML(f) {
       <input type="text" class="lstn-input" data-lstn-text="${q.questionId}" maxlength="40" placeholder="Jawaban" value="${esc(f.answers[q.questionId] || "")}" />
     </div>`).join("");
   return lstnBlockHTML({
-    range: "1–5", title: "Riverside Leisure Centre",
+    // Weekly quest content names its own recording; the fixed META
+    // diagnostic package carries no title and keeps the original literal.
+    range: "1–5", title: f.assessment.recordings?.[0]?.title || "Riverside Leisure Centre",
     instruction: "Complete the notes below. Write NO MORE THAN TWO WORDS AND/OR A NUMBER for each answer.",
     live, inner: rows,
   });
@@ -4218,9 +4274,10 @@ function lstnSubmitConfirmSheetHTML() {
 // early-return for step "active"/"submitted".
 function renderListeningDiagnosticTest() {
   const f = listeningDiagnosticFlow;
+  const submittedHTML = f.mode === "quest" ? lstnQuestResultHTML() : lstnSubmittedHTML();
   root.innerHTML = `
     <div class="lstn-shell">
-      ${f.step === "submitted" ? lstnSubmittedHTML() : lstnActiveHTML()}
+      ${f.step === "submitted" ? submittedHTML : lstnActiveHTML()}
     </div>
     ${f.submitConfirmOpen ? lstnSubmitConfirmSheetHTML() : ""}`;
   wireListeningDiagnosticHandlers();
@@ -4241,13 +4298,79 @@ async function lstnDoSubmit() {
   f.submitConfirmOpen = false;
   f.error = "";
   try {
-    const resp = await api("/api/listening-diagnostic/submit", { method: "POST", body: { questId: f.questId, answers: f.answers, runsCompleted: f.runsCompleted } });
-    f.step = "submitted";
-    f.submittedResult = { correct: resp.correct, total: resp.totalQuestions, answeredCount: resp.answeredCount, wrong: resp.wrong, byTaskType: resp.byTaskType };
+    if (f.mode === "quest") {
+      // Quest-driven weekly sprint: grade through the practice-test
+      // pipeline (band/history/drill scheduling), not the diagnostic route.
+      // Answer keys match because flat ids double as questionIds.
+      const resp = await api("/api/practice-test/submit", { method: "POST", body: { questId: f.questId, answers: f.answers } });
+      questCtaState.set(f.questId, "completed");
+      f.step = "submitted";
+      f.questResult = { score: resp.score, total: resp.total, wrong: resp.wrong || [], assessment: resp.assessment || null, mentorReply: resp.mentorReply || "" };
+    } else {
+      const resp = await api("/api/listening-diagnostic/submit", { method: "POST", body: { questId: f.questId, answers: f.answers, runsCompleted: f.runsCompleted } });
+      f.step = "submitted";
+      f.submittedResult = { correct: resp.correct, total: resp.totalQuestions, answeredCount: resp.answeredCount, wrong: resp.wrong, byTaskType: resp.byTaskType };
+    }
   } catch (e) {
     f.error = e.message;
   }
   renderDashboard();
+}
+
+// Quest-mode result screen - the structured practice-test result (band
+// RANGE + confidence, per-block strong/weak, Eleva note, wrong-answer
+// accordion) rendered inside the listening shell. Reuses the .rdg-result-*
+// classes (identical layout language, different labels) rather than
+// duplicating a CSS section.
+function lstnQuestResultHTML() {
+  const f = listeningDiagnosticFlow;
+  const r = f.questResult || {};
+  const a = r.assessment || null;
+  const cats = a?.categories?.breakdown || {};
+  const catRow = (c) => {
+    const b = cats[c];
+    return `<div class="rdg-result-cat"><span>${esc(rdgCategoryLabel(c))}</span><span class="mono">${b ? `${b.correct}/${b.total}` : ""}</span></div>`;
+  };
+  const strong = a?.categories?.strong || [];
+  const unstable = a?.categories?.unstable || [];
+  const wrong = r.wrong || [];
+  const note = r.mentorReply || a?.decision?.currentTarget || "";
+  const qNum = (id) => (f.payload?.questions.findIndex((q) => q.id === id) ?? -1) + 1 || "";
+  return `
+    <div class="rdg-result">
+      <div class="eyebrow mono rdg-result-eyebrow">LISTENING RESULT</div>
+      <div class="rdg-result-score fr">${r.score ?? "–"} / ${r.total ?? 20}</div>
+      ${a && a.band ? `
+        <p class="rdg-result-band">Estimated Listening: <b>${a.band.rangeLow}–${a.band.rangeHigh}</b></p>
+        <p class="rdg-result-band-meta mono">Confidence: ${esc(a.confidence || "Low")} · ${a.totalQuestions} questions observed</p>` : ""}
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label" style="color:#8fbf9f">WHAT YOU DID WELL</div>
+        ${strong.length ? strong.map(catRow).join("") : `<p class="rdg-result-neutral">Belum ada kategori yang menonjol di attempt ini.</p>`}
+      </div>
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label" style="color:#c9564f">NEEDS WORK</div>
+        ${unstable.length ? unstable.map(catRow).join("") : `<p class="rdg-result-neutral">Tidak ada kategori yang jatuh di attempt ini.</p>`}
+      </div>
+      ${note ? `
+      <div class="rdg-result-note">
+        <div class="eyebrow mono" style="color:#e8a33d">YANG ELEVA LIHAT</div>
+        <p>${esc(note)}</p>
+        ${a?.decision?.nextTrial ? `<p class="rdg-result-next mono">Next: ${esc(a.decision.nextTrial)}</p>` : ""}
+      </div>` : ""}
+      ${wrong.length ? `
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label">PEMBAHASAN SOAL YANG SALAH</div>
+        ${wrong.map((w) => `
+          <details class="rdg-wrong">
+            <summary><span class="mono rdg-qnum">${qNum(w.id)}</span> ${esc(w.text.length > 80 ? w.text.slice(0, 80) + "…" : w.text)}</summary>
+            <div class="rdg-wrong-body">
+              <p class="mono">Jawabanmu: ${esc(w.yourAnswer || "-")} · Benar: ${esc(w.correctAnswer)}</p>
+              ${w.explanation ? `<p>${esc(w.explanation)}</p>` : ""}
+            </div>
+          </details>`).join("")}
+      </div>` : `<p class="rdg-result-neutral" style="text-align:center">Semua benar — mantap.</p>`}
+      <button class="btn-primary full" id="lstnQuestExit" style="margin-top:16px">Selesai</button>
+    </div>`;
 }
 
 function wireListeningDiagnosticHandlers() {
@@ -4260,8 +4383,10 @@ function wireListeningDiagnosticHandlers() {
     // Same precedent as ptCancel: just clears client state, no API call -
     // the just-created META quest row is left open/unreflected, same
     // "orphaned META session is fine, never blocks anything" convention.
+    // Quest mode returns to where the quest lives (Home), not META.
+    const f = listeningDiagnosticFlow;
     listeningDiagnosticFlow = null;
-    activeScreen = "meta";
+    activeScreen = f?.mode === "quest" ? (f.origin === "meta" ? "meta" : "home") : "meta";
     renderDashboard();
   });
   document.getElementById("lstnPlayBtn")?.addEventListener("click", () => lstnStartRun());
@@ -4307,6 +4432,17 @@ function wireListeningDiagnosticHandlers() {
     activeScreen = "meta";
     renderDashboard();
   });
+  // Quest-mode result exit: the reflection is already saved server-side -
+  // refetch state so Home reflects the completed quest (same idiom as
+  // rdgExit for the reading shell).
+  document.getElementById("lstnQuestExit")?.addEventListener("click", async () => {
+    const f = listeningDiagnosticFlow;
+    listeningDiagnosticFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state").catch(() => appState);
+    activeScreen = f?.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
 }
 
 // ==== Round 42: IELTS Reading Half Diagnostic ======================
@@ -4324,6 +4460,8 @@ const RDG_CATEGORY_LABEL = {
   "true/false/not given": "True / False / Not Given",
   "matching information": "Matching Information",
   "sentence completion": "Sentence Completion",
+  "note completion": "Note Completion",
+  "matching": "Matching",
 };
 function rdgCategoryLabel(cat) {
   return RDG_CATEGORY_LABEL[cat] || (cat ? cat.replace(/\b\w/g, (c) => c.toUpperCase()) : "Lainnya");
@@ -5863,7 +6001,13 @@ function questHubCardsHTML(quests) {
 // chain feature) taking priority over all of it when present.
 function questEyebrowHTML(quest) {
   const isMultiDomain = quest.completionType === "multi-domain";
-  const somaSubLabel = quest.primaryFeature === "MOVEMENT" ? "Training" : "";
+  // Sub-label slot: SOMA Training for MOVEMENT quests; round 43 (founder
+  // feedback) - practice-test quests name their measured skill the same way
+  // ("QUEST HARI INI · GROWTH: LISTENING"), kind from practiceTestSchema,
+  // default reading.
+  const somaSubLabel = quest.primaryFeature === "MOVEMENT" ? "Training"
+    : quest.completionType === "practice-test" ? (PRACTICE_LABELS[quest.practiceTestSchema?.kind || "reading"] || "Reading")
+    : "";
   const statTag = quest.statFocus ? esc(statLabel(quest.statFocus)).toUpperCase() : "";
   let base = `QUEST HARI INI${statTag ? " · " + statTag + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(quest, true)) : ""}`;
   // Founder request 19 Agustus: name the LABORA feature in the eyebrow -
@@ -7743,11 +7887,15 @@ function renderDashboard() {
       root.innerHTML = spinnerHTML("Menyusun soal...");
       try {
         const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: id, kind, track } });
-        // Round 42: every reading payload (sprint AND drill) opens in the
-        // dedicated test-mode shell; the old flat quiz card only remains for
-        // the unreachable listening kind.
+        // Round 42/43: reading opens the reading test shell; a listening
+        // sprint (v2 payload with recordings) opens the listening
+        // diagnostic shell in quest mode. The old flat quiz card only
+        // remains for drills/legacy flat payloads.
         if (kind === "reading") {
           startReadingTest(id, track, resp, "home");
+          practiceTestFlow = null;
+        } else if (kind === "listening" && resp.recordings) {
+          startListeningQuestTest(id, track, resp, "home");
           practiceTestFlow = null;
         } else {
           practiceTestFlow.payload = resp;
@@ -8120,11 +8268,14 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyusun soal...");
     try {
       const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: practiceTestFlow.questId, kind: practiceTestFlow.kind, track: practiceTestFlow.track } });
-      // Round 42: reading goes to the dedicated test shell (see the quest
-      // handler above); only the unreachable listening kind still uses the
-      // flat quiz card.
+      // Round 42/43: reading goes to the reading shell, listening sprints
+      // to the listening shell in quest mode; only flat payloads (drills)
+      // still use the flat quiz card.
       if (practiceTestFlow.kind === "reading") {
         startReadingTest(practiceTestFlow.questId, practiceTestFlow.track, resp, practiceTestFlow.origin || "meta");
+        practiceTestFlow = null;
+      } else if (practiceTestFlow.kind === "listening" && resp.recordings) {
+        startListeningQuestTest(practiceTestFlow.questId, practiceTestFlow.track, resp, practiceTestFlow.origin || "meta");
         practiceTestFlow = null;
       } else {
         practiceTestFlow.payload = resp;
@@ -8188,6 +8339,9 @@ function renderDashboard() {
       const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: f.questId, kind: f.kind, track: f.track } });
       if (f.kind === "reading") {
         startReadingTest(f.questId, f.track, resp, f.origin || "home");
+        practiceTestFlow = null;
+      } else if (f.kind === "listening" && resp.recordings) {
+        startListeningQuestTest(f.questId, f.track, resp, f.origin || "home");
         practiceTestFlow = null;
       } else {
         f.payload = resp;

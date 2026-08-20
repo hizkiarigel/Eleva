@@ -305,6 +305,73 @@ test("keeps blocks/section/maxWords/weekKey, still strips every answer field", (
   assert.ok(!s.includes("correctAnswer") && !s.includes("acceptableAnswers") && !s.includes("explanation") && !s.includes("category"), "answer key fields must not leak");
 });
 
+console.log("Unit: cleanListeningSprintPayload (strict all-or-null, round 43)");
+function makeListeningRaw(mutate) {
+  const script = "hello and welcome to the centre today we will talk through everything you need ".repeat(20).trim(); // 14 words x 20 = 280
+  const rec = (id, title) => ({ recordingId: id, title, announcement: `Recording ${id}. You will hear something. Questions.`, script });
+  const legend = ["A", "B", "C", "D", "E"].map((letter, i) => ({ letter, label: `Team ${i + 1}` }));
+  const questions = [];
+  for (let i = 1; i <= 5; i++) questions.push({ id: `q${i}`, text: `note ${i}`, correctAnswer: "two words", acceptableAnswers: ["2 words"], explanation: "e" });
+  for (let i = 6; i <= 10; i++) questions.push({ id: `q${i}`, text: `mc ${i}`, options: [{ letter: "A", label: "one" }, { letter: "B", label: "two" }, { letter: "C", label: "three" }], correctAnswer: "B", explanation: "e" });
+  for (let i = 11; i <= 15; i++) questions.push({ id: `q${i}`, text: `match ${i}`, correctAnswer: "C", explanation: "e" });
+  for (let i = 16; i <= 20; i++) questions.push({ id: `q${i}`, text: `sentence ${i}`, correctAnswer: "one word", explanation: "e" });
+  const raw = { recordings: [rec(1, "Rec One Title"), rec(2, "Rec Two Title")], matchingLegend: legend, questions };
+  if (mutate) mutate(raw);
+  return raw;
+}
+test("valid listening payload normalizes: recordings, legend, 4 blocks, letter answers", () => {
+  const clean = pt.cleanListeningSprintPayload(makeListeningRaw());
+  assert.ok(clean, "valid payload must pass");
+  assert.strictEqual(clean.recordings.length, 2);
+  assert.ok(clean.recordings[0].announcement && clean.recordings[1].title);
+  assert.deepStrictEqual(clean.blocks.map((b) => b.blockType), ["note_completion", "multiple_choice", "matching", "sentence_completion"]);
+  assert.deepStrictEqual(clean.questions.map((q) => q.type).join(","), [...Array(5).fill("fill"), ...Array(5).fill("mc"), ...Array(5).fill("matching"), ...Array(5).fill("fill")].join(","));
+  assert.strictEqual(clean.questions[0].maxWords, 2);
+  assert.strictEqual(clean.questions[5].correctAnswer, "B");
+  assert.deepStrictEqual(clean.questions[5].options[0], { letter: "A", label: "one" });
+  assert.strictEqual(clean.questions[10].recordingId, 2);
+});
+test("1 recording → null; empty announcement → null; short script → null", () => {
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => r.recordings.pop())), null);
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.recordings[0].announcement = ""; })), null);
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.recordings[1].script = "too short"; })), null);
+});
+test("legend must be exactly 5 A-E", () => {
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => r.matchingLegend.pop())), null);
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.matchingLegend[2].letter = "X"; })), null);
+});
+test("mc needs exactly 3 A-C options with a letter answer; matching answer must be A-E", () => {
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => r.questions[6].options.pop())), null);
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.questions[6].correctAnswer = "D"; })), null);
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.questions[11].correctAnswer = "F"; })), null);
+  const lower = pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.questions[11].correctAnswer = "c"; }));
+  assert.strictEqual(lower.questions[11].correctAnswer, "C", "letter answers normalize to uppercase");
+});
+test("completion keys respect the 2-word limit", () => {
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.questions[0].correctAnswer = "three whole words"; })), null);
+  assert.strictEqual(pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.questions[16].acceptableAnswers = ["three whole words"]; })), null);
+});
+test("stripAnswers keeps recordings/legend/recordingId, still strips the key", () => {
+  const cleaned = pt.cleanListeningSprintPayload(makeListeningRaw());
+  const stripped = pt.stripAnswers({ kind: "listening", track: "academic", entryType: "sprint", schemaVersion: 2, weekKey: "2026-08-17", ...cleaned });
+  assert.strictEqual(stripped.recordings.length, 2);
+  assert.strictEqual(stripped.matchingLegend.length, 5);
+  assert.strictEqual(stripped.questions[10].recordingId, 2);
+  const s = JSON.stringify(stripped);
+  assert.ok(!s.includes("correctAnswer") && !s.includes("acceptableAnswers") && !s.includes("explanation"), "answer key must not leak");
+});
+test("listening fallback = the fixed round-41 diagnostic converted to v2", () => {
+  const ai = require("../server/claude");
+  const fb = ai.fallbackListeningSprint();
+  assert.strictEqual(fb.questions.length, 20);
+  assert.strictEqual(fb.recordings[0].title, "Riverside Leisure Centre");
+  assert.strictEqual(fb.matchingLegend.length, 5);
+  assert.strictEqual(fb.blocks.length, 4);
+  // grading via the practice-test pipeline honors acceptableAnswers
+  const g = pt.gradeAnswers(fb.questions, { q19: "forty-eight" });
+  assert.strictEqual(g.correct, 1);
+});
+
 console.log("Unit: reading fallback fixture is a valid v2 sprint");
 test("fallbackPracticeTest reading = 4 labelled paragraphs + exact 5/5/5/5 blocks", () => {
   const ai = require("../server/claude");
@@ -511,10 +578,11 @@ async function apiTests() {
   const readingQuestA = await insertQuest({ kind: "reading", track: "academic" });
   const readingQuestB = await insertQuest({ kind: "reading", track: "academic" });
 
-  // The weekly cache is GLOBAL (not per-user like everything else this
+  // The weekly caches are GLOBAL (not per-user like everything else this
   // script creates), so leftovers from a previous run on the same scratch DB
   // must be cleared or the empty-cache/seed assertions below break.
   await sql.query("DELETE FROM weekly_reading_tests");
+  await sql.query("DELETE FROM weekly_listening_tests");
 
   await atest("keyless reading sprint serves the v2 fallback and never caches it", async () => {
     const { json } = await call("/api/practice-test/generate", { questId: readingQuestA, kind: "reading", track: "academic" });
@@ -589,6 +657,58 @@ async function apiTests() {
     assert.ok(json.focusCategory, "drill focusCategory missing");
     assert.ok(json.questions.length <= 12, "drill must be 12 questions or fewer");
     assert.ok(!json.blocks, "drill must not carry sprint blocks");
+  });
+
+  // --- Round 43: weekly LISTENING sprint (diagnostic format + global cache) ---
+
+  // Goal-less META-style quests: their track state is always empty, so these
+  // generates are guaranteed sprints (the goal-0 listening track already has
+  // a pending drill from the tests above).
+  async function insertMetaQuest() {
+    const quest = {
+      mode: "quest", completionType: "practice-test", structuredKind: null,
+      evidenceSchema: null, practiceTestSchema: null,
+      title: "Practice Test Mandiri", description: "Sesi bebas.", statFocus: "growth", why: "test",
+    };
+    const { rows } = await sql.query(
+      `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest, is_meta)
+       VALUES ($1, NULL, '2026-08-12', $2, NULL, NULL, false, true) RETURNING id`,
+      [userId, quest]
+    );
+    return rows[0].id;
+  }
+
+  await atest("keyless listening sprint serves the converted round-41 diagnostic, uncached", async () => {
+    const questId = await insertMetaQuest();
+    const { json } = await call("/api/practice-test/generate", { questId, kind: "listening", track: "academic" });
+    assert.strictEqual(json.entryType, "sprint");
+    assert.strictEqual(json.schemaVersion, 2);
+    assert.strictEqual(json.recordings.length, 2);
+    assert.strictEqual(json.recordings[0].title, "Riverside Leisure Centre");
+    assert.strictEqual(json.matchingLegend.length, 5);
+    assert.strictEqual(json.blocks.length, 4);
+    assert.strictEqual(json.questions.length, 20);
+    const s = JSON.stringify(json);
+    assert.ok(!s.includes("correctAnswer") && !s.includes("acceptableAnswers"), "answer key must not leak");
+    const { rows } = await sql.query("SELECT count(*)::int AS n FROM weekly_listening_tests");
+    assert.strictEqual(rows[0].n, 0, "fallback must NOT be cached as the week's content");
+  });
+
+  await atest("seeded weekly listening content is served to every attempt that week", async () => {
+    const seededListening = pt.cleanListeningSprintPayload(makeListeningRaw((r) => { r.recordings[0].title = "Seeded Listening Week"; }));
+    assert.ok(seededListening, "listening seed fixture must pass the strict validator");
+    await sql.query(`INSERT INTO weekly_listening_tests (week_key, payload) VALUES ($1, $2)`, [testWeekKey(), seededListening]);
+    const questId = await insertMetaQuest();
+    const { json } = await call("/api/practice-test/generate", { questId, kind: "listening", track: "academic" });
+    assert.strictEqual(json.recordings[0].title, "Seeded Listening Week");
+    // submit grades through the practice-test pipeline (band assessment)
+    const answers = {};
+    json.questions.forEach((q, i) => { answers[q.id] = q.type === "mc" ? "B" : q.type === "matching" ? "C" : "two words"; });
+    const { json: sub } = await call("/api/practice-test/submit", { questId, answers });
+    assert.ok(sub.assessment && sub.assessment.band, "band assessment missing");
+    assert.strictEqual(sub.assessment.trackKey, "listening");
+    // seed keys: notes "two words", mc "B", matching "C", sentences "one word" -> 15/20
+    assert.strictEqual(sub.score, 15);
   });
 
   await sql.end();
