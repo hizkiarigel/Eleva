@@ -591,6 +591,48 @@ const READING_FALLBACK_V2 = (() => {
   return cleaned;
 })();
 
+// Round 43: the LISTENING sprint fallback is the round-41 hand-authored
+// diagnostic package (server/listeningDiagnostic.js) converted into the
+// weekly-sprint payload shape - highest-quality static content we have, in
+// exactly the right format, so keyless mode exercises the same shell and
+// grading path as generated weeks. Built + validated once at module load
+// (fail-fast), same guarantee as READING_FALLBACK_V2 above.
+const listeningDiagnostic = require("./listeningDiagnostic");
+const LISTENING_FALLBACK_V2 = (() => {
+  const ld = listeningDiagnostic.ASSESSMENT;
+  const raw = {
+    recordings: [
+      {
+        recordingId: 1, title: "Riverside Leisure Centre",
+        announcement: "Recording 1. You will hear a telephone conversation between a woman and a staff member at a leisure centre. Questions 1 to 10.",
+        script: ld.recordings[0].script,
+      },
+      {
+        recordingId: 2, title: "Bright Start Community Garden",
+        announcement: "Recording 2. You will hear a talk given by a volunteer coordinator at a community garden. Questions 11 to 20.",
+        script: ld.recordings[1].script,
+      },
+    ],
+    matchingLegend: ld.matchingLegend,
+    questions: ld.questions.map((q) => ({
+      id: q.questionId, text: q.prompt, correctAnswer: q.correctAnswer,
+      ...(q.options ? { options: q.options } : {}),
+      ...(q.acceptableAnswers && q.acceptableAnswers.length ? { acceptableAnswers: q.acceptableAnswers } : {}),
+    })),
+  };
+  const cleaned = practiceTest.cleanListeningSprintPayload(raw, { minScriptWords: 0 });
+  if (!cleaned) throw new Error("LISTENING_FALLBACK_V2 failed cleanListeningSprintPayload - fix the conversion before deploying");
+  return cleaned;
+})();
+
+// Serves the converted fixed-diagnostic package for a listening sprint when
+// weekly generation fails or no API key is present. Shallow-cloned so the
+// caller can spread/augment without touching the shared constant. Never
+// cached as a week's content (same rule as the reading fallback).
+function fallbackListeningSprint() {
+  return { ...LISTENING_FALLBACK_V2, questions: [...LISTENING_FALLBACK_V2.questions] };
+}
+
 async function generatePracticeTest(ctx) {
   if (!hasKey()) return fallbackPracticeTest(ctx);
   try {
@@ -668,6 +710,55 @@ ${blocksSpec.map((b, i) => `- q${i * 5 + 1}-q${i * 5 + 5}: ${b.label}`).join("\n
     }
   }
   throw lastError || new Error("reading sprint generation failed");
+}
+
+// Round 43: weekly LISTENING sprint in the round-41 diagnostic format -
+// 2 TTS-spoken recordings + 20 questions in the exact 4-block structure
+// (note completion / MC / matching / sentence completion, NO True/False).
+// Same contract as generateReadingSprintContent: weekly-GLOBAL content,
+// fixed mid difficulty, global topic dedup via ctx.avoidTitles, strict
+// validation, one retry, then THROW (the route serves the converted fixed
+// diagnostic as an uncached fallback).
+async function generateListeningSprintContent(ctx) {
+  if (!hasKey()) throw new Error("no API key");
+  const avoidNote = ctx.avoidTitles && ctx.avoidTitles.length
+    ? `\n\nTopik/setting minggu-minggu sebelumnya (JANGAN pakai yang sama atau mirip): ${ctx.avoidTitles.map((t) => `"${t}"`).join(", ")}.`
+    : "";
+  const user = `Tugas: buatkan SATU paket "IELTS Listening Half Diagnostic" - 2 rekaman (dibacakan lewat text-to-speech browser) + TEPAT 20 soal dalam 4 blok berurutan. Paket ini dipakai semua pengguna selama seminggu, jadi kualitas dan ketepatan format WAJIB tinggi.
+
+Balas JSON dengan bentuk PERSIS (tanpa teks lain):
+{"recordings": [{"recordingId": 1, "title": string, "announcement": string, "script": string}, {"recordingId": 2, "title": string, "announcement": string, "script": string}], "matchingLegend": [{"letter": "A", "label": string}, ... persis 5 item A-E], "questions": [{"id": "q1", "text": string, "options": [{"letter": "A", "label": string}], "correctAnswer": string, "acceptableAnswers": [string], "explanation": string}]}
+
+REKAMAN (Bahasa Inggris, konvensi IELTS Listening asli):
+- Recording 1 (soal 1-10): percakapan dua orang tentang urusan sehari-hari/transaksional (mis. mendaftar layanan, bertanya fasilitas, memesan sesuatu). 250-450 kata.
+- Recording 2 (soal 11-20): monolog satu pembicara dalam konteks sosial/komunitas (mis. orientasi relawan, pengumuman acara, tur). 300-500 kata.
+- Skrip HARUS enak dibacakan text-to-speech: kalimat pendek natural, TANPA format daftar/bullet, angka disebut jelas. Setiap jawaban disebut JELAS, SEKALI (boleh dikonfirmasi ulang oleh lawan bicara), dan DALAM URUTAN SOAL - soal 1 terjawab lebih dulu dari soal 2, dst.
+- Untuk blok matching: skrip Recording 2 memperkenalkan kelima item legend dulu, lalu menegaskan ulang fakta pembedanya (teknik IELTS asli - jawaban matching baru terkunci di penegasan kedua).
+- "title": nama tempat/acara pendek (mis. "Riverside Leisure Centre"). "announcement": satu-dua kalimat pembuka gaya IELTS ("Recording 1. You will hear ... Questions 1 to 10.").
+- Topik netral dan bervariasi.${avoidNote}
+
+SOAL - TEPAT 20, id "q1" sampai "q20" BERURUTAN, dalam 4 blok PERSIS (TANPA True/False - bukan bagian format ini):
+- q1-q5 (Note Completion, dari Recording 1): "text" berisi catatan rumpang pendek ("Weekday closing time", "Cost of ... ($)"). "correctAnswer" maksimal 2 kata dan/atau angka PERSIS seperti diucapkan. "acceptableAnswers" berisi variasi wajar penulisan (mis. "10pm"/"10 pm"/"22:00"). TANPA "options".
+- q6-q10 (Multiple Choice, dari Recording 1): "options" WAJIB persis 3 item berhuruf A, B, C. "correctAnswer" persis "A"/"B"/"C". Distraktor harus disebut di skrip lalu dinegasikan/dikoreksi (bukan asal beda).
+- q11-q15 (Matching, dari Recording 2): "matchingLegend" persis 5 item A-E (nama tim/kategori/fitur). "text" berisi pernyataan yang dicocokkan, "correctAnswer" persis "A"-"E". TANPA "options" per soal. Setiap huruf legend dipakai TEPAT satu kali.
+- q16-q20 (Sentence Completion, dari Recording 2): kalimat rumpang dengan ______, "correctAnswer" maksimal 2 kata dan/atau angka dari skrip. "acceptableAnswers" variasi wajar. TANPA "options".
+- SEMUA jawaban harus benar-benar bisa didengar di skripnya, dalam urutan nomor soal. Tiap soal punya TEPAT SATU jawaban benar.
+- "explanation" WAJIB di semua soal: satu kalimat pendek Bahasa Indonesia menyebut bagian skrip mana yang menjawabnya.`;
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await callClaude(user, { maxTokens: 6000 });
+      const cleaned = practiceTest.cleanListeningSprintPayload(result);
+      if (cleaned) return cleaned;
+      lastError = new Error("listening sprint payload failed validation");
+      console.error(`generateListeningSprintContent attempt ${attempt + 1}: payload rejected by cleanListeningSprintPayload`);
+    } catch (e) {
+      lastError = e;
+      console.error(`generateListeningSprintContent attempt ${attempt + 1} failed:`, e.message);
+    }
+  }
+  throw lastError || new Error("listening sprint generation failed");
 }
 
 // Task 10b (Job Match Analysis): the only multimodal generate* function in
@@ -1217,7 +1308,8 @@ function fallbackChapterAnalysis(ctx, shifts, flaggedTension, erodedLocks) {
 module.exports = {
   generateQuest, processReflection, hasKey,
   generateScenarioCard, generateChapterAnalysis,
-  generateTargetOptions, generatePracticeTest, generateReadingSprintContent, fallbackPracticeTest, generateJobMatchAnalysis,
+  generateTargetOptions, generatePracticeTest, generateReadingSprintContent, generateListeningSprintContent,
+  fallbackPracticeTest, fallbackListeningSprint, generateJobMatchAnalysis,
   PATHWAY_NAMES, SUB_PATHWAY_NAMES, fallbackChapterAnalysis, normalizeSubPathway,
   normalizeEvidenceSchema, generateSideQuest,
   normalizeCompletionType, fallbackReflection, looksRecoveryThemed, analyzeNutritionPhoto,

@@ -107,21 +107,28 @@ async function test(name, fn) {
   }
 
   console.log("E2E: Today's Trial practice-test quests always skip the picker (12 Agustus follow-up)");
-  await test("full schema (kind+track) goes straight to the questions", async () => {
+  await test("full schema (kind+track) goes straight to the listening test intro (round 43 shell)", async () => {
     await openDashboard();
     await page.click(`[data-reflect-id="${fullQuest}"]`);
-    await page.waitForSelector("#ptSubmit", { timeout: 20000 });
+    await page.waitForSelector("#lstnStart", { timeout: 20000 });
     assert.strictEqual(await page.locator('text=Mau latihan apa dulu?').count(), 0, "kind picker must not appear");
     assert.strictEqual(await page.locator('text=Academic atau General Training?').count(), 0, "track picker must not appear");
+    assert.strictEqual(await page.locator("#ptSubmit").count(), 0, "old flat quiz must not render for a listening sprint");
+    await page.click("#lstnCancel");
   });
 
-  await test("kind-only schema also goes straight to the questions (track defaults to academic)", async () => {
+  await test("kind-only schema also goes straight to the listening intro (track defaults to academic)", async () => {
     await openDashboard();
     await page.click('[data-qhub-idx="1"]'); // select the 2nd quest hub card (kindQuest) before its detail-panel CTA exists
     await page.click(`[data-reflect-id="${kindQuest}"]`);
-    await page.waitForSelector("#ptSubmit", { timeout: 20000 });
+    await page.waitForSelector("#lstnStart", { timeout: 20000 });
     assert.strictEqual(await page.locator('text=Academic atau General Training?').count(), 0, "track picker must not appear");
-    await page.click("#ptCancel");
+    await page.click("#lstnCancel");
+  });
+
+  await test("practice-test quest eyebrow names the skill (Growth: Listening)", async () => {
+    await openDashboard();
+    assert.ok(await page.locator('text=GROWTH: LISTENING').count(), "eyebrow must carry the practice-test kind");
   });
 
   await test("no schema defaults to reading/academic and opens the Round 42 test-shell intro (not the flat quiz)", async () => {
@@ -152,30 +159,31 @@ async function test(name, fn) {
     await page.click("#ptCancel");
   });
 
-  console.log("E2E: Task 13 result card blocks");
-  await test("submitting a sprint renders SPRINT #, ESTIMATED LEVEL, ELEVA OBSERVED, ELEVA DECISION", async () => {
+  console.log("E2E: Round 43 listening sprint in the diagnostic shell + Task 13 band result");
+  await test("listening sprint runs in the chrome-free lstn shell and ends on a band-range result", async () => {
     await openDashboard();
     await page.click(`[data-reflect-id="${fullQuest}"]`);
-    await page.waitForSelector("#ptSubmit", { timeout: 20000 });
-    // Answer every question: first option for choice questions, text for fills.
-    const choiceIds = await page.$$eval("[data-pt-choice]", (els) => [...new Set(els.map((e) => e.dataset.ptChoice))]);
-    for (const qid of choiceIds) {
-      await page.click(`[data-pt-choice="${qid}"]`); // first match = first option
-    }
-    const fillIds = await page.$$eval("[data-pt-fill]", (els) => els.map((e) => e.dataset.ptFill));
-    for (const qid of fillIds) {
-      await page.fill(`[data-pt-fill="${qid}"]`, "eight");
-    }
-    await page.click("#ptSubmit");
-    await page.waitForSelector('text=ESTIMATED LEVEL', { timeout: 20000 });
-    assert.ok(await page.locator('text=LISTENING SPRINT #01').count(), "sprint header missing");
-    assert.ok(await page.locator('text=ELEVA OBSERVED').count(), "observed block missing");
-    assert.ok(await page.locator('text=ELEVA DECISION').count(), "decision block missing");
-    assert.ok(await page.locator('text=Confidence:').count(), "confidence line missing");
-    assert.ok(await page.locator('text=Primary Quest').count(), "primary quest line missing");
-    // Band must render as a range, never a single score
-    const bandText = await page.locator(".pt-band").innerText();
-    assert.ok(/IELTS \d(\.5)?–\d(\.5)?/.test(bandText), `band not a range: ${bandText}`);
+    await page.waitForSelector("#lstnStart", { timeout: 20000 });
+    await page.click("#lstnStart");
+    await page.waitForSelector(".lstn-shell", { timeout: 20000 });
+    assert.strictEqual(await page.locator(".app-shell").count(), 0, "app chrome must be hidden during the test");
+    // Answer every question without playing audio: text fills, MC letters,
+    // matching letters (headless has no speechSynthesis - playback shows an
+    // error state, which must not block answering).
+    const textIds = await page.$$eval("[data-lstn-text]", (els) => els.map((e) => e.dataset.lstnText));
+    for (const qid of textIds) await page.fill(`[data-lstn-text="${qid}"]`, "eight");
+    const mcIds = await page.$$eval("[data-lstn-mc]", (els) => [...new Set(els.map((e) => e.dataset.lstnMc))]);
+    for (const qid of mcIds) await page.click(`[data-lstn-mc="${qid}"] >> nth=0`);
+    const matchIds = await page.$$eval("[data-lstn-match]", (els) => [...new Set(els.map((e) => e.dataset.lstnMatch))]);
+    for (const qid of matchIds) await page.click(`[data-lstn-match="${qid}"] >> nth=0`);
+    await page.click("#lstnFootSubmit");
+    await page.waitForSelector('text=LISTENING RESULT', { timeout: 30000 });
+    assert.strictEqual(await page.locator(".app-shell").count(), 0, "result must render in the shell");
+    const bandText = await page.locator(".rdg-result-band").innerText();
+    assert.ok(/\d(\.5)?–\d(\.5)?/.test(bandText), `band not a range: ${bandText}`);
+    assert.ok(await page.locator('text=NEEDS WORK').count(), "needs-work block missing");
+    await page.click("#lstnQuestExit");
+    await page.waitForSelector(".tab-bar", { timeout: 20000 });
   });
 
   console.log("E2E: Round 42 Reading Half Diagnostic test shell");

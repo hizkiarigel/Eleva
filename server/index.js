@@ -1180,6 +1180,26 @@ app.post("/api/practice-test/generate", requireAuth, async (req, res) => {
       }
       const body = content || ai.fallbackPracticeTest({ kind, track, drill: null });
       payload = { kind, track, entryType: "sprint", schemaVersion: 2, weekKey, ...body };
+    } else if (kind === "listening" && !nextDrill) {
+      // Round 43 (founder feedback): the quest-driven LISTENING sprint now
+      // uses the round-41 diagnostic format (2 TTS recordings + 4 task-type
+      // blocks) with the same weekly-global rotation as reading. Fallback =
+      // the hand-authored fixed diagnostic converted to this shape - served
+      // per-attempt, never cached (same rule as reading).
+      const weekKey = startOfWeekKey();
+      let content = await db.getWeeklyListeningTest(weekKey);
+      if (!content) {
+        try {
+          const avoidTitles = await db.recentWeeklyListeningTitles();
+          const fresh = await ai.generateListeningSprintContent({ avoidTitles });
+          content = await db.insertWeeklyListeningTestIfAbsent(weekKey, fresh);
+        } catch (e) {
+          console.error("weekly listening sprint generation failed, serving uncached fallback:", e.message);
+          content = null;
+        }
+      }
+      const body = content || ai.fallbackListeningSprint();
+      payload = { kind, track, entryType: "sprint", schemaVersion: 2, weekKey, ...body };
     } else {
       const result = await ai.generatePracticeTest({
         kind, track, level: trackState.level || 1,

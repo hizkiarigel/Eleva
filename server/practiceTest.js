@@ -71,6 +71,45 @@ const READING_SPRINT_BLOCKS = [
 ];
 const READING_BLOCK_SIZE = 5;
 const PARAGRAPH_LABELS = ["A", "B", "C", "D"];
+
+// Round 43 (founder feedback on round 42's deploy): the quest-driven
+// LISTENING sprint adopts the round-41 Listening Half Diagnostic format -
+// 2 TTS-spoken recordings + the same 4 task types, 5 each, in this order
+// (deliberately NO True/False, per that design). Same flat-questions
+// contract as reading: each block maps to an existing QUESTION_TYPES code
+// so gradeAnswers/band/drill work unchanged. mc/matching answers are the
+// LETTER (grading never needs the label), matching legend is shared
+// context like the fixed diagnostic's MATCHING_LEGEND.
+const LISTENING_SPRINT_BLOCKS = [
+  {
+    blockType: "note_completion", type: "fill", label: "Note Completion",
+    category: "note completion", recordingId: 1, maxWords: 2,
+    instruction: "Complete the notes below. Write NO MORE THAN TWO WORDS AND/OR A NUMBER for each answer.",
+  },
+  {
+    blockType: "multiple_choice", type: "mc", label: "Multiple Choice",
+    category: "multiple choice", recordingId: 1,
+    instruction: "Choose the correct letter, A, B or C.",
+  },
+  {
+    blockType: "matching", type: "matching", label: "Matching",
+    category: "matching", recordingId: 2,
+    instruction: "Choose FIVE answers from the box, A–E.",
+  },
+  {
+    blockType: "sentence_completion", type: "fill", label: "Sentence Completion",
+    category: "sentence completion", recordingId: 2, maxWords: 2,
+    instruction: "Complete the sentences below. Write NO MORE THAN TWO WORDS AND/OR A NUMBER for each answer.",
+  },
+];
+const MC_LETTERS = ["A", "B", "C"];
+const LEGEND_LETTERS = ["A", "B", "C", "D", "E"];
+// Each recording script is spoken via browser TTS; bounds keep a script
+// long enough to carry 10 answer points but short enough to sit through
+// twice (the 2-run cap). The hand-authored round-41 scripts are ~330 and
+// ~430 words - the generated ones should land in the same range.
+const SCRIPT_MIN_WORDS = 150;
+const SCRIPT_MAX_WORDS = 650;
 // The prompt asks for 650-900 words; validation bounds are deliberately
 // looser because model word counts drift - a 620-word passage is still a
 // perfectly usable diagnostic, a 300-word one is not.
@@ -234,13 +273,108 @@ function cleanReadingSprintPayload(raw, { minPassageWords = PASSAGE_MIN_WORDS } 
   return { passage: { title, paragraphs }, blocks, questions };
 }
 
+// Round 43: weekly LISTENING sprint validator - same strict all-or-null
+// philosophy as cleanReadingSprintPayload above (content is cached for a
+// whole week, one bad question ships to everyone). Normalizes to:
+//   { recordings: [{recordingId, title, announcement, script}],
+//     matchingLegend: [{letter, label} x5],
+//     blocks, questions }
+// opts.minScriptWords: 0 only for the module-load fallback conversion.
+function cleanListeningSprintPayload(raw, { minScriptWords = SCRIPT_MIN_WORDS } = {}) {
+  if (!raw || typeof raw !== "object") return null;
+
+  const rawRecs = Array.isArray(raw.recordings) ? raw.recordings : [];
+  if (rawRecs.length !== 2) return null;
+  const recordings = [];
+  for (let i = 0; i < 2; i++) {
+    const r = rawRecs[i];
+    const title = String(r?.title || "").trim();
+    const announcement = String(r?.announcement || "").trim();
+    const script = String(r?.script || "").trim();
+    if (!title || !announcement || !script) return null;
+    const words = script.split(/\s+/).filter(Boolean).length;
+    if (words < minScriptWords || words > SCRIPT_MAX_WORDS) return null;
+    recordings.push({ recordingId: i + 1, title, announcement, script });
+  }
+
+  const rawLegend = Array.isArray(raw.matchingLegend) ? raw.matchingLegend : [];
+  if (rawLegend.length !== LEGEND_LETTERS.length) return null;
+  const matchingLegend = [];
+  for (let i = 0; i < LEGEND_LETTERS.length; i++) {
+    const label = String(rawLegend[i]?.label || "").trim();
+    if (String(rawLegend[i]?.letter || "").trim().toUpperCase() !== LEGEND_LETTERS[i] || !label) return null;
+    matchingLegend.push({ letter: LEGEND_LETTERS[i], label });
+  }
+
+  const rawQs = Array.isArray(raw.questions) ? raw.questions : [];
+  if (rawQs.length !== SPRINT_QUESTIONS) return null;
+  const questions = [];
+  for (let i = 0; i < SPRINT_QUESTIONS; i++) {
+    const q = rawQs[i];
+    if (!q || typeof q !== "object") return null;
+    const block = LISTENING_SPRINT_BLOCKS[Math.floor(i / READING_BLOCK_SIZE)];
+    const id = `q${i + 1}`;
+    if (String(q.id ?? id).trim() !== id) return null;
+    const text = String(q.text ?? q.prompt ?? "").trim();
+    if (!text) return null;
+    const correctAnswer = String(q.correctAnswer ?? "").trim();
+    if (!correctAnswer) return null;
+    const out = {
+      id, type: block.type, section: block.blockType, recordingId: block.recordingId,
+      text, correctAnswer,
+      explanation: String(q.explanation || "").trim().slice(0, 300),
+      category: block.category,
+    };
+    if (block.blockType === "multiple_choice") {
+      // options are {letter, label} pairs (the lstn UI's own shape); the
+      // stored correctAnswer is the LETTER, so grading stays a plain
+      // norm-compare with no option lookup.
+      const opts = Array.isArray(q.options) ? q.options : [];
+      if (opts.length !== MC_LETTERS.length) return null;
+      const options = [];
+      for (let j = 0; j < MC_LETTERS.length; j++) {
+        const label = String(opts[j]?.label || "").trim();
+        if (String(opts[j]?.letter || "").trim().toUpperCase() !== MC_LETTERS[j] || !label) return null;
+        options.push({ letter: MC_LETTERS[j], label });
+      }
+      if (!MC_LETTERS.includes(correctAnswer.toUpperCase())) return null;
+      out.correctAnswer = correctAnswer.toUpperCase();
+      out.options = options;
+    } else if (block.blockType === "matching") {
+      if (!LEGEND_LETTERS.includes(correctAnswer.toUpperCase())) return null;
+      out.correctAnswer = correctAnswer.toUpperCase();
+    } else {
+      const maxWords = block.maxWords;
+      if (!checkWordLimit(correctAnswer, maxWords)) return null;
+      const acceptable = (Array.isArray(q.acceptableAnswers) ? q.acceptableAnswers : [])
+        .map((a) => String(a).trim()).filter(Boolean);
+      if (acceptable.some((a) => !checkWordLimit(a, maxWords))) return null;
+      out.maxWords = maxWords;
+      if (acceptable.length) out.acceptableAnswers = acceptable.slice(0, 4);
+    }
+    questions.push(out);
+  }
+
+  const blocks = LISTENING_SPRINT_BLOCKS.map((b, bi) => ({
+    blockType: b.blockType,
+    label: b.label,
+    range: `${bi * READING_BLOCK_SIZE + 1}-${(bi + 1) * READING_BLOCK_SIZE}`,
+    recordingId: b.recordingId,
+    instruction: b.instruction,
+    ...(b.maxWords ? { maxWords: b.maxWords } : {}),
+    questionIds: questions.slice(bi * READING_BLOCK_SIZE, (bi + 1) * READING_BLOCK_SIZE).map((q) => q.id),
+  }));
+
+  return { recordings, matchingLegend, blocks, questions };
+}
+
 // What the client is allowed to see before submitting - the correctAnswer
 // and explanation stay server-side (in days.practice_test_payload) until
 // grading happens, so a curious look at the network tab can't just hand
 // over the answer key. entryType/focusCategory ride along so the UI can
 // label a DRILL differently from a SPRINT (Task 13).
 function stripAnswers(payload) {
-  const { questions, kind, track, passage, script, entryType, focusCategory, schemaVersion, weekKey, blocks } = payload;
+  const { questions, kind, track, passage, script, entryType, focusCategory, schemaVersion, weekKey, blocks, recordings, matchingLegend } = payload;
   return {
     kind, track,
     ...(entryType ? { entryType } : {}),
@@ -250,14 +384,21 @@ function stripAnswers(payload) {
     ...(passage != null ? { passage } : {}),
     ...(script != null ? { script } : {}),
     ...(blocks ? { blocks } : {}),
-    // section/maxWords ride along (v2 sprints) so the client can render the
-    // block chip and the word-limit hint; correctAnswer/acceptableAnswers/
-    // explanation/category still never leave the server pre-grading.
-    questions: questions.map(({ id, type, text, options, section, maxWords }) => ({
+    // Listening v2: recordings (scripts are the content itself, spoken via
+    // TTS - same "scripts are safe to ship" rule as listeningDiagnostic's
+    // own stripAnswers) and the shared matching legend.
+    ...(recordings ? { recordings } : {}),
+    ...(matchingLegend ? { matchingLegend } : {}),
+    // section/maxWords/recordingId ride along (v2 sprints) so the client can
+    // render block chips, word-limit hints, and per-recording grouping;
+    // correctAnswer/acceptableAnswers/explanation/category still never
+    // leave the server pre-grading.
+    questions: questions.map(({ id, type, text, options, section, maxWords, recordingId }) => ({
       id, type, text,
       ...(options ? { options } : {}),
       ...(section ? { section } : {}),
       ...(maxWords ? { maxWords } : {}),
+      ...(recordingId ? { recordingId } : {}),
     })),
   };
 }
@@ -498,8 +639,8 @@ function weakestCategory(categories) {
 }
 
 module.exports = {
-  cleanPayload, cleanReadingSprintPayload, checkWordLimit, stripAnswers, gradeAnswers,
-  READING_SPRINT_BLOCKS, READING_BLOCK_SIZE, PARAGRAPH_LABELS,
+  cleanPayload, cleanReadingSprintPayload, cleanListeningSprintPayload, checkWordLimit, stripAnswers, gradeAnswers,
+  READING_SPRINT_BLOCKS, LISTENING_SPRINT_BLOCKS, READING_BLOCK_SIZE, PARAGRAPH_LABELS,
   estimateBand, confidenceLabel, parseTargetBand,
   migrateState, trackStatus, currentTargetFor, categorySplit, weakestCategory,
   SPRINT_QUESTIONS, DRILL_QUESTIONS, MIN_QUESTIONS_SPRINT, MIN_QUESTIONS_DRILL,
