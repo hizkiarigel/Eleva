@@ -3739,18 +3739,31 @@ function mdqFeatureLabelJoin(quest, upper) {
   }).join(" + ");
 }
 
-// Home screen's 3-tile info row for a multi-domain quest (design handoff
-// 01-01-home.png, sits between the description and "SELESAI KETIKA" on
-// the detail panel) - "area utama"/"waktu"/"tujuan" at a glance, without
-// needing to open the Hub. Purely descriptive (no live data besides the
-// area count/labels, which are already known from featureRequirements).
-function mdqHomeInfoRowHTML(quest) {
-  const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+// Home screen's 3-tile info row (design handoff 01-01-home.png, sits
+// between the description and "SELESAI KETIKA" on the detail panel) -
+// "area utama"/"waktu"/"tujuan" at a glance. Originally multi-domain-only;
+// widened to every quest type on founder request (20 Agustus) once a
+// plain single-feature quest was compared side by side and the founder
+// wanted one consistent card style everywhere, not just Recovery+Nutrition.
+// For a multi-domain quest, "area" is the real primaryFeature+supportingFeatures
+// count/labels and "tujuan" is the template's own tujuanSingkat. For every
+// other completionType there's no such structured breakdown, so "area"
+// falls back to the quest's single statFocus (still real data, just not
+// multi-part) and "tujuan" falls back to the active goal text (goalLabel -
+// user-supplied, must stay escaped same as every other use of it in this
+// file) since there's no per-quest short-purpose field outside the Hub
+// template.
+function mdqHomeInfoRowHTML(quest, goalLabel) {
+  const isMultiDomain = quest.completionType === "multi-domain";
+  const keys = isMultiDomain ? [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean) : [];
+  const areaCount = isMultiDomain ? keys.length : 1;
+  const areaSub = isMultiDomain ? mdqFeatureLabelJoin(quest, false) : esc(statLabel(quest.statFocus) || "Umum");
+  const tujuanSub = esc(quest.tujuanSingkat || goalLabel || "");
   const common = `width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" style="flex:none"`;
   const tiles = [
-    { icon: `<svg ${common}><path d="M5 3v18M5 4h11l-2.5 3.5L16 11H5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: `${keys.length} area utama`, sub: mdqFeatureLabelJoin(quest, false) },
+    { icon: `<svg ${common}><path d="M5 3v18M5 4h11l-2.5 3.5L16 11H5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: `${areaCount} area utama`, sub: areaSub },
     { icon: `<svg ${common}><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`, label: "Est. waktu", sub: "±30 menit" },
-    { icon: `<svg ${common}><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="0.8" fill="var(--accent)"></circle></svg>`, label: "Tujuan", sub: esc(quest.tujuanSingkat || "") },
+    { icon: `<svg ${common}><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="0.8" fill="var(--accent)"></circle></svg>`, label: "Tujuan", sub: tujuanSub },
   ];
   return `
     <div class="mdq-info-row">
@@ -3763,25 +3776,44 @@ function mdqHomeInfoRowHTML(quest) {
     </div>`;
 }
 
-// Home screen's "SELESAI KETIKA" for a multi-domain quest replaces the
-// generic bullet list with a per-area radio-style checklist (design
-// handoff), reflecting REAL featureState - never a static preview that
-// could drift from what the Hub itself shows, same "evidence, not
-// checkboxes, always derived" rule as questHub.js's own computeFeatureState.
-function mdqHomeChecklistHTML(quest) {
-  const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
-  const featureState = quest.featureState || {};
+// Home screen's "SELESAI KETIKA" checklist. For a multi-domain quest this
+// replaces the generic bullet list with a per-area radio-style checklist
+// reflecting REAL featureState - never a static preview that could drift
+// from what the Hub itself shows, same "evidence, not checkboxes, always
+// derived" rule as questHub.js's own computeFeatureState. Every other
+// completionType has no per-requirement completion tracking at all (the
+// quest resolves as one atomic event, not N independently-completable
+// parts), so widening this to all quest types (founder request, 20
+// Agustus) means the radios for those requirements stay permanently
+// unfilled here by construction - same honesty rule, just nothing to
+// report yet since there's no sub-state to read. That's still preferable
+// to inventing fake partial-completion data: it's the same information
+// the old bullet list carried, only visually unified with the Hub's style.
+function mdqHomeChecklistHTML(quest, dod) {
+  const isMultiDomain = quest.completionType === "multi-domain";
+  if (isMultiDomain) {
+    const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+    const featureState = quest.featureState || {};
+    return `
+      <div class="mdq-home-checklist">
+        ${keys.map((k) => {
+          const done = featureState[k] === "COMPLETE";
+          const label = QH_FEATURE_META[k]?.label || k;
+          return `
+          <div class="mdq-home-check-item">
+            <span class="mdq-home-check-radio ${done ? "done" : ""}"></span>
+            <span>${esc(label)} requirement terpenuhi</span>
+          </div>`;
+        }).join("")}
+      </div>`;
+  }
   return `
     <div class="mdq-home-checklist">
-      ${keys.map((k) => {
-        const done = featureState[k] === "COMPLETE";
-        const label = QH_FEATURE_META[k]?.label || k;
-        return `
+      ${(dod || []).map((d) => `
         <div class="mdq-home-check-item">
-          <span class="mdq-home-check-radio ${done ? "done" : ""}"></span>
-          <span>${esc(label)} requirement terpenuhi</span>
-        </div>`;
-      }).join("")}
+          <span class="mdq-home-check-radio"></span>
+          <span>${esc(d)}</span>
+        </div>`).join("")}
     </div>`;
 }
 
@@ -5776,9 +5808,9 @@ function questDetailPanelHTML(q, goalLabel, ctaLabel, ctaDisabled) {
       <h2 class="fr qhub-detail-title">${esc(q.quest.title)}</h2>
       <p class="qhub-detail-desc">${esc(q.quest.description)}</p>
       ${q.quest.completionType === "nutrition-log" && q.quest.progressive ? `<p class="qhub-target mono" style="color:var(--qh-gold)">${esc(nutritionProgressLabel(q.quest.progressive))}</p>` : ""}
-      ${isMultiDomain ? mdqHomeInfoRowHTML(q.quest) : ""}
+      ${mdqHomeInfoRowHTML(q.quest, goalLabel)}
       <div class="qhub-dod-label mono">SELESAI KETIKA</div>
-      ${isMultiDomain ? mdqHomeChecklistHTML(q.quest) : `<ul class="qhub-dod-list">${dod.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>`}
+      ${mdqHomeChecklistHTML(q.quest, dod)}
       <div class="qhub-detail-foot">
         <span class="qhub-duration mono">±30 menit</span>
         <button class="btn-primary" data-reflect-id="${q.id}" ${ctaDisabled ? "disabled" : ""}>${esc(ctaLabel)}</button>
