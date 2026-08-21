@@ -5724,7 +5724,21 @@ function deriveDoDChecklist(quest) {
     if (es.activityType) items.push(`Aktivitas: ${es.activityType}`);
     if (es.metricType === "distance" && es.target) items.push(`Jarak minimal ${es.target} km`);
     if (es.metricType === "reps" && es.target) items.push(`${es.target} repetisi/set`);
-    if (es.metricType === "recovery") items.push("Catat tidur, air, makan berprotein, dan level nyeri");
+    // Post-deploy feedback (21 Agustus): "Catat tidur, air, makan
+    // berprotein, dan level nyeri" alone read as too vague next to cardio's
+    // concrete "Jarak minimal 3.2 km" line. evidenceSchema.target is
+    // unconditionally null for recovery by design (normalizeEvidenceSchema,
+    // server/claude.js) - there's no single AI-set number, the form asks 4
+    // separate fields (structured.js: durasiTidurJam 0-24, asupanAirGelas
+    // 0-30, makanProtein int 0-10, levelNyeri enum) - so these are general
+    // wellness guidance thresholds ("disarankan"), never a fabricated
+    // per-quest target.
+    if (es.metricType === "recovery") {
+      items.push("Durasi tidur malam ini (disarankan ≥ 7 jam)");
+      items.push("Asupan air hari ini (disarankan ≥ 8 gelas)");
+      items.push("Jumlah makan berprotein hari ini");
+      items.push("Level nyeri saat ini (Tidak ada/Ringan/Sedang/Berat)");
+    }
   } else if (quest.completionType === "practice-test") {
     items.push("Selesaikan seluruh set latihan dan submit jawaban");
   } else if (quest.completionType === "job-match-analysis") {
@@ -5807,7 +5821,19 @@ function questHubCardsHTML(quests) {
 // chain feature) taking priority over all of it when present.
 function questEyebrowHTML(quest) {
   const isMultiDomain = quest.completionType === "multi-domain";
-  const somaSubLabel = quest.primaryFeature === "MOVEMENT" ? "Training" : "";
+  // Post-deploy feedback (21 Agustus): an ordinary AI-generated recovery
+  // quest (structuredKind "recovery", completionType still just
+  // structured-physical - NOT multi-domain, which needs the AI to judge
+  // BOTH recovery AND nutrition needed at once, a deliberately narrow/rare
+  // threshold) had no sub-label at all, same gap Training's fix closed for
+  // MOVEMENT. Honest, not fabricated: a recovery-only quest reads
+  // "Recovery", never a compound "Nutrition + Recovery" it doesn't earn -
+  // genuine dual-area quests still get that via the isMultiDomain suffix
+  // below, untouched.
+  const somaSubLabel = quest.primaryFeature === "MOVEMENT" ? "Training"
+    : quest.structuredKind === "recovery" ? "Recovery"
+    : quest.completionType === "nutrition-log" ? "Nutrition"
+    : "";
   const base = `QUEST HARI INI${quest.statFocus ? " · " + esc(statLabel(quest.statFocus)).toUpperCase() + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(quest, true)) : ""}`;
   const text = quest.chain ? `BODY · ${esc(quest.chain.label).toUpperCase()} · Langkah ${quest.chain.step}/${quest.chain.total}` : base;
   return `<div class="qhub-eyebrow mono">${text}</div>`;
@@ -7011,7 +7037,7 @@ function movementEvidenceHTML() {
         <span style="font-size:13.5px">Sistem sudah mencatat sets, reps, dan beban dari sesi latihanmu — nggak perlu screenshot tambahan.</span>
       </div>
       ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
-      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? "Mengirim…" : "Kirim Bukti"}</button>`;
+      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? `<span class="spin" style="display:inline-block;margin-right:6px">◐</span>Mengirim…` : "Kirim Bukti"}</button>`;
   }
   const choices = [
     ["activity-data", "Data aktivitas", "Durasi + jarak yang sudah dicatat"],
@@ -7034,7 +7060,7 @@ function movementEvidenceHTML() {
         ${attempt.evidencePhotoName ? `<p style="color:var(--muted);font-size:12px;margin:6px 0 0">✓ ${esc(attempt.evidencePhotoName)}</p>` : ""}
       </div>` : ""}
     ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
-    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? "Mengirim…" : "Kirim Bukti"}</button>`;
+    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? `<span class="spin" style="display:inline-block;margin-right:6px">◐</span>Mengirim…` : "Kirim Bukti"}</button>`;
 }
 
 function wireMovementEvidenceHandlers() {
@@ -7167,30 +7193,39 @@ async function mvSubmitStrength() {
   renderDashboard();
 }
 
-// Submitted. No raw LLM essay (design handoff's explicit rule) - a
-// confirmation state plus a static componentized list of what's coming;
-// the real mentorReply/interpretation still get stored on the reflection
-// and feed the next quest/Riwayat as usual, just not echoed verbatim here.
+// Submitted. Post-deploy feedback (21 Agustus, Option B - explicitly
+// reverses the earlier "no raw LLM essay" default after real confusion in
+// production, confirmed via AskUserQuestion): by the time this screen
+// renders, POST /api/reflection has already returned - mentorReply/
+// interpretation are real data sitting on movementFlow.submittedResult, not
+// something still "being analyzed." Reuses elevaResponseHTML (the same
+// Observed/Hypothesis/Decision renderer completedResultCardHTML already
+// uses elsewhere) instead of a static three-line placeholder. The next
+// quest preview reads straight off the appState already refetched right
+// after submit (mvSubmitCardio/mvSubmitStrength) - no new network call -
+// and is only shown for an ordinary goal-linked quest (movementFlow.
+// goalIndex != null); a chain step's next step (if any) surfaces normally
+// on Home instead, since Training is always the chain's LAST step.
 function movementSubmittedHTML() {
+  const r = movementFlow.submittedResult || {};
+  const nextQuest = movementFlow.goalIndex != null
+    ? (appState.openQuests || []).find((q) => q.goalIndex === movementFlow.goalIndex)?.quest || null
+    : null;
   return `
     ${questEyebrowHTML(movementFlow.quest)}
     <div style="text-align:center;padding:20px 0 0">
       <div style="width:56px;height:56px;border-radius:50%;border:1px solid var(--growth);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;color:var(--growth);font-size:24px">✓</div>
       <h2 class="fr" style="font-size:19px;margin:0 0 6px">Bukti terkirim!</h2>
-      <p style="color:var(--muted);font-size:13.5px;margin:0 0 6px">Eleva sedang menganalisis progresmu.</p>
-      <p style="color:var(--muted);font-size:12.5px;margin:0 0 22px">Analisis lengkapnya akan muncul di quest berikutnya sebagai "Eleva Observed."</p>
+      <p style="color:var(--muted);font-size:13.5px;margin:0 0 22px">Ini analisis Eleva untuk sesi barusan.</p>
     </div>
+    ${elevaResponseHTML(r.interpretation)}
+    ${r.mentorReply ? `<p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 18px;line-height:1.6">${esc(r.mentorReply)}</p>` : ""}
+    ${nextQuest ? `
     <div class="quest-card" style="text-align:left">
-      ${[
-        ["Analisis progres", "Menilai konsistensi dan effort"],
-        ["Insight & rekomendasi", "Tips agar kamu makin berkembang"],
-        ["Quest berikutnya", "Akan disesuaikan dengan kondisimu"],
-      ].map(([title, sub], i, arr) => `
-        <div style="padding:12px 0${i < arr.length - 1 ? ";border-bottom:1px solid var(--hair)" : ""}">
-          <div style="font-size:14.5px">${title}</div>
-          <div style="color:var(--muted);font-size:12.5px;margin-top:2px">${sub}</div>
-        </div>`).join("")}
-    </div>
+      <div class="mono" style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:8px">QUEST BERIKUTNYA SUDAH SIAP</div>
+      <div style="font-size:15px;margin-bottom:4px">${esc(nextQuest.title)}</div>
+      <div style="color:var(--muted);font-size:13px">${esc(nextQuest.description)}</div>
+    </div>` : ""}
     <button class="btn-ghost full" id="mvBackHomeSubmitted" style="margin-top:18px">Kembali ke Home</button>`;
 }
 

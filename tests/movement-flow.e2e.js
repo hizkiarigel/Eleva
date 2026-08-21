@@ -282,9 +282,13 @@ async function test(name, fn) {
     await page.click('[data-mv-evidence="activity-data"]');
     await page.click("#mvKirimBukti");
     await page.waitForSelector("text=Bukti terkirim!", { timeout: 20000 });
-    assert.ok(await page.locator("text=Analisis progres").count());
-    assert.ok(await page.locator("text=Insight & rekomendasi").count());
-    assert.ok(await page.locator("text=Quest berikutnya").count());
+    // Post-deploy feedback (21 Agustus), Option B: this screen now shows the
+    // REAL mentorReply/interpretation (already returned by POST
+    // /api/reflection) via elevaResponseHTML, not the old static three-line
+    // placeholder - keyless mode's fallbackReflection() still fills both,
+    // so this is asserting the actual keyless-mode copy, not a mock.
+    assert.ok(await page.locator("text=ELEVA RESPONSE").count(), "real interpretation card must render, not a static placeholder");
+    assert.ok(await page.locator("text=Refleksinya kesimpan").count(), "real mentorReply text must render");
     const { rows } = await sql.query("SELECT quest, reflection FROM days WHERE id = $1", [cardioId2]);
     assert.strictEqual(rows[0].quest.activeAttempt, null, "activeAttempt must be cleared on successful submit");
     assert.ok(rows[0].reflection, "a reflection must be written");
@@ -545,6 +549,59 @@ async function test(name, fn) {
     await page.click("#mvBackHomeSubmitted");
     await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
     assert.strictEqual(await page.locator(`[data-reflect-id="${cardioId4}"]`).count(), 0, "the now-reflected quest must not still show as an open card");
+  });
+
+  console.log("E2E: post-deploy feedback (21 Agustus) - loading spinner + Submitted screen shows real analysis and next quest");
+  await test("submitting shows a visible spin icon while saving, then the real interpretation + a next-quest preview for the goal", async () => {
+    // cardioId is goalIndex 0 ("Lari 10 km"), a REAL goal. It already has an
+    // in-progress attempt sitting at "review" (seeded by the earlier Kondisi
+    // chip test, never submitted/abandoned since) - resuming picks up right
+    // there, not back at Preview. A real goal slot means GET /api/state
+    // will lazily generate a fresh replacement quest the instant this one
+    // is reflected on, which is exactly the next-quest preview case.
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page.click(`[data-reflect-id="${cardioId}"]`);
+    await page.waitForSelector("#mvReviewDone", { timeout: 20000 });
+    await page.fill("#mvDurMin", "20");
+    await page.fill("#mvDurSec", "00");
+    await page.fill("#mvDistance", "3.5");
+    await page.click('[data-mv-effort="Ringan"]');
+    await page.click("#mvReviewDone");
+    await page.waitForSelector("#mvKirimBukti", { timeout: 20000 });
+    await page.click('[data-mv-evidence="activity-data"]');
+    await page.click("#mvKirimBukti");
+    // The spin icon must appear immediately, before the response resolves -
+    // checked right after the click, same submit pipeline mvSubmitCardio
+    // already awaits.
+    assert.ok(await page.locator("#mvKirimBukti .spin").count(), "a visible spin icon must appear while submitting, not just a dim disabled button");
+    await page.waitForSelector("text=Bukti terkirim!", { timeout: 20000 });
+    assert.ok(await page.locator("text=ELEVA RESPONSE").count(), "real interpretation must render on Submitted");
+    assert.ok(await page.locator("text=QUEST BERIKUTNYA SUDAH SIAP").count(), "a next-quest preview must appear for a real goal-linked quest");
+    const { rows } = await sql.query("SELECT count(*)::int AS n FROM days WHERE goal_index = 0 AND reflection IS NULL");
+    assert.strictEqual(rows[0].n, 1, "the goal's fresh replacement quest must already exist by the time Submitted renders");
+  });
+
+  console.log("E2E: post-deploy feedback (21 Agustus) - eyebrow sub-label and concrete checklist for a plain recovery quest");
+  await test("a structured-physical/recovery quest (not multi-domain, not a chain step) gets the 'Recovery' eyebrow sub-label and 4 concrete checklist lines", async () => {
+    const recoveryQuest = {
+      mode: "quest", completionType: "structured-physical", structuredKind: "recovery",
+      evidenceSchema: { activityType: null, hasWeight: null, metricType: "recovery", target: null },
+      title: "Hari Bicara ke Tubuh",
+      description: "Hari ini tidak ada lari. Catat kondisi pemulihanmu.",
+      statFocus: "body", why: "test",
+    };
+    const recoveryId = await seedQuest(1, recoveryQuest);
+    await page.goto(BASE);
+    await page.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    // Select (expand) the card only - the eyebrow/checklist render in the
+    // Home detail panel itself, no need to actually tap into the legacy
+    // structured-physical/recovery reflect flow for this assertion.
+    await page.click('.qhub-card:has-text("Hari Bicara ke Tubuh")');
+    await page.waitForSelector(`[data-reflect-id="${recoveryId}"]`, { timeout: 20000 });
+    assert.ok(await page.locator("text=QUEST HARI INI · BODY: RECOVERY").count(), "a plain recovery quest must get the Recovery eyebrow sub-label");
+    assert.ok(await page.locator("text=disarankan").count(), "the checklist must show concrete general-guidance wording, not the old vague single line");
+    assert.strictEqual(await page.locator("text=Catat tidur, air, makan berprotein, dan level nyeri").count(), 0, "the old vague single-line checklist text must be gone");
   });
 
   await browser.close();
