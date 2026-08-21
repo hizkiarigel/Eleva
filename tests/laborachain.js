@@ -166,6 +166,47 @@ test("non-chain quests get laboraChain nulled", () => {
   assert.strictEqual(q.laboraChain, null);
 });
 
+console.log("Unit: forceJobHuntingChain (founder feedback backstop - job-hunting quests always chain)");
+test("standalone job-match-analysis upgrades to a valid 2-step labora-chain", () => {
+  const q = { completionType: "job-match-analysis", title: "T" };
+  ai.forceJobHuntingChain(q);
+  assert.strictEqual(q.completionType, "labora-chain");
+  assert.deepStrictEqual(q.laboraChain.steps.map((s) => s.feature), ["job-match-analysis", "job-application-submit"]);
+  // the forced pair must survive real normalizeChain validation regardless
+  // of jobMatchHint history - this is the whole point of the backstop.
+  const withoutHint = lc.normalizeChain(q.laboraChain.steps, { jobMatchHintQualified: false });
+  assert.ok(withoutHint, "must produce a valid chain even with no qualifying history");
+  assert.strictEqual(withoutHint.steps.length, 2);
+  const withHint = lc.normalizeChain(q.laboraChain.steps, { jobMatchHintQualified: true });
+  assert.ok(withHint, "must also produce a valid chain when a prior match qualified");
+});
+test("forceJobHuntingChain composes with normalizeLaboraChain unchanged", () => {
+  const q = { completionType: "job-match-analysis", title: "T" };
+  ai.forceJobHuntingChain(q);
+  ai.normalizeLaboraChain(q, {});
+  assert.strictEqual(q.completionType, "labora-chain");
+  assert.deepStrictEqual(q.laboraChain.steps.map((s) => s.feature), ["job-match-analysis", "job-application-submit"]);
+  assert.strictEqual(q.lifecycleType, "session");
+});
+test("job-application-submit is left standalone (deliberately not chained)", () => {
+  const q = { completionType: "job-application-submit", title: "T" };
+  ai.forceJobHuntingChain(q);
+  assert.strictEqual(q.completionType, "job-application-submit");
+  assert.strictEqual(q.laboraChain, undefined);
+});
+test("a genuine model-proposed labora-chain is untouched", () => {
+  const q = { completionType: "labora-chain", laboraChain: { steps: [step("video-quiz"), step("job-match-analysis")] } };
+  ai.forceJobHuntingChain(q);
+  assert.deepStrictEqual(q.laboraChain.steps.map((s) => s.feature), ["video-quiz", "job-match-analysis"]);
+});
+test("non-job-hunting completionTypes are untouched", () => {
+  ["reflective", "structured-physical", "video-quiz", "nutrition-log", "practice-test"].forEach((ct) => {
+    const q = { completionType: ct };
+    ai.forceJobHuntingChain(q);
+    assert.strictEqual(q.completionType, ct);
+  });
+});
+
 if (failures) {
   console.error(`\n${failures} test(s) failed`);
   process.exit(1);
