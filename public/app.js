@@ -6018,7 +6018,11 @@ function questEyebrowHTML(quest) {
     const step = chainCurrentStep(quest);
     if (step) base = `QUEST HARI INI · ${statTag || "LIVELIHOOD"}: ${LABORA_FEATURE_EYEBROW[step.feature] || ""} · LANGKAH ${c.currentIndex + 1}/${c.steps.length}`;
   } else if (LABORA_FEATURE_EYEBROW[quest.completionType]) {
-    base += ` · ${LABORA_FEATURE_EYEBROW[quest.completionType]}`;
+    // Founder feedback (round after 20 Agustus): match the colon sub-label
+    // convention used everywhere else in this function (BODY: TRAINING,
+    // GROWTH: LISTENING, and the labora-chain branch above) - was a
+    // stray " · " concatenation instead of ": ".
+    base += `: ${LABORA_FEATURE_EYEBROW[quest.completionType]}`;
   }
   const text = quest.chain ? `BODY · ${esc(quest.chain.label).toUpperCase()} · Langkah ${quest.chain.step}/${quest.chain.total}` : base;
   return `<div class="qhub-eyebrow mono">${text}</div>`;
