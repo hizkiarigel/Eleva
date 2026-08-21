@@ -152,6 +152,18 @@ async function init() {
     );
   `);
 
+  // Round 43: same weekly-global cadence for the LISTENING sprint (founder
+  // feedback on round 42: listening content should also refresh weekly for
+  // variety, in the round-41 diagnostic format). No track column - the
+  // listening diagnostic format is Academic-shaped by design.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS weekly_listening_tests (
+      week_key TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
   // Task 10a (Artifacts library): persistent per-user document library, not
   // tied to any single quest - "CV" is the first real type, schema stays
   // generic (portfolio/certificate/etc. can reuse the same table later
@@ -728,6 +740,30 @@ async function recentWeeklyReadingTitles(track, limit = 8) {
   return rows.map((r) => r.title).filter(Boolean);
 }
 
+// Round 43: listening twin of the reading cache accessors above - same
+// first-writer-wins race idiom, no track dimension.
+async function getWeeklyListeningTest(weekKey) {
+  const { rows } = await pool.query(`SELECT payload FROM weekly_listening_tests WHERE week_key = $1`, [weekKey]);
+  return rows[0]?.payload || null;
+}
+async function insertWeeklyListeningTestIfAbsent(weekKey, payload) {
+  const { rows } = await pool.query(
+    `INSERT INTO weekly_listening_tests (week_key, payload) VALUES ($1, $2)
+     ON CONFLICT (week_key) DO NOTHING RETURNING payload`,
+    [weekKey, payload]
+  );
+  if (rows[0]) return rows[0].payload;
+  return getWeeklyListeningTest(weekKey);
+}
+// Dedup list = both recording titles of recent weeks, flattened newest-first.
+async function recentWeeklyListeningTitles(limit = 8) {
+  const { rows } = await pool.query(
+    `SELECT payload->'recordings' AS recs FROM weekly_listening_tests ORDER BY week_key DESC LIMIT $1`,
+    [limit]
+  );
+  return rows.flatMap((r) => (Array.isArray(r.recs) ? r.recs.map((x) => x?.title) : [])).filter(Boolean);
+}
+
 async function activatePathway(userId) {
   await pool.query(`UPDATE character_state SET pathway_status = 'active' WHERE user_id = $1`, [userId]);
 }
@@ -1042,6 +1078,7 @@ module.exports = {
   setPracticeTestState, setPracticeTestPayload, getPracticeTestPayload,
   setVideoQuizPayload, getVideoQuizPayload,
   getWeeklyReadingTest, insertWeeklyReadingTestIfAbsent, recentWeeklyReadingTitles,
+  getWeeklyListeningTest, insertWeeklyListeningTestIfAbsent, recentWeeklyListeningTitles,
   listArtifacts, getArtifactById, createArtifact, replaceArtifactContent,
   updateKondisi, resetKondisiToNormal, archiveChapter, listChapters,
   touchStatActivity, applyDecayIfDue, setShortfallReason, listPendingShortfalls,

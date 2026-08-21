@@ -24,8 +24,10 @@ flowchart TD
     LOCKED_Q -- "belum" --> INTRO["Intro (dalam chrome normal):\ntopik, 15 soal, ambang lulus, ±menit → 'Mulai Quest'"]
 
     INTRO --> PICK["'Pilih materi belajarmu' (takeover .vq-shell):\ntempel link YouTube → 'Periksa Materi'"]
-    PICK --> VALIDATE["POST /api/video-quiz/validate\nparseVideoId → fetchVideoData (server/youtube.js:\noEmbed judul/kanal + innertube durasi/caption tracks,\ntranskrip cap 15.000 char) → judgeVideoRelevance\n(Claude: transkrip 6.000 char pertama vs topic → {relevant, rationale})"]
-    VALIDATE -- "link invalid 400 /\nno captions 422 /\nnetwork 502" --> PICK
+    PICK --> VALIDATE["POST /api/video-quiz/validate\nparseVideoId → fetchVideoData (server/youtube.js multi-strategi:\ninnertube ANDROID → WEB → scrape halaman watch, caption fmt=json3\ndengan fallback XML timedtext, transkrip cap 15.000 char,\ndiagnostik per-strategi di-log 'video-quiz fetch diagnostics')\n→ judgeVideoRelevance (Claude: transkrip 6.000 char pertama vs topic)"]
+    VALIDATE -- "link invalid 400 / network 502" --> PICK
+    VALIDATE -- "NO_CAPTIONS 422 (respons playable\ntanpa caption track = video memang tanpa subtitle) /\nYT_BLOCKED 422 (semua strategi kena bot-check —\nBUKAN salah videonya)" --> MANUAL["Fallback transkrip manual (bug produksi 19 Agustus):\nklien menampilkan tombol 'Tempel transkrip manual' →\nuser salin isi panel Transcript YouTube → validate ulang dengan\n{manualTranscript} → sanitizeManualTranscript (buang timestamp\n0:00/12:34, min 200 char, cap 15.000) → videoMeta via\nfetchVideoMetaOnly (oEmbed best-effort) → candidate.source='manual'\n→ pipeline selanjutnya identik"]
+    MANUAL --> CAND
     VALIDATE -- "relevant=false\n(rationale ditampilkan,\ninput tetap — pilih video lain)" --> PICK
     VALIDATE -- "relevant=true" --> CAND["payload.candidate tersimpan di\ndays.video_quiz_payload (BELUM terkunci —\nre-check dengan URL lain bebas menimpa)"]
     CAND --> READY["'Materi siap': thumbnail + judul/kanal + rationale\n'Ganti Video' ← masih boleh /\n'Saya Sudah Belajar → Mulai Assessment'"]
@@ -65,12 +67,29 @@ Penjelasan node yang tidak jelas dari namanya:
   YouTube lagi; transkrip terkunci di payload dipakai ulang untuk generate
   set baru (attempt+1, prompt minta soal yang beda substansi). Video tidak
   pernah berganti sampai lulus.
-- **server/youtube.js** — tanpa dependency (konvensi repo: global fetch,
-  sama seperti callClaude). oEmbed itu stabil; endpoint innertube TIDAK
-  resmi dan bisa berubah sewaktu-waktu — kegagalan dipetakan ke error
-  berkode (`NO_CAPTIONS` → 422 "pilih video lain yang ada subtitle-nya",
-  lainnya → 502 "coba lagi"). `ELEVA_YOUTUBE_STUB=1` mengembalikan fixture
-  tetap tanpa network — dipakai e2e test dan dev keyless.
+- **server/youtube.js (multi-strategi, revisi bug produksi 19 Agustus)** —
+  tanpa dependency (konvensi repo: global fetch). Tiga strategi berurutan:
+  innertube client ANDROID (paling andal dari IP server), innertube WEB
+  dengan header browser, lalu scrape `ytInitialPlayerResponse` dari halaman
+  watch. Caption diambil `fmt=json3` dulu, fallback parse XML timedtext.
+  Taksonomi error JUJUR: `NO_CAPTIONS` HANYA kalau ada respons playable
+  (playabilityStatus OK) yang benar-benar tanpa caption track; selain itu
+  `YT_BLOCKED` (bot-check/blokir IP — respons 422-nya menawarkan tempel
+  transkrip manual). Semua kegagalan me-log `video-quiz fetch diagnostics`
+  (playability + jumlah track per strategi) untuk debugging produksi.
+  Endpoint-endpoint ini TIDAK resmi dan bisa berubah sewaktu-waktu.
+  `ELEVA_YOUTUBE_STUB=1` mengembalikan fixture tetap tanpa network — dipakai
+  e2e test dan dev keyless.
+- **Transkrip manual** — jalan keluar yang dijamin bekerja apa pun kondisi
+  IP server: user menyalin isi panel Transcript YouTube dan menempelkannya.
+  Server men-sanitasi (timestamp dibuang, whitespace dirapikan, min 200
+  char, cap 15.000), menandai `candidate.source: "manual"`, dan tetap
+  menjalankan judgeVideoRelevance + locking + generation yang sama — hanya
+  sumber string transkripnya yang berbeda.
+- **Entry point labora-chain** — ketiga route video-quiz juga menerima quest
+  `labora-chain` yang LANGKAH SAAT INI-nya video-quiz (guard
+  `resolveChainStep`); lihat docs/labora-chain-flow.md — lulus assessment di
+  dalam chain memajukan langkah, bukan menutup quest.
 - **Keyless mode** — `judgeVideoRelevance` permisif (relevant=true dengan
   rationale "Mode offline"), `generateVideoQuizQuestions` menyajikan
   `VIDEO_QUIZ_FALLBACK` statis (15 soal generik "belajar efektif dari materi

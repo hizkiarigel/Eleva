@@ -692,6 +692,12 @@ let jobApplicationFlow = null;
 // .app-shell chrome entirely (see renderDashboard's early-return) - the
 // design's own "test mode" requirement (header+tab bar hidden during the
 // exam). null when inactive.
+// Round 43: this same shell now also serves quest-driven weekly listening
+// sprints - extra fields when mode === "quest": { mode, origin, track,
+// payload (stripped weekly practice-test payload), questResult } - and the
+// assessment is built client-side via lstnAssessmentFromPayload. mode
+// undefined/"meta" = the original fixed META diagnostic, byte-identical
+// behavior.
 // {
 //   questId, step: "intro" | "active" | "submitted",
 //   assessment: { recordings, questions, matchingLegend } | null,  // stripped package from POST /api/meta/start
@@ -3263,6 +3269,15 @@ function lstnStop() {
 
 // "Start Listening" and "Putar sekali lagi" both call this. Never touches
 // .answers - a replay must never reset what the user has already typed.
+// Round 43: weekly quest content carries its own per-recording announcement
+// text; the fixed META diagnostic package has none and keeps the original
+// hardcoded lines - so that path's spoken output is byte-identical.
+function lstnAnnouncement(recordingId) {
+  const rec = listeningDiagnosticFlow?.assessment?.recordings?.find((r) => r.recordingId === recordingId);
+  if (rec?.announcement) return rec.announcement;
+  return recordingId === 1 ? LSTN_ANNOUNCE_REC1 : LSTN_ANNOUNCE_REC2;
+}
+
 function lstnStartRun() {
   const f = listeningDiagnosticFlow;
   if (!f || f.runsCompleted >= 2) return;
@@ -3270,7 +3285,7 @@ function lstnStartRun() {
   const gen = lstnGen;
   f.playback = { state: "playing-rec1", gen, recordingId: 1 };
   renderDashboard();
-  lstnSpeakOne(LSTN_ANNOUNCE_REC1, gen, 1, () => lstnBeginScript(1, gen));
+  lstnSpeakOne(lstnAnnouncement(1), gen, 1, () => lstnBeginScript(1, gen));
 }
 
 // One SpeechSynthesisUtterance - the single choke point every spoken step
@@ -3322,8 +3337,7 @@ function lstnRetry() {
   const gen = lstnGen;
   f.playback = { state: recordingId === 1 ? "playing-rec1" : "playing-rec2", gen, recordingId };
   renderDashboard();
-  const announce = recordingId === 1 ? LSTN_ANNOUNCE_REC1 : LSTN_ANNOUNCE_REC2;
-  lstnSpeakOne(announce, gen, recordingId, () => lstnBeginScript(recordingId, gen));
+  lstnSpeakOne(lstnAnnouncement(recordingId), gen, recordingId, () => lstnBeginScript(recordingId, gen));
 }
 
 // The spoken (not just visual) transition between recordings. The
@@ -3343,7 +3357,7 @@ function lstnBeginRecording2(gen) {
   if (gen !== lstnGen || !f) return;
   f.playback = { state: "playing-rec2", gen, recordingId: 2 };
   renderDashboard();
-  lstnSpeakOne(LSTN_ANNOUNCE_REC2, gen, 2, () => lstnBeginScript(2, gen));
+  lstnSpeakOne(lstnAnnouncement(2), gen, 2, () => lstnBeginScript(2, gen));
 }
 
 // The ONE place runsCompleted changes - only reached after recording 2's
@@ -3967,6 +3981,46 @@ function artifactsSheetHTML() {
 }
 
 // ==== Round 41: IELTS Listening Half Diagnostic ====================
+// Round 43: the same shell now serves TWO modes - the fixed META diagnostic
+// (mode "meta", unchanged) and the quest-driven weekly Listening sprint
+// (mode "quest"): weekly-generated content in the identical format, graded
+// through the practice-test pipeline so band/history/drills keep working.
+
+// Adapter: stripped weekly practice-test payload → the assessment shape the
+// lstn renderers/playback already consume. Flat question ids ("q1".."q20")
+// double as questionIds, so the answers map submits to
+// /api/practice-test/submit unchanged.
+function lstnAssessmentFromPayload(p) {
+  return {
+    recordings: p.recordings.map((r) => ({
+      ...r, audioSrc: null,
+      orderedQuestionRange: r.recordingId === 1 ? [1, 10] : [11, 20],
+    })),
+    questions: p.questions.map((q, i) => ({
+      questionId: q.id, questionNumber: i + 1,
+      recordingId: q.recordingId || (i < 10 ? 1 : 2),
+      taskType: q.section, prompt: q.text,
+      ...(q.options ? { options: q.options } : {}),
+      ...(q.maxWords ? { maxWords: q.maxWords } : {}),
+    })),
+    matchingLegend: p.matchingLegend || [],
+  };
+}
+
+// Entry point for a quest-driven listening sprint (practice-test quest,
+// kind "listening", v2 weekly payload with recordings). Mirrors
+// startReadingTest's role for the reading shell.
+function startListeningQuestTest(questId, track, payload, origin) {
+  listeningDiagnosticFlow = {
+    mode: "quest", questId, origin: origin || "home", track,
+    step: "intro",
+    assessment: lstnAssessmentFromPayload(payload), payload,
+    answers: {}, runsCompleted: 0,
+    playback: { state: "idle", gen: 0, recordingId: null },
+    deadlineTs: null, submitConfirmOpen: false, error: "",
+    submittedResult: null, questResult: null,
+  };
+}
 
 function lstnAnsweredCount(f) {
   return Object.values(f.answers).filter((v) => String(v || "").trim()).length;
@@ -4069,7 +4123,9 @@ function lstnNoteCompletionBlockHTML(f) {
       <input type="text" class="lstn-input" data-lstn-text="${q.questionId}" maxlength="40" placeholder="Jawaban" value="${esc(f.answers[q.questionId] || "")}" />
     </div>`).join("");
   return lstnBlockHTML({
-    range: "1–5", title: "Riverside Leisure Centre",
+    // Weekly quest content names its own recording; the fixed META
+    // diagnostic package carries no title and keeps the original literal.
+    range: "1–5", title: f.assessment.recordings?.[0]?.title || "Riverside Leisure Centre",
     instruction: "Complete the notes below. Write NO MORE THAN TWO WORDS AND/OR A NUMBER for each answer.",
     live, inner: rows,
   });
@@ -4218,9 +4274,10 @@ function lstnSubmitConfirmSheetHTML() {
 // early-return for step "active"/"submitted".
 function renderListeningDiagnosticTest() {
   const f = listeningDiagnosticFlow;
+  const submittedHTML = f.mode === "quest" ? lstnQuestResultHTML() : lstnSubmittedHTML();
   root.innerHTML = `
     <div class="lstn-shell">
-      ${f.step === "submitted" ? lstnSubmittedHTML() : lstnActiveHTML()}
+      ${f.step === "submitted" ? submittedHTML : lstnActiveHTML()}
     </div>
     ${f.submitConfirmOpen ? lstnSubmitConfirmSheetHTML() : ""}`;
   wireListeningDiagnosticHandlers();
@@ -4241,13 +4298,79 @@ async function lstnDoSubmit() {
   f.submitConfirmOpen = false;
   f.error = "";
   try {
-    const resp = await api("/api/listening-diagnostic/submit", { method: "POST", body: { questId: f.questId, answers: f.answers, runsCompleted: f.runsCompleted } });
-    f.step = "submitted";
-    f.submittedResult = { correct: resp.correct, total: resp.totalQuestions, answeredCount: resp.answeredCount, wrong: resp.wrong, byTaskType: resp.byTaskType };
+    if (f.mode === "quest") {
+      // Quest-driven weekly sprint: grade through the practice-test
+      // pipeline (band/history/drill scheduling), not the diagnostic route.
+      // Answer keys match because flat ids double as questionIds.
+      const resp = await api("/api/practice-test/submit", { method: "POST", body: { questId: f.questId, answers: f.answers } });
+      questCtaState.set(f.questId, "completed");
+      f.step = "submitted";
+      f.questResult = { score: resp.score, total: resp.total, wrong: resp.wrong || [], assessment: resp.assessment || null, mentorReply: resp.mentorReply || "" };
+    } else {
+      const resp = await api("/api/listening-diagnostic/submit", { method: "POST", body: { questId: f.questId, answers: f.answers, runsCompleted: f.runsCompleted } });
+      f.step = "submitted";
+      f.submittedResult = { correct: resp.correct, total: resp.totalQuestions, answeredCount: resp.answeredCount, wrong: resp.wrong, byTaskType: resp.byTaskType };
+    }
   } catch (e) {
     f.error = e.message;
   }
   renderDashboard();
+}
+
+// Quest-mode result screen - the structured practice-test result (band
+// RANGE + confidence, per-block strong/weak, Eleva note, wrong-answer
+// accordion) rendered inside the listening shell. Reuses the .rdg-result-*
+// classes (identical layout language, different labels) rather than
+// duplicating a CSS section.
+function lstnQuestResultHTML() {
+  const f = listeningDiagnosticFlow;
+  const r = f.questResult || {};
+  const a = r.assessment || null;
+  const cats = a?.categories?.breakdown || {};
+  const catRow = (c) => {
+    const b = cats[c];
+    return `<div class="rdg-result-cat"><span>${esc(rdgCategoryLabel(c))}</span><span class="mono">${b ? `${b.correct}/${b.total}` : ""}</span></div>`;
+  };
+  const strong = a?.categories?.strong || [];
+  const unstable = a?.categories?.unstable || [];
+  const wrong = r.wrong || [];
+  const note = r.mentorReply || a?.decision?.currentTarget || "";
+  const qNum = (id) => (f.payload?.questions.findIndex((q) => q.id === id) ?? -1) + 1 || "";
+  return `
+    <div class="rdg-result">
+      <div class="eyebrow mono rdg-result-eyebrow">LISTENING RESULT</div>
+      <div class="rdg-result-score fr">${r.score ?? "–"} / ${r.total ?? 20}</div>
+      ${a && a.band ? `
+        <p class="rdg-result-band">Estimated Listening: <b>${a.band.rangeLow}–${a.band.rangeHigh}</b></p>
+        <p class="rdg-result-band-meta mono">Confidence: ${esc(a.confidence || "Low")} · ${a.totalQuestions} questions observed</p>` : ""}
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label" style="color:#8fbf9f">WHAT YOU DID WELL</div>
+        ${strong.length ? strong.map(catRow).join("") : `<p class="rdg-result-neutral">Belum ada kategori yang menonjol di attempt ini.</p>`}
+      </div>
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label" style="color:#c9564f">NEEDS WORK</div>
+        ${unstable.length ? unstable.map(catRow).join("") : `<p class="rdg-result-neutral">Tidak ada kategori yang jatuh di attempt ini.</p>`}
+      </div>
+      ${note ? `
+      <div class="rdg-result-note">
+        <div class="eyebrow mono" style="color:#e8a33d">YANG ELEVA LIHAT</div>
+        <p>${esc(note)}</p>
+        ${a?.decision?.nextTrial ? `<p class="rdg-result-next mono">Next: ${esc(a.decision.nextTrial)}</p>` : ""}
+      </div>` : ""}
+      ${wrong.length ? `
+      <div class="rdg-result-block">
+        <div class="eyebrow mono rdg-result-label">PEMBAHASAN SOAL YANG SALAH</div>
+        ${wrong.map((w) => `
+          <details class="rdg-wrong">
+            <summary><span class="mono rdg-qnum">${qNum(w.id)}</span> ${esc(w.text.length > 80 ? w.text.slice(0, 80) + "…" : w.text)}</summary>
+            <div class="rdg-wrong-body">
+              <p class="mono">Jawabanmu: ${esc(w.yourAnswer || "-")} · Benar: ${esc(w.correctAnswer)}</p>
+              ${w.explanation ? `<p>${esc(w.explanation)}</p>` : ""}
+            </div>
+          </details>`).join("")}
+      </div>` : `<p class="rdg-result-neutral" style="text-align:center">Semua benar — mantap.</p>`}
+      <button class="btn-primary full" id="lstnQuestExit" style="margin-top:16px">Selesai</button>
+    </div>`;
 }
 
 function wireListeningDiagnosticHandlers() {
@@ -4260,8 +4383,10 @@ function wireListeningDiagnosticHandlers() {
     // Same precedent as ptCancel: just clears client state, no API call -
     // the just-created META quest row is left open/unreflected, same
     // "orphaned META session is fine, never blocks anything" convention.
+    // Quest mode returns to where the quest lives (Home), not META.
+    const f = listeningDiagnosticFlow;
     listeningDiagnosticFlow = null;
-    activeScreen = "meta";
+    activeScreen = f?.mode === "quest" ? (f.origin === "meta" ? "meta" : "home") : "meta";
     renderDashboard();
   });
   document.getElementById("lstnPlayBtn")?.addEventListener("click", () => lstnStartRun());
@@ -4307,6 +4432,17 @@ function wireListeningDiagnosticHandlers() {
     activeScreen = "meta";
     renderDashboard();
   });
+  // Quest-mode result exit: the reflection is already saved server-side -
+  // refetch state so Home reflects the completed quest (same idiom as
+  // rdgExit for the reading shell).
+  document.getElementById("lstnQuestExit")?.addEventListener("click", async () => {
+    const f = listeningDiagnosticFlow;
+    listeningDiagnosticFlow = null;
+    root.innerHTML = spinnerHTML("Memuat...");
+    appState = await api("/api/state").catch(() => appState);
+    activeScreen = f?.origin === "meta" ? "meta" : "home";
+    renderDashboard();
+  });
 }
 
 // ==== Round 42: IELTS Reading Half Diagnostic ======================
@@ -4324,6 +4460,8 @@ const RDG_CATEGORY_LABEL = {
   "true/false/not given": "True / False / Not Given",
   "matching information": "Matching Information",
   "sentence completion": "Sentence Completion",
+  "note completion": "Note Completion",
+  "matching": "Matching",
 };
 function rdgCategoryLabel(cat) {
   return RDG_CATEGORY_LABEL[cat] || (cat ? cat.replace(/\b\w/g, (c) => c.toUpperCase()) : "Lainnya");
@@ -4941,6 +5079,7 @@ function startVideoQuiz(day, origin) {
     estimatedMinutes: vq.estimatedMinutes ?? 25,
     step: st?.lockedVideoUrl ? "locked" : "intro",
     videoUrl: "", checking: false, checkError: "",
+    manualOffered: false, manualOpen: false, manualText: "",
     materi: null,
     locked: st?.lockedVideoUrl ? { videoUrl: st.lockedVideoUrl, videoMeta: st.lockedVideoMeta || {}, videoId: st.lockedVideoId || null } : null,
     lastResult: st?.lastResult || null,
@@ -5029,9 +5168,14 @@ function vqPickHTML() {
       <input type="url" class="vq-input" id="vqUrlInput" placeholder="Tempel link YouTube..." value="${esc(f.videoUrl)}" ${f.checking ? "disabled" : ""} inputmode="url" autocomplete="off" />
       <div class="vq-note">Setelah assessment dimulai, video ini tidak dapat diganti sampai quest selesai.</div>
       ${f.checkError ? `<p class="vq-error">${esc(f.checkError)}</p>` : ""}
+      ${f.manualOffered && !f.manualOpen ? `<button class="btn-ghost full" id="vqManualToggle" style="margin-top:14px">Tempel transkrip manual</button>` : ""}
+      ${f.manualOpen ? `
+      <div class="eyebrow mono vq-field-label">TRANSKRIP MANUAL</div>
+      <textarea class="vq-input" id="vqManualText" rows="7" ${f.checking ? "disabled" : ""} placeholder="Buka videonya di YouTube → deskripsi → 'Show transcript' → salin semua teksnya, lalu tempel di sini.">${esc(f.manualText)}</textarea>
+      <div class="vq-note" style="margin-top:8px">Timestamp kayak 0:00 boleh ikut ke-copy — nanti dibersihkan otomatis. Link YouTube di atas tetap wajib diisi.</div>` : ""}
     </div>
     <div class="vq-foot-single">
-      <button class="btn-primary full" id="vqCheckBtn" ${f.checking ? "disabled" : ""}>${f.checking ? "Memeriksa materi..." : "Periksa Materi"}</button>
+      <button class="btn-primary full" id="vqCheckBtn" ${f.checking ? "disabled" : ""}>${f.checking ? "Memeriksa materi..." : (f.manualOpen ? "Periksa Materi (transkrip manual)" : "Periksa Materi")}</button>
     </div>`;
 }
 
@@ -5215,7 +5359,7 @@ function vqResultHTML() {
       </div>
       <div class="vq-foot-single">
         <button class="btn-ghost full" id="vqPembahasan">Lihat Pembahasan</button>
-        <button class="btn-primary full" id="vqFinish" style="margin-top:10px">Selesaikan Quest</button>
+        <button class="btn-primary full" id="vqFinish" style="margin-top:10px">${f.chainNext ? `Lanjut: ${esc(LABORA_FEATURE_LABEL[f.chainNext] || f.chainNext)}` : "Selesaikan Quest"}</button>
       </div>`;
   }
   return `
@@ -5289,6 +5433,7 @@ async function vqDoValidate() {
   if (!f || f.checking) return;
   const url = String(document.getElementById("vqUrlInput")?.value || "").trim();
   f.videoUrl = url;
+  f.manualText = String(document.getElementById("vqManualText")?.value || f.manualText || "");
   if (!url) {
     f.checkError = "Tempel link video YouTube dulu.";
     renderDashboard();
@@ -5298,7 +5443,9 @@ async function vqDoValidate() {
   f.checkError = "";
   renderDashboard();
   try {
-    const resp = await api("/api/video-quiz/validate", { method: "POST", body: { questId: f.questId, videoUrl: url } });
+    const body = { questId: f.questId, videoUrl: url };
+    if (f.manualOpen && f.manualText.trim()) body.manualTranscript = f.manualText;
+    const resp = await api("/api/video-quiz/validate", { method: "POST", body });
     f.checking = false;
     if (!resp.relevant) {
       f.checkError = resp.rationale || `Video ini belum membahas "${f.topic}". Coba video lain.`;
@@ -5309,6 +5456,9 @@ async function vqDoValidate() {
   } catch (e) {
     f.checking = false;
     f.checkError = e.message;
+    // Server says the transcript couldn't be fetched (blocked or truly no
+    // captions) - reveal the paste-it-yourself fallback.
+    if (e.data?.manualAllowed) f.manualOffered = true;
   }
   renderDashboard();
 }
@@ -5350,7 +5500,10 @@ async function vqDoSubmit() {
     const resp = await api("/api/video-quiz/submit", { method: "POST", body: { questId: f.questId, answers: f.answers } });
     f.result = resp;
     f.lastResult = { score: resp.score, total: resp.total, passed: resp.passed, strongConcepts: resp.strongConcepts, weakConcepts: resp.weakConcepts };
-    if (resp.passed) questCtaState.set(f.questId, "completed");
+    // Under a LABORA chain a pass is one STEP done, not the quest - the
+    // dashboard CTA should read "Lanjut: <next feature>", not "Lihat Hasil".
+    f.chainNext = resp.passed && resp.chain && !resp.chain.completed ? resp.chain.nextFeature : null;
+    if (resp.passed) questCtaState.set(f.questId, f.chainNext ? "started" : "completed");
     f.step = "result";
   } catch (e) {
     f.error = e.message;
@@ -5389,6 +5542,13 @@ function wireVideoQuizHandlers() {
   document.getElementById("vqCheckBtn")?.addEventListener("click", () => vqDoValidate());
   document.getElementById("vqUrlInput")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") vqDoValidate();
+  });
+  document.getElementById("vqManualToggle")?.addEventListener("click", () => {
+    f.manualOpen = true;
+    renderDashboard();
+  });
+  document.getElementById("vqManualText")?.addEventListener("input", (e) => {
+    f.manualText = e.target.value;
   });
   document.getElementById("vqSwap")?.addEventListener("click", () => {
     f.materi = null;
@@ -5713,6 +5873,24 @@ function questCategoryIconSVG(quest, size, color) {
   }
 }
 
+// LABORA feature display names - shared by the chain checklist, the chain
+// CTA label, and the detail-panel eyebrow (founder request 19 Agustus:
+// "QUEST HARI INI · LIVELIHOOD" harus menyebut fiturnya, mis. JOB MATCH).
+const LABORA_FEATURE_LABEL = {
+  "video-quiz": "Video Quest",
+  "job-match-analysis": "Job Match",
+  "job-application-submit": "Submit Application",
+};
+const LABORA_FEATURE_EYEBROW = {
+  "video-quiz": "VIDEO QUEST",
+  "job-match-analysis": "JOB MATCH",
+  "job-application-submit": "SUBMIT APPLICATION",
+};
+function chainCurrentStep(quest) {
+  const c = quest?.laboraChain;
+  return c ? c.steps?.[c.currentIndex] || null : null;
+}
+
 // "Selesai ketika" checklist (design handoff) - derived from evidenceSchema/
 // completionType since no dod:string[] field exists server-side. Always
 // returns at least one bullet (falls back to the quest's own description)
@@ -5750,6 +5928,18 @@ function deriveDoDChecklist(quest) {
   } else if (quest.completionType === "video-quiz") {
     items.push("Pilih & kunci satu video YouTube yang relevan dengan topiknya");
     items.push(`Jawab 15 soal dari materi video itu (lulus ≥ ${quest.videoQuiz?.passThreshold ?? 11}/15)`);
+  } else if (quest.completionType === "labora-chain" && quest.laboraChain) {
+    // One line per chain step with live status - the quest card doubles as
+    // the chain's progress checklist.
+    quest.laboraChain.steps.forEach((s, i) => {
+      const label = LABORA_FEATURE_LABEL[s.feature] || s.feature;
+      const glyph = s.status === "done" ? "✓" : s.status === "skipped" ? "⤼" : s.status === "active" ? "▶" : "○";
+      let suffix = "";
+      if (s.status === "done" && s.feature === "video-quiz" && s.result) suffix = ` — lulus ${s.result.score}/${s.result.total}`;
+      else if (s.status === "done" && s.feature === "job-match-analysis" && s.result) suffix = ` — ${s.result.qualified ? "qualified" : "belum qualified"}`;
+      else if (s.status === "skipped") suffix = " — dilewati (job match belum lolos)";
+      items.push(`${glyph} Langkah ${i + 1}: ${label}${suffix}`);
+    });
   } else if (quest.completionType === "multi-domain") {
     items.push("2 area utama · Recovery + Nutrition");
   }
@@ -5764,6 +5954,10 @@ function deriveDoDChecklist(quest) {
 // isNutrition branch above.
 function questCtaLabel(quest, id) {
   if (quest?.completionType === "nutrition-log") return "Lanjut Catat";
+  if (quest?.completionType === "labora-chain") {
+    const step = chainCurrentStep(quest);
+    if (step) return `${quest.laboraChain.currentIndex === 0 ? "Mulai" : "Lanjut"}: ${LABORA_FEATURE_LABEL[step.feature] || step.feature}`;
+  }
   const st = questCtaState.get(id);
   if (st === "completed") return "Lihat Hasil";
   if (st === "started") return "Lanjutkan";
@@ -5821,20 +6015,34 @@ function questHubCardsHTML(quests) {
 // chain feature) taking priority over all of it when present.
 function questEyebrowHTML(quest) {
   const isMultiDomain = quest.completionType === "multi-domain";
-  // Post-deploy feedback (21 Agustus): an ordinary AI-generated recovery
-  // quest (structuredKind "recovery", completionType still just
-  // structured-physical - NOT multi-domain, which needs the AI to judge
-  // BOTH recovery AND nutrition needed at once, a deliberately narrow/rare
-  // threshold) had no sub-label at all, same gap Training's fix closed for
-  // MOVEMENT. Honest, not fabricated: a recovery-only quest reads
-  // "Recovery", never a compound "Nutrition + Recovery" it doesn't earn -
-  // genuine dual-area quests still get that via the isMultiDomain suffix
-  // below, untouched.
+  // Sub-label slot: SOMA Training for MOVEMENT quests; Recovery/Nutrition
+  // for ordinary AI-generated recovery/nutrition-log quests (post-deploy
+  // feedback, 21 Agustus - honest per-quest label, not a fabricated
+  // compound one; genuine dual-area quests still get the isMultiDomain
+  // suffix below, untouched); round 43 (founder feedback) - practice-test
+  // quests name their measured skill the same way ("QUEST HARI INI ·
+  // GROWTH: LISTENING"), kind from practiceTestSchema, default reading.
   const somaSubLabel = quest.primaryFeature === "MOVEMENT" ? "Training"
     : quest.structuredKind === "recovery" ? "Recovery"
     : quest.completionType === "nutrition-log" ? "Nutrition"
+    : quest.completionType === "practice-test" ? (PRACTICE_LABELS[quest.practiceTestSchema?.kind || "reading"] || "Reading")
     : "";
-  const base = `QUEST HARI INI${quest.statFocus ? " · " + esc(statLabel(quest.statFocus)).toUpperCase() + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(quest, true)) : ""}`;
+  const statTag = quest.statFocus ? esc(statLabel(quest.statFocus)).toUpperCase() : "";
+  let base = `QUEST HARI INI${statTag ? " · " + statTag + (somaSubLabel ? ": " + esc(somaSubLabel).toUpperCase() : "") : ""}${isMultiDomain ? " • " + esc(mdqFeatureLabelJoin(quest, true)) : ""}`;
+  // Founder request 19 Agustus: name the LABORA feature in the eyebrow -
+  // single quest: "QUEST HARI INI · LIVELIHOOD · JOB MATCH"; chain quest:
+  // "QUEST HARI INI · LIVELIHOOD: JOB MATCH · LANGKAH 2/3".
+  if (quest.completionType === "labora-chain" && quest.laboraChain) {
+    const c = quest.laboraChain;
+    const step = chainCurrentStep(quest);
+    if (step) base = `QUEST HARI INI · ${statTag || "LIVELIHOOD"}: ${LABORA_FEATURE_EYEBROW[step.feature] || ""} · LANGKAH ${c.currentIndex + 1}/${c.steps.length}`;
+  } else if (LABORA_FEATURE_EYEBROW[quest.completionType]) {
+    // Founder feedback (round after 20 Agustus): match the colon sub-label
+    // convention used everywhere else in this function (BODY: TRAINING,
+    // GROWTH: LISTENING, and the labora-chain branch above) - was a
+    // stray " · " concatenation instead of ": ".
+    base += `: ${LABORA_FEATURE_EYEBROW[quest.completionType]}`;
+  }
   const text = quest.chain ? `BODY · ${esc(quest.chain.label).toUpperCase()} · Langkah ${quest.chain.step}/${quest.chain.total}` : base;
   return `<div class="qhub-eyebrow mono">${text}</div>`;
 }
@@ -5967,7 +6175,8 @@ function completedResultCardHTML(r) {
       ${Object.keys(r.deltas || {}).length ? `<div class="deltas" style="margin-bottom:18px">${Object.entries(r.deltas).map(([k]) => `<span class="delta-chip">${statLabel(k)} · Evidence tercatat</span>`).join("")}</div>` : ""}
       ${shortfallPromptHTML(r)}
       ${targetPickerHTML(r.target)}
-      <button class="btn-primary full" id="dismissCompleted" style="margin-top:18px">Lanjut</button>
+      ${r.chainNext ? `<div class="mono" style="font-size:12px;color:var(--accent);margin:12px 0 0">Langkah berikutnya: ${esc(LABORA_FEATURE_LABEL[r.chainNext] || r.chainNext)} — buka quest-nya lagi dari beranda.</div>` : ""}
+      <button class="btn-primary full" id="dismissCompleted" style="margin-top:18px">${r.chainNext ? `Lanjut: ${esc(LABORA_FEATURE_LABEL[r.chainNext] || r.chainNext)}` : "Lanjut"}</button>
     </div>`;
 }
 
@@ -7359,6 +7568,33 @@ function gymSessionEvalHTML(ev) {
     </div>`;
 }
 
+// Flow launchers extracted from the [data-reflect-id] handler so the
+// labora-chain branch can dispatch to them per current step - bodies are
+// the original branches verbatim (Task 10b / Task 14 point 5).
+async function launchJobMatchFlow(id) {
+  root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
+  let cv = null;
+  try {
+    const { artifacts } = await api("/api/artifacts");
+    cv = artifacts.find((a) => a.type === "cv") || null;
+  } catch (e) { /* fall through to upload-cv either way */ }
+  jobMatchFlow = { questId: id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
+  renderDashboard();
+}
+async function launchJobApplicationFlow(id) {
+  root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
+  let cv = null;
+  try {
+    const { artifacts } = await api("/api/artifacts");
+    cv = artifacts.find((a) => a.type === "cv") || null;
+  } catch (e) { /* fall through to cv step either way */ }
+  jobApplicationFlow = {
+    questId: id, step: cv ? "form" : "cv", cvArtifact: cv,
+    form: { companyName: "", roleTitle: "", dateApplied: "", submissionProof: "" }, error: "",
+  };
+  renderDashboard();
+}
+
 function renderDashboard() {
   // Round 41: the IELTS Listening Half Diagnostic's active exam/submitted
   // screens are the one flow in this app that hides the normal header+tab
@@ -7683,11 +7919,15 @@ function renderDashboard() {
       root.innerHTML = spinnerHTML("Menyusun soal...");
       try {
         const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: id, kind, track } });
-        // Round 42: every reading payload (sprint AND drill) opens in the
-        // dedicated test-mode shell; the old flat quiz card only remains for
-        // the unreachable listening kind.
+        // Round 42/43: reading opens the reading test shell; a listening
+        // sprint (v2 payload with recordings) opens the listening
+        // diagnostic shell in quest mode. The old flat quiz card only
+        // remains for drills/legacy flat payloads.
         if (kind === "reading") {
           startReadingTest(id, track, resp, "home");
+          practiceTestFlow = null;
+        } else if (kind === "listening" && resp.recordings) {
+          startListeningQuestTest(id, track, resp, "home");
           practiceTestFlow = null;
         } else {
           practiceTestFlow.payload = resp;
@@ -7725,29 +7965,28 @@ function renderDashboard() {
     // a returning user with a CV already on file skips straight to the job
     // posting upload step, never asked to re-upload the same CV.
     if (quest?.completionType === "job-match-analysis") {
-      root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
-      let cv = null;
-      try {
-        const { artifacts } = await api("/api/artifacts");
-        cv = artifacts.find((a) => a.type === "cv") || null;
-      } catch (e) { /* fall through to upload-cv either way */ }
-      jobMatchFlow = { questId: id, step: cv ? "upload-job" : "upload-cv", cvArtifact: cv, images: [], error: "" };
-      renderDashboard();
+      await launchJobMatchFlow(id);
       return;
     }
     // Task 14 point 5: job-application-submit quests check the Artifacts
     // library first, same pattern as job-match-analysis just above.
     if (quest?.completionType === "job-application-submit") {
-      root.innerHTML = spinnerHTML("Memeriksa CV tersimpan...");
-      let cv = null;
-      try {
-        const { artifacts } = await api("/api/artifacts");
-        cv = artifacts.find((a) => a.type === "cv") || null;
-      } catch (e) { /* fall through to cv step either way */ }
-      jobApplicationFlow = {
-        questId: id, step: cv ? "form" : "cv", cvArtifact: cv,
-        form: { companyName: "", roleTitle: "", dateApplied: "", submissionProof: "" }, error: "",
-      };
+      await launchJobApplicationFlow(id);
+      return;
+    }
+    // LABORA Chain: one quest, 2-3 LABORA steps in sequence - dispatch to
+    // the CURRENT step's existing flow. Fresh /api/state first (the same
+    // staleness lesson as video-quiz/MOVEMENT: a step may have advanced on
+    // another tab).
+    if (quest?.completionType === "labora-chain") {
+      root.innerHTML = spinnerHTML("Memuat quest...");
+      appState = await api("/api/state").catch(() => appState);
+      const fresh = (appState.openQuests || []).find((q) => q.id === id);
+      if (!fresh) { renderDashboard(); return; }
+      const step = chainCurrentStep(fresh.quest);
+      if (step?.feature === "video-quiz") { startVideoQuiz(fresh, "home"); renderDashboard(); return; }
+      if (step?.feature === "job-match-analysis") { await launchJobMatchFlow(id); return; }
+      if (step?.feature === "job-application-submit") { await launchJobApplicationFlow(id); return; }
       renderDashboard();
       return;
     }
@@ -8061,11 +8300,14 @@ function renderDashboard() {
     root.innerHTML = spinnerHTML("Menyusun soal...");
     try {
       const resp = await api("/api/practice-test/generate", { method: "POST", body: { questId: practiceTestFlow.questId, kind: practiceTestFlow.kind, track: practiceTestFlow.track } });
-      // Round 42: reading goes to the dedicated test shell (see the quest
-      // handler above); only the unreachable listening kind still uses the
-      // flat quiz card.
+      // Round 42/43: reading goes to the reading shell, listening sprints
+      // to the listening shell in quest mode; only flat payloads (drills)
+      // still use the flat quiz card.
       if (practiceTestFlow.kind === "reading") {
         startReadingTest(practiceTestFlow.questId, practiceTestFlow.track, resp, practiceTestFlow.origin || "meta");
+        practiceTestFlow = null;
+      } else if (practiceTestFlow.kind === "listening" && resp.recordings) {
+        startListeningQuestTest(practiceTestFlow.questId, practiceTestFlow.track, resp, practiceTestFlow.origin || "meta");
         practiceTestFlow = null;
       } else {
         practiceTestFlow.payload = resp;
@@ -8130,6 +8372,9 @@ function renderDashboard() {
       if (f.kind === "reading") {
         startReadingTest(f.questId, f.track, resp, f.origin || "home");
         practiceTestFlow = null;
+      } else if (f.kind === "listening" && resp.recordings) {
+        startListeningQuestTest(f.questId, f.track, resp, f.origin || "home");
+        practiceTestFlow = null;
       } else {
         f.payload = resp;
         f.plays = 0;
@@ -8183,14 +8428,19 @@ function renderDashboard() {
         body: { questId: jobMatchFlow.questId, cvArtifactId: jobMatchFlow.cvArtifact.id, images: jobMatchFlow.images },
       });
       const qd = openQuests.find((q) => q.id === jobMatchFlow.questId);
-      questCtaState.set(jobMatchFlow.questId, "completed");
+      // LABORA Chain: a not-yet-finished chain means this analysis was one
+      // STEP - the quest stays open with the next step's CTA, so the label
+      // state stays "started" and the result card points to what's next.
+      const chainOngoing = resp.chain && !resp.chain.completed;
+      questCtaState.set(jobMatchFlow.questId, chainOngoing ? "started" : "completed");
       completedResult = {
-        // Task 14 point 6: no more delta chip (deltas always empty here) -
-        // resp.target is the Milestone progress line instead (reuses
-        // targetPickerHTML, same component the structured-physical flow
-        // uses for its own Target Berikutnya line).
+        // Task 14 point 6: no more delta chip (deltas always empty here for
+        // plain quests) - resp.target is the Milestone progress line instead
+        // (reuses targetPickerHTML, same component the structured-physical
+        // flow uses for its own Target Berikutnya line).
         questTitle: qd?.quest?.title || "", status: "COMPLETED", goalIndex: qd?.goalIndex,
-        mentorReply: "", deltas: {}, jobMatch: resp.result, target: resp.target,
+        mentorReply: resp.mentorReply || "", deltas: resp.deltas || {}, jobMatch: resp.result, target: resp.target,
+        chainNext: chainOngoing ? resp.chain.nextFeature : null,
       };
       jobMatchFlow = null;
     } catch (e) {
@@ -8241,8 +8491,10 @@ function renderDashboard() {
       questCtaState.set(jobApplicationFlow.questId, "completed");
       completedResult = {
         questTitle: qd?.quest?.title || "", status: "COMPLETED", goalIndex: qd?.goalIndex,
-        mentorReply: resp.jobApplication ? `Lamaran ke ${resp.jobApplication.companyName} untuk ${resp.jobApplication.roleTitle} tercatat.` : "",
-        deltas: {}, jobApplication: resp.jobApplication, target: resp.target,
+        // A chain completion carries the AI mentorReply summarizing all
+        // steps; a plain submit keeps the deterministic one-liner.
+        mentorReply: resp.mentorReply || (resp.jobApplication ? `Lamaran ke ${resp.jobApplication.companyName} untuk ${resp.jobApplication.roleTitle} tercatat.` : ""),
+        deltas: resp.deltas || {}, jobApplication: resp.jobApplication, target: resp.target,
       };
       jobApplicationFlow = null;
     } catch (e) {

@@ -20,7 +20,14 @@ flowchart TD
     GEN["POST /api/practice-test/generate\nmigrasi skema lama → tracks; cek nextDrill track ini"] --> DRILL{"tracks[kind].nextDrill\nada?"}
     DRILL -- "ya" --> GDRILL["generatePracticeTest mode DRILL\n12 soal flat, fokus 1 kategori lemah,\nAI-generate BARU per attempt (tidak di-cache)"]
     DRILL -- "tidak, kind=reading" --> WEEKLY{"weekly_reading_tests\nsudah punya baris minggu ini\n(startOfWeekKey, Senin lokal server)\n+ track ini?"}
-    DRILL -- "tidak, kind=listening\n(jalur mati per round 41,\ntidak diubah)" --> GSPRINT["generatePracticeTest mode SPRINT lama\n20 soal flat + cleanPayload"]
+    DRILL -- "tidak, kind=listening\n(round 43)" --> WEEKLYL{"weekly_listening_tests\nsudah punya baris minggu ini?"}
+    WEEKLYL -- "ya" --> SERVEL["pakai payload minggu ini (GLOBAL)"]
+    WEEKLYL -- "belum" --> GENL["generateListeningSprintContent (maxTokens 6000)\nformat diagnostik round 41: 2 rekaman TTS\n(title+announcement+script 250-500 kata),\nlegend matching A-E, 20 soal 4 blok 5/5/5/5:\nQ1-5 note_completion / Q6-10 multiple_choice (A-C) /\nQ11-15 matching (A-E) / Q16-20 sentence_completion (maks 2 kata);\nvalidasi cleanListeningSprintPayload STRICT, 1x retry, lalu THROW"]
+    GENL -- "sukses" --> CACHEL["insertWeeklyListeningTestIfAbsent\n(ON CONFLICT DO NOTHING, race-safe)"]
+    CACHEL --> SERVEL
+    GENL -- "gagal / keyless" --> FBL["fallbackListeningSprint:\npaket diagnostik round 41 hand-authored,\ndikonversi ke shape v2 saat module load (fail-fast) —\nattempt INI SAJA, TIDAK di-cache"]
+    FBL --> SNAP
+    SERVEL --> SNAP
 
     WEEKLY -- "ya" --> SERVE["pakai payload minggu ini\n(GLOBAL: konten sama untuk semua user\nsepanjang minggu — keputusan founder)"]
     WEEKLY -- "belum" --> GENV2["generateReadingSprintContent (maxTokens 6000)\npassage {title, paragraphs A-D} 650-900 kata,\n20 soal PERSIS 4 blok 5/5/5/5:\nQ1-5 multiple_choice / Q6-10 true_false_not_given /\nQ11-15 matching_information / Q16-20 sentence_completion (maks 2 kata);\ndedup topik global via recentWeeklyReadingTitles;\nvalidasi cleanReadingSprintPayload STRICT all-or-null, 1x retry, lalu THROW"]
@@ -30,10 +37,11 @@ flowchart TD
     FB --> SNAP
 
     SERVE --> SNAP["snapshot per-attempt ke days.practice_test_payload\n(answer key TIDAK pernah di quest jsonb;\ngrading selalu pakai snapshot attempt sendiri —\naman dari pergantian minggu di tengah attempt)"]
-    GSPRINT --> SNAP
     GDRILL --> SNAP
     SNAP --> STRIP["res = stripAnswers(payload)\n(+ blocks, section, maxWords, weekKey, schemaVersion;\ncorrectAnswer/acceptableAnswers/explanation tetap server-side)"]
 
+    STRIP --> SHELLL["Listening (round 43): shell diagnostik yang sama\n(listeningDiagnosticFlow mode 'quest', .lstn-shell):\nintro → active chrome-hidden, audio card (2x putaran penuh,\nannouncement per-rekaman dari payload), 4 blok tipe soal,\ntimer 30:00, submit → /api/practice-test/submit →\nresult in-shell 'LISTENING RESULT' (band range + strong/weak\n+ accordion pembahasan, reuse class .rdg-result-*);\nMETA LINGUA Listening row = diagnostik TETAP round 41,\nmode 'meta', konten fixed, TIDAK berubah"]
+    SHELLL --> SUBMIT
     STRIP --> SHELL["Reading: test-mode shell (readingTestFlow, .rdg-shell)\nintro → active (chrome DISEMBUNYIKAN via early-return\nrenderDashboard, seperti listening diagnostic):\ntab Passage/Questions dengan scroll memory per-tab,\n1 blok per layar + progress bar + overview sheet,\nflag per soal (bukan unanswered), timer 30:00 sprint / 20:00 drill\n(habis waktu: jawaban TIDAK dihapus, TIDAK auto-submit —\nsheet 'Time is up' → Review & Submit)"]
     SHELL --> REVIEW["Review screen: answered/unanswered/flagged,\nstatus per blok + tap untuk lompat balik;\nsubmit dengan soal kosong → warning\n'N soal belum dijawab' (tidak pernah memblokir)"]
     REVIEW --> SUBMIT["POST /api/practice-test/submit"]
@@ -92,3 +100,22 @@ Penjelasan node yang tidak jelas dari namanya:
   (drill 20:00). Habis waktu TIDAK auto-submit dan TIDAK menghapus jawaban
   (keputusan founder): sheet "Time is up" → Review & Submit. Slot "Time" di
   ELEVA OBSERVED masih gap (belum ada bucket waktu per soal).
+- **Listening sprint mingguan (Round 43)** — quest practice-test kind
+  listening memakai format Listening Half Diagnostic round 41 (2 rekaman
+  TTS + note completion / MC / matching / sentence completion, TANPA
+  True/False) dengan rotasi mingguan global yang sama seperti Reading.
+  Shell klien = shell diagnostik yang sama (`listeningDiagnosticFlow`)
+  dalam `mode: "quest"`: assessment dibangun via adapter
+  `lstnAssessmentFromPayload` (id soal flat "q1".."q20" dobel sebagai
+  questionId), announcement + judul rekaman dinamis dari payload (jalur
+  META diagnostik fixed tetap memakai konstanta lama — byte-identical).
+  Submit lewat `/api/practice-test/submit` sehingga band / history /
+  nextDrill / level Task 13 jalan penuh; jawaban mc/matching disimpan
+  sebagai HURUF (correctAnswer huruf juga, grading tetap norm-compare).
+  Fallback = paket diagnostik round 41 dikonversi (kualitas hand-authored,
+  format persis) — tidak pernah di-cache. Drill listening tetap flat UI
+  lama per-attempt. Diagnostik META (LINGUA row) TIDAK ikut rotasi —
+  keputusan §46 (konten fixed & comparable) tetap berlaku di jalur itu.
+- **Eyebrow quest (Round 43)** — quest practice-test menampilkan
+  "QUEST HARI INI · GROWTH: LISTENING/READING" (kind dari
+  practiceTestSchema, default reading) di `questDetailPanelHTML`.
