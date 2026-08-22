@@ -2308,11 +2308,24 @@ app.post("/api/nutrition/log", requireAuth, async (req, res) => {
     const source = ["search", "photo"].includes(req.body.source) ? req.body.source : "search";
 
     let quest = null;
+    // Multi-Domain Quest System fix, item 3 (22 Agustus): the Hub's own
+    // NUTRITION module used to duplicate this flow as a thinner stepper
+    // form. Now a Hub quest's NUTRITION feature delegates INTO this real
+    // Log-Meal flow, scoped to just that quest - a second ownership branch
+    // alongside the existing nutrition-log one, never replacing it.
+    let hubFeatureKey = null;
     if (req.body.questId != null) {
       quest = await db.getQuestById(req.userId, req.body.questId);
       if (!quest) return res.status(400).json({ error: "Quest tidak ditemukan." });
-      if (quest.quest?.completionType !== "nutrition-log") return res.status(400).json({ error: "Quest ini bukan tipe Nutrition." });
       if (quest.reflection) return res.status(400).json({ error: "Quest ini sudah selesai." });
+      if (quest.quest?.completionType === "nutrition-log") {
+        // existing behavior, unchanged below
+      } else if (quest.quest?.completionType === "multi-domain"
+          && [quest.quest.primaryFeature, ...(quest.quest.supportingFeatures || [])].includes("NUTRITION")) {
+        hubFeatureKey = "NUTRITION";
+      } else {
+        return res.status(400).json({ error: "Quest ini bukan tipe Nutrition." });
+      }
     }
 
     const entry = await db.createFoodEntry(req.userId, {
@@ -2321,16 +2334,35 @@ app.post("/api/nutrition/log", requireAuth, async (req, res) => {
 
     let progressive = null;
     let resolved = null;
-    if (quest) {
+    let hub = null;
+    if (quest && !hubFeatureKey) {
       progressive = nutrition.applyContribution(quest.quest.progressive, validated.clean);
       await db.updateQuestProgress(req.userId, quest.id, { progressive });
       if (progressive.status === "COMPLETED") {
         const state = await db.getState(req.userId);
         resolved = await resolveNutritionQuest(req.userId, quest.id, { ...quest.quest, progressive }, state);
       }
+    } else if (quest && hubFeatureKey) {
+      // Recompute protein/meals from ALL of this quest's logged entries so
+      // far - source of truth is food_entries, never a running counter
+      // that could drift. Hydration has no equivalent in the real Log-Meal
+      // flow's data model - preserve whatever was already manually entered
+      // via the Hub's own stepper, never clobber it here.
+      const entries = await db.listFoodEntriesForQuest(req.userId, quest.id);
+      const proteinSum = entries.reduce((s, e) => s + (Number(e.protein) || 0), 0);
+      const existingHydration = (quest.quest.featureData?.NUTRITION || {}).hydration;
+      const patch = { protein: Math.round(proteinSum * 10) / 10, meals: entries.length };
+      if (existingHydration != null) patch.hydration = existingHydration;
+      const requirements = quest.quest.featureRequirements?.NUTRITION || [];
+      const featureData = { ...(quest.quest.featureData || {}), NUTRITION: { ...(quest.quest.featureData?.NUTRITION || {}), ...patch } };
+      const featureState = { ...(quest.quest.featureState || {}) };
+      featureState.NUTRITION = questHub.computeFeatureState(requirements, featureData.NUTRITION);
+      const status = questHub.computeQuestStatus(featureState, quest.quest.primaryFeature, quest.quest.supportingFeatures || []);
+      await db.updateQuestProgress(req.userId, quest.id, { featureData, featureState, status });
+      hub = { featureData, featureState, status };
     }
 
-    res.json({ ok: true, entry, progressive, resolved: resolved ? { status: resolved.status, mentorReply: resolved.mentorReply } : null });
+    res.json({ ok: true, entry, progressive, resolved: resolved ? { status: resolved.status, mentorReply: resolved.mentorReply } : null, hub });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan catatan makan." });
@@ -2405,6 +2437,7 @@ async function saveQuestHubFeature(req, res, featureKey, validateFn) {
 
 app.post("/api/quest-hub/recovery", requireAuth, (req, res) => saveQuestHubFeature(req, res, "RECOVERY", questHub.validateRecoveryPatch));
 app.post("/api/quest-hub/nutrition", requireAuth, (req, res) => saveQuestHubFeature(req, res, "NUTRITION", questHub.validateNutritionPatch));
+app.post("/api/quest-hub/training", requireAuth, (req, res) => saveQuestHubFeature(req, res, "TRAINING", questHub.validateTrainingPatch));
 
 // Only reachable once every feature is COMPLETE (quest.status ===
 // READY_TO_COMPLETE, recomputed fresh above on every patch save - never a
@@ -2456,9 +2489,19 @@ app.post("/api/quest-hub/complete", requireAuth, async (req, res) => {
       growthSessions: newGrowthSessions, pathwayNoun: state.pathwayNoun,
     });
 
+    // Multi-Domain Quest System fix (22 Agustus): primaryFeature/
+    // supportingFeatures/featureState were previously omitted here, which
+    // is exactly why the client fell back to a hardcoded boolean
+    // (multiDomainSummary: true) driving a hardcoded "Recovery + Nutrition"
+    // string instead of deriving it from what this quest actually had.
+    // Safe to send featureState as-is - every key is guaranteed COMPLETE
+    // at this point (this route only reaches here once status was already
+    // READY_TO_COMPLETE, checked above).
     res.json({
       ok: true, questTitle: day.quest.title, mentorReply: result.mentorReply,
       interpretation: result.interpretation || null, safetyNote: result.safetyNote || null, deltas,
+      primaryFeature: day.quest.primaryFeature, supportingFeatures: day.quest.supportingFeatures || [],
+      featureState: day.quest.featureState,
     });
   } catch (e) {
     console.error(e);

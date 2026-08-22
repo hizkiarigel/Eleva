@@ -222,28 +222,38 @@ async function test(name, fn) {
     assert.strictEqual(await page.locator(".mdq-pill-empty").count(), 1, "Nutrition must still read empty, not corrupted by the reload");
   });
 
-  console.log("E2E: Nutrition module (numeric steppers)");
-  await test("opening Nutrition shows the three stepper fields at their fixed targets", async () => {
+  console.log("E2E: Nutrition module (Hidrasi stepper + real Log-Meal delegation, item 3 22 Agustus)");
+  await test("opening Nutrition shows only the Hidrasi stepper (protein/meals no longer duplicated here) plus a 'Buka Log Makan' button", async () => {
     await page.click('[data-mdq-open="nutrition"]');
-    await page.waitForSelector("#mdqSaveFeature", { timeout: 10000 });
-    assert.ok(await page.locator("text=/ 80g").count(), "protein target must read 80g");
-    assert.ok(await page.locator("text=/ 2.5L").count(), "hydration target must read 2.5L");
+    await page.waitForSelector("#mdqOpenNutritionLog", { timeout: 10000 });
+    assert.ok(await page.locator("text=/ 2.5L").count(), "hydration target must still read 2.5L");
+    assert.strictEqual(await page.locator('[data-mdq-step="protein"]').count(), 0, "protein stepper must no longer exist here - it comes from the real Log-Meal flow now");
+    assert.strictEqual(await page.locator('[data-mdq-step="meals"]').count(), 0, "meals stepper must no longer exist here either");
   });
 
-  await test("stepping a value up moves the displayed number and never goes below 0", async () => {
-    for (let i = 0; i < 3; i++) await page.click('[data-mdq-step="meals"][data-mdq-delta="1"]');
-    assert.ok(await page.locator("text=3 / 3").count(), "meals stepper (decimals=0) should read '3 / 3', not '3.00 / 3'"); // meals uses toFixed(0) - only protein/hydration use non-zero decimals
-    await page.click('[data-mdq-step="meals"][data-mdq-delta^="-"]');
-    await page.click('[data-mdq-step="meals"][data-mdq-delta^="-"]');
-    await page.click('[data-mdq-step="meals"][data-mdq-delta^="-"]');
-    await page.click('[data-mdq-step="meals"][data-mdq-delta^="-"]'); // one extra decrement past 0
-    assert.ok(await page.locator("text=0 / 3").count(), "must clamp at 0, never negative");
+  await test("'Buka Log Makan' delegates into the real search-based Log-Meal flow, scoped to this Hub quest", async () => {
+    await page.click("#mdqOpenNutritionLog");
+    await page.waitForSelector("text=Waktu makan", { timeout: 20000 });
+    await page.click('[data-nf-meal="sarapan"]');
+    await page.waitForSelector("#nfSearchInput", { timeout: 10000 });
+    await page.fill("#nfSearchInput", "telur");
+    await page.waitForSelector("[data-nf-pick]", { timeout: 10000 });
+    await page.click("[data-nf-pick]");
+    await page.waitForSelector("#nfSave", { timeout: 10000 });
+    await page.click("#nfSave");
+    await page.waitForSelector("text=TERCATAT HARI INI", { timeout: 20000 });
   });
 
-  await test("filling all three Nutrition fields and saving reaches the Hub with both cards Selesai", async () => {
-    for (let i = 0; i < 16; i++) await page.click('[data-mdq-step="protein"][data-mdq-delta="5"]'); // 80g
+  await test("'Selesai' from the delegated Log-Meal flow returns to the Hub overview, not the plain dashboard", async () => {
+    await page.click("#nfDone");
+    await page.waitForSelector("#mdqComplete", { timeout: 20000 });
+    assert.strictEqual(await page.locator(".mdq-pill-empty").count(), 0, "Nutrition must no longer read empty - protein/meals were recorded via the real entry");
+  });
+
+  await test("filling Hidrasi and saving reaches the Hub with both cards Selesai", async () => {
+    await page.click('[data-mdq-open="nutrition"]');
+    await page.waitForSelector("#mdqOpenNutritionLog", { timeout: 10000 });
     for (let i = 0; i < 10; i++) await page.click('[data-mdq-step="hydration"][data-mdq-delta="0.25"]'); // 2.5L
-    for (let i = 0; i < 3; i++) await page.click('[data-mdq-step="meals"][data-mdq-delta="1"]');
     await page.click("#mdqSaveFeature");
     await page.waitForSelector("#mdqBackHome", { timeout: 10000 });
     assert.strictEqual(await page.locator(".mdq-pill-done").count(), 2, "both features must show Selesai");
@@ -326,6 +336,117 @@ async function test(name, fn) {
     const overflow2 = await page2.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.strictEqual(overflow2, 0, `horizontal overflow detected on feature module: ${overflow2}px`);
     await context2.close();
+  });
+
+  console.log("E2E: 3-domain (Recovery + Nutrition + Training) — TRAINING reuses the Movement Review/Evidence screens");
+  await test("full 3-domain completion walk, including driving TRAINING through Pre-Start -> Review -> Evidence", async () => {
+    const email3 = `mdqhub-e2e-3-${Date.now()}@example.com`;
+    let cookie3 = "";
+    async function call3(path, body, method) {
+      const res = await fetch(`${BASE}${path}`, {
+        method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json", cookie: cookie3 },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const setCookie = res.headers.getSetCookie?.() || [];
+      if (setCookie.length) cookie3 = setCookie.map((c) => c.split(";")[0]).join("; ");
+      return res.json().catch(() => ({}));
+    }
+    await call3("/api/signup", { email: email3, password: "password123", betaCode: "TESTCODE" });
+    await call3("/api/profile", {
+      name: "MDQ E2E 3",
+      radarSnapshot: { body: 5, growth: 5, livelihood: 5, emotional: 5, social: 5, purpose: 5, autonomy: 5 },
+      pathway: "Architect",
+      goals: ["Pulih dan makan lebih baik"],
+    });
+    const { rows: userRows3 } = await sql.query("SELECT id FROM users WHERE email = $1", [email3]);
+    const t3 = questHub.RECOVERY_NUTRITION_TRAINING_TEMPLATE;
+    const quest3 = {
+      mode: "quest", completionType: "multi-domain", structuredKind: null,
+      title: t3.title, description: t3.description, why: t3.why, statFocus: t3.statFocus,
+      domain: t3.domain, primaryFeature: t3.primaryFeature, supportingFeatures: t3.supportingFeatures,
+      featureRequirements: t3.featureRequirements, tujuanSingkat: t3.tujuanSingkat,
+      featureData: { RECOVERY: {}, NUTRITION: {}, TRAINING: {} },
+      featureState: { RECOVERY: "NOT_STARTED", NUTRITION: "NOT_STARTED", TRAINING: "NOT_STARTED" },
+      status: "NOT_STARTED", goalIndex: 0,
+    };
+    const todayKey3 = new Date().toLocaleDateString("en-CA");
+    await sql.query(
+      `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest, is_meta)
+       VALUES ($1, 0, $3, $2, NULL, NULL, false, false) RETURNING id`,
+      [userRows3[0].id, quest3, todayKey3]
+    );
+
+    const context3 = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    const cookies3 = cookie3.split("; ").map((pair) => {
+      const eq = pair.indexOf("=");
+      return { name: pair.slice(0, eq), value: pair.slice(eq + 1), url: BASE };
+    });
+    await context3.addCookies(cookies3);
+    const page3 = await context3.newPage();
+    await page3.goto(BASE);
+    await page3.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await page3.click("[data-reflect-id]");
+    await page3.waitForSelector("#mdqComplete", { timeout: 10000 });
+
+    assert.strictEqual(await page3.locator('[data-mdq-open]').count(), 3, "Hub must show exactly 3 feature cards (Recovery, Nutrition, Training)");
+    assert.ok(await page3.locator('[data-mdq-open="training"]').count(), "a Training feature card must be present");
+
+    // Recovery
+    await page3.click('[data-mdq-open="recovery"]');
+    await page3.waitForSelector("#mdqSaveFeature", { timeout: 10000 });
+    await page3.click('[data-mdq-chip="sleep"][data-mdq-value="Baik"]');
+    await page3.click('[data-mdq-chip="energy"][data-mdq-value="Tinggi"]');
+    await page3.click('[data-mdq-chip="soreness"][data-mdq-value="Tidak ada"]');
+    await page3.click('[data-mdq-chip="recovery_session"][data-mdq-value="Mobility"]');
+    await page3.click("#mdqSaveFeature");
+    await page3.waitForSelector("#mdqBackHome", { timeout: 10000 });
+
+    // Nutrition - delegates into the real Log-Meal flow for protein/meals
+    // (Multi-Domain Quest System fix, item 3), Hidrasi stays this Hub's own
+    // stepper.
+    await page3.click('[data-mdq-open="nutrition"]');
+    await page3.waitForSelector("#mdqOpenNutritionLog", { timeout: 10000 });
+    await page3.click("#mdqOpenNutritionLog");
+    await page3.waitForSelector("text=Waktu makan", { timeout: 20000 });
+    await page3.click('[data-nf-meal="sarapan"]');
+    await page3.waitForSelector("#nfSearchInput", { timeout: 10000 });
+    await page3.fill("#nfSearchInput", "telur");
+    await page3.waitForSelector("[data-nf-pick]", { timeout: 10000 });
+    await page3.click("[data-nf-pick]");
+    await page3.waitForSelector("#nfSave", { timeout: 10000 });
+    await page3.click("#nfSave");
+    await page3.waitForSelector("text=TERCATAT HARI INI", { timeout: 20000 });
+    await page3.click("#nfDone");
+    await page3.waitForSelector("#mdqComplete", { timeout: 20000 });
+    await page3.click('[data-mdq-open="nutrition"]');
+    await page3.waitForSelector("#mdqOpenNutritionLog", { timeout: 10000 });
+    for (let i = 0; i < 10; i++) await page3.click('[data-mdq-step="hydration"][data-mdq-delta="0.25"]');
+    await page3.click("#mdqSaveFeature");
+    await page3.waitForSelector("#mdqBackHome", { timeout: 10000 });
+
+    // Training - reuses movementReviewHTML/movementEvidenceHTML (Pre-Start -> Review -> Evidence)
+    await page3.click('[data-mdq-open="training"]');
+    await page3.waitForSelector("#mdqTrainingStart", { timeout: 10000 });
+    assert.ok(await page3.locator("text=Sesi Latihan").count(), "Training Pre-Start screen must render");
+    await page3.click("#mdqTrainingStart");
+    await page3.waitForSelector("#mvDurMin", { timeout: 10000 });
+    await page3.fill("#mvDurMin", "30");
+    await page3.fill("#mvDurSec", "00");
+    await page3.fill("#mvDistance", "4");
+    await page3.click('[data-mv-effort="Cukup"]');
+    await page3.click("#mvReviewDone");
+    await page3.waitForSelector('[data-mv-evidence="activity-data"]', { timeout: 10000 });
+    await page3.click('[data-mv-evidence="activity-data"]');
+    await page3.click("#mvKirimBukti");
+    await page3.waitForSelector("#mdqComplete", { timeout: 15000 });
+    assert.strictEqual(await page3.locator(".mdq-pill-done").count(), 3, "all 3 features (Recovery, Nutrition, Training) must show Selesai");
+    assert.strictEqual(await page3.locator("#mdqComplete").isDisabled(), false, "Selesaikan Quest must now be enabled");
+
+    await page3.click("#mdqComplete");
+    await page3.waitForSelector("text=Recovery ✓ / Nutrition ✓ / Training ✓", { timeout: 20000 });
+    await page3.click("#dismissCompleted");
+    await page3.waitForSelector("[data-reflect-id]", { timeout: 20000 });
+    await context3.close();
   });
 
   await browser.close();

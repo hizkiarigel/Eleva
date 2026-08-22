@@ -17,6 +17,15 @@
 // server/nutrition.js). Those two systems stay exactly as they are, used by
 // their own quest types; this Hub is a parallel, simpler surface built
 // specifically for this design's screens, not a wrapper around either.
+//
+// N-Domain extension (22 Agustus): TRAINING joins as an OPTIONAL 3rd
+// domain on top of the base Recovery+Nutrition pair - unlike RECOVERY/
+// NUTRITION, it deliberately REUSES structured.js's "cardio" evidence
+// shape/validator rather than inventing a third field vocabulary, since
+// TRAINING evidence is collected via the reused Movement cardio UI, not a
+// Hub-specific form (see validateTrainingPatch).
+
+const structured = require("./structured");
 
 const RECOVERY_REQUIREMENTS = [
   { id: "sleep", required: true },
@@ -28,6 +37,20 @@ const NUTRITION_REQUIREMENTS = [
   { id: "protein", required: true },
   { id: "hydration", required: true },
   { id: "meals", required: true },
+];
+// N-Domain extension (22 Agustus): TRAINING's evidence shape is
+// deliberately NOT a third field vocabulary like RECOVERY/NUTRITION above -
+// it reuses structured.js's existing "cardio" kind exactly (see
+// validateTrainingPatch below), since TRAINING evidence is collected via
+// the reused Movement cardio UI (Pre-Start -> Finish&Review -> Evidence),
+// not a Hub-specific stepper/chip form. jarakKm is required here even
+// though structured.js's own cardio validator allows it null for a
+// standalone Movement quest - the Hub's "concrete distance/session target"
+// requirement needs a real number to count as evidence.
+const TRAINING_REQUIREMENTS = [
+  { id: "durasiMenit", required: true },
+  { id: "jarakKm", required: true },
+  { id: "titikBerat", required: true },
 ];
 
 const SLEEP_OPTIONS = ["Kurang", "Cukup", "Baik"];
@@ -59,6 +82,17 @@ const RECOVERY_NUTRITION_TEMPLATE = {
   // same reasoning as title/description/why above, rather than hardcoded
   // client-side where it'd be disconnected from this template.
   tujuanSingkat: "Pulih & bertenaga",
+};
+
+// N-Domain extension: TRAINING is an OPTIONAL 3rd domain on top of the base
+// Recovery+Nutrition pair (never a replacement, never TRAINING alone) - a
+// separate named export, not a mutation of RECOVERY_NUTRITION_TEMPLATE
+// above, so existing seeding code (tests, backfills) that imports that
+// export by name is completely unaffected.
+const RECOVERY_NUTRITION_TRAINING_TEMPLATE = {
+  ...RECOVERY_NUTRITION_TEMPLATE,
+  supportingFeatures: ["NUTRITION", "TRAINING"],
+  featureRequirements: { RECOVERY: RECOVERY_REQUIREMENTS, NUTRITION: NUTRITION_REQUIREMENTS, TRAINING: TRAINING_REQUIREMENTS },
 };
 
 function num(v) {
@@ -114,6 +148,22 @@ function validateNutritionPatch(data) {
   return { ok: true, clean };
 }
 
+// TRAINING's "patch" is really a full evidence submit (mirrors how a
+// standalone cardio quest submits: one shot, all fields together), not an
+// incremental field-by-field patch like Recovery/Nutrition's chip/stepper
+// saves - reuses structured.js's "cardio" validator (plausibility caps,
+// speed-cap fabrication check, evidenceChoice/photo handling - all
+// identical to what Today's Trial cardio quests already enforce) rather
+// than reimplementing any of that, then additionally requires jarakKm.
+function validateTrainingPatch(data) {
+  const result = structured.validateStructuredData("cardio", data);
+  if (!result.ok) return result;
+  if (result.clean.jarakKm == null) {
+    return { ok: false, error: "Jarak sesi latihan wajib diisi (km) supaya tercatat sebagai bukti." };
+  }
+  return result;
+}
+
 // "Evidence, not checkboxes" (handoff): a feature is COMPLETE only when
 // every REQUIRED id for it has a recorded (non-null/undefined) value -
 // derived fresh from the recorded data every time, never an independently-
@@ -146,9 +196,9 @@ function computeQuestStatus(featureStateByKey, primaryFeature, supportingFeature
 }
 
 module.exports = {
-  RECOVERY_REQUIREMENTS, NUTRITION_REQUIREMENTS,
+  RECOVERY_REQUIREMENTS, NUTRITION_REQUIREMENTS, TRAINING_REQUIREMENTS,
   SLEEP_OPTIONS, ENERGY_OPTIONS, SORENESS_OPTIONS, RECOVERY_SESSION_OPTIONS,
-  NUTRITION_TARGETS, RECOVERY_NUTRITION_TEMPLATE,
-  validateRecoveryPatch, validateNutritionPatch,
+  NUTRITION_TARGETS, RECOVERY_NUTRITION_TEMPLATE, RECOVERY_NUTRITION_TRAINING_TEMPLATE,
+  validateRecoveryPatch, validateNutritionPatch, validateTrainingPatch,
   computeFeatureState, countRecorded, computeQuestStatus,
 };

@@ -3219,8 +3219,23 @@ function structSummary(sd) {
   if (sd.kind === "gym") {
     return `${sd.gerakan} · ${sd.set}×${sd.repetisi}${sd.bebanKg != null ? ` @ ${sd.bebanKg}kg` : ""} · titik gagal di ${sd.titikGagal}`;
   }
-  const jenis = sd.jenisAktivitas === "Lainnya" ? (sd.jenisLainnya || "Lainnya") : sd.jenisAktivitas;
-  return `${jenis} · ${mmss(sd.durasiMenit)}${sd.jarakKm != null ? ` · ${sd.jarakKm} km` : ""} · ${sd.titikBerat}${sd.titikBeratDetail ? ` (${sd.titikBeratDetail})` : ""}`;
+  // Multi-Domain Quest System fix (22 Agustus): this used to fall through
+  // unconditionally to the cardio-shaped return below, which reads fields
+  // (jenisAktivitas/durasiMenit/jarakKm/titikBerat) that don't exist on
+  // recovery data (durasiTidurJam/asupanAirGelas/makanProtein/levelNyeri) -
+  // produced literal "undefined · NaN:NaN · undefined". Wording matches
+  // deriveDoDChecklist's existing recovery checklist labels.
+  if (sd.kind === "recovery") {
+    return `Tidur ${sd.durasiTidurJam}j · Air ${sd.asupanAirGelas} gelas · Protein ${sd.makanProtein}x makan · Nyeri: ${sd.levelNyeri}`;
+  }
+  if (sd.kind === "cardio") {
+    const jenis = sd.jenisAktivitas === "Lainnya" ? (sd.jenisLainnya || "Lainnya") : sd.jenisAktivitas;
+    return `${jenis} · ${mmss(sd.durasiMenit)}${sd.jarakKm != null ? ` · ${sd.jarakKm} km` : ""} · ${sd.titikBerat}${sd.titikBeratDetail ? ` (${sd.titikBeratDetail})` : ""}`;
+  }
+  // Safe generic fallback for any future/unrecognized kind - never fall
+  // through to fields that may not exist on this shape (the exact bug this
+  // replaces).
+  return "Evidence tercatat";
 }
 
 // Task 9 (Practice Test): browser-native TTS only, per founder spec - free,
@@ -3711,6 +3726,7 @@ function nutritionFlowHTML() {
 const QH_FEATURE_META = {
   RECOVERY: { label: "Recovery", accent: "#63e38b", icon: "heart", desc: "Tidur, kondisi tubuh, atau recovery session." },
   NUTRITION: { label: "Nutrition", accent: "#c4d97a", icon: "droplet", desc: "Protein, hidrasi, dan asupan makan." },
+  TRAINING: { label: "Training", accent: "#e8a33d", icon: "training", desc: "Satu sesi latihan dengan bukti durasi dan jarak." },
 };
 const QH_SLEEP_OPTIONS = ["Kurang", "Cukup", "Baik"];
 const QH_ENERGY_OPTIONS = ["Rendah", "Normal", "Tinggi"];
@@ -3720,6 +3736,7 @@ const QH_RECOVERY_SESSION_OPTIONS = ["Jalan pemulihan", "Stretching", "Mobility"
 function qhIconSVG(icon, color) {
   const common = `width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.6" style="flex:none"`;
   if (icon === "heart") return `<svg ${common}><path d="M12 20s-7-4.35-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 5c-2.5 4.65-9.5 9-9.5 9z"></path></svg>`;
+  if (icon === "training") return `<svg ${common}><path d="M6.5 6.5l11 11M4 9l3-3 2 2-3 3-2-2zm12 6l3-3-2-2-3 3 2 2zM4 15l2 2M18 7l2 2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`; // dumbbell-ish (Training)
   return `<svg ${common}><path d="M12 2s6 7 6 12a6 6 0 0 1-12 0c0-5 6-12 6-12z"></path></svg>`; // droplet (Nutrition)
 }
 // "N dari M tercatat" - mirrors server/questHub.js's countRecorded exactly
@@ -3849,6 +3866,7 @@ function questHubFlowHTML() {
   }
   if (f.view === "recovery") return questHubFeatureHTML(day, f, "RECOVERY");
   if (f.view === "nutrition") return questHubFeatureHTML(day, f, "NUTRITION");
+  if (f.view === "training" && f.training) return questHubTrainingHTML(day, f);
   return questHubOverviewHTML(day, f);
 }
 
@@ -3930,6 +3948,13 @@ function questHubFeatureHTML(day, f, featureKey) {
       </div>
     </div>`;
   };
+  // Multi-Domain Quest System fix, item 3 (22 Agustus): NUTRITION's
+  // protein+meals evidence now comes from the REAL Log-Meal flow
+  // (openNutritionFlow) instead of a second, thinner stepper form -
+  // "Buka Log Makan" delegates into it. Hydration has no equivalent field
+  // in that flow's data model (food_entries has no water column), so it
+  // stays this Hub's own manual stepper, saved through the same
+  // /api/quest-hub/nutrition partial-patch route as before.
   const bodyHTML = featureKey === "RECOVERY"
     ? `<h2 class="fr mdq-title">Body Check &amp; Recovery Session</h2>
        ${chipRow("TIDUR SEMALAM", "sleep", QH_SLEEP_OPTIONS)}
@@ -3938,9 +3963,8 @@ function questHubFeatureHTML(day, f, featureKey) {
        <div class="mdq-divider"></div>
        ${chipRow("RECOVERY SESSION", "recovery_session", QH_RECOVERY_SESSION_OPTIONS)}`
     : `<h2 class="fr mdq-title">Protein, Hidrasi &amp; Makan</h2>
-       ${stepperRow("Protein", "protein", 80, "g", 5, 0)}
        ${stepperRow("Hidrasi", "hydration", 2.5, "L", 0.25, 2)}
-       ${stepperRow("Meals dicatat", "meals", 3, "", 1, 0)}`;
+       <button class="btn-ghost full" id="mdqOpenNutritionLog" style="margin-top:10px">Buka Log Makan (protein &amp; jumlah makan)</button>`;
   return `
     <div class="quest-card fadeUp mdq-card">
       <button class="mdq-back" id="mdqBackHub">← Kembali</button>
@@ -5941,7 +5965,12 @@ function deriveDoDChecklist(quest) {
       items.push(`${glyph} Langkah ${i + 1}: ${label}${suffix}`);
     });
   } else if (quest.completionType === "multi-domain") {
-    items.push("2 area utama · Recovery + Nutrition");
+    // Multi-Domain Quest System fix (22 Agustus): was a hardcoded 2-domain
+    // string, silently wrong for a 3-domain (Recovery+Nutrition+Training)
+    // quest. mdqFeatureLabelJoin is already generic over N features - reuse
+    // it instead of a second hardcoded string that can drift out of sync.
+    const keys = [quest.primaryFeature, ...(quest.supportingFeatures || [])].filter(Boolean);
+    items.push(`${keys.length} area utama · ${mdqFeatureLabelJoin(quest, false)}`);
   }
   if (!items.length) items.push(quest.description);
   return items;
@@ -6168,7 +6197,10 @@ function completedResultCardHTML(r) {
       ${r.structuredData ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(structSummary(r.structuredData))}</div>` : ""}
       ${r.structuredData?.kind === "gym-session" ? gymSessionEvalHTML(r.structuredData.evaluation) : ""}
       ${r.jobApplication ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${esc(jobApplicationSummary(r.jobApplication))}</div>` : ""}
-      ${r.multiDomainSummary ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">Recovery ✓ / Nutrition ✓</div>` : ""}
+      ${r.multiDomainSummary ? `<div class="mono" style="font-size:12px;color:var(--muted);margin:0 0 8px">${
+        [r.multiDomainSummary.primaryFeature, ...(r.multiDomainSummary.supportingFeatures || [])].filter(Boolean)
+          .map((k) => `${esc(QH_FEATURE_META[k]?.label || k)} ✓`).join(" / ")
+      }</div>` : ""}
       ${r.practiceTest ? practiceTestResultHTML(r.practiceTest) : ""}
       ${r.jobMatch ? jobMatchResultHTML(r.jobMatch) : ""}
       ${r.mentorReply ? `<p class="fr" style="font-style:italic;font-size:14.5px;margin:0 0 16px;line-height:1.6">${esc(r.mentorReply)}</p>` : ""}
@@ -6940,8 +6972,12 @@ function wireMovementHandlers() {
     renderDashboard();
   });
   wireMovementActiveHandlers();
-  wireMovementReviewHandlers();
-  wireMovementEvidenceHandlers();
+  // Standalone Movement's onDraftChange is the exact same mvSaveAttempt
+  // save this always did before the Hub-TRAINING parameterization
+  // refactor - same patch shapes, same debounced/immediate semantics.
+  const movementSaveOpts = { onDraftChange: (patch, immediate) => mvSaveAttempt(patch, immediate) };
+  wireMovementReviewHandlers(movementFlow, movementSaveOpts);
+  wireMovementEvidenceHandlers(movementFlow, movementSaveOpts);
 }
 
 // ---- Active Session (Strength) -------------------------------------
@@ -7110,8 +7146,8 @@ function wireMovementActiveHandlers() {
 // same edge (client leaves the server) durasiMenitFromFields already
 // converts at for the legacy cardio form - reused here via the same field-
 // name shape rather than duplicating the conversion.
-function mvDurasiMenit() {
-  return durasiMenitFromFields({ durasiMin: movementFlow.attempt.draftReview.durationMin, durasiSec: movementFlow.attempt.draftReview.durationSec });
+function mvDurasiMenit(dr = movementFlow.attempt.draftReview) {
+  return durasiMenitFromFields({ durasiMin: dr.durationMin, durasiSec: dr.durationSec });
 }
 
 // Finish & Review. Cardio: mm:ss two-box duration + distance, pace derived
@@ -7137,10 +7173,15 @@ function movementStrengthRecapHTML() {
   }).join("");
 }
 
-function movementReviewHTML() {
-  const quest = movementFlow.quest;
+// Multi-Domain Quest System fix, item 7 (22 Agustus): `flow` defaults to
+// the standalone Movement global so every existing call site is
+// unaffected - the Hub's TRAINING sub-flow passes its own synthetic
+// `questHubFlow.training` object instead (no `.attempt` wrapper, since no
+// server-side attempt exists for it - see the guarded `dr` line below).
+function movementReviewHTML(flow = movementFlow) {
+  const quest = flow.quest;
   const isStrength = quest.executionMode === "STRENGTH";
-  const dr = movementFlow.attempt.draftReview;
+  const dr = flow.attempt ? flow.attempt.draftReview : flow.draftReview;
   const heavy = ["Berat", "Terlalu berat"].includes(dr.effort);
   const notesMissing = heavy && !dr.notes.trim();
   return `
@@ -7159,7 +7200,7 @@ function movementReviewHTML() {
         </div>
         <div class="field"><label>Jarak (km)</label><input type="number" min="0" step="0.1" id="mvDistance" value="${esc(dr.distanceKm)}" placeholder="0" /></div>
       </div>
-      <p class="mono" id="mvPaceDisplay" style="font-size:12px;color:var(--muted);margin:-6px 0 14px">${(() => { const p = paceLabel(mvDurasiMenit(), dr.distanceKm); return `Pace estimasi: ${p || "—"}`; })()}</p>
+      <p class="mono" id="mvPaceDisplay" style="font-size:12px;color:var(--muted);margin:-6px 0 14px">${(() => { const p = paceLabel(mvDurasiMenit(dr), dr.distanceKm); return `Pace estimasi: ${p || "—"}`; })()}</p>
       `}
       <div class="field" style="margin-top:${isStrength ? "14px" : "0"}">
         <label>Rasanya gimana?</label>
@@ -7174,16 +7215,22 @@ function movementReviewHTML() {
       ${notesMissing ? `<p style="color:var(--rust);font-size:13px;margin:0 0 12px">Ceritakan singkat apa yang bikin berat sebelum lanjut.</p>` : ""}
     </div>
     <div style="display:flex;gap:12px;margin-top:16px">
-      <button class="btn-ghost rust" id="mvReviewAbandon" style="flex:1">Batalkan Quest</button>
+      ${flow.attempt ? `<button class="btn-ghost rust" id="mvReviewAbandon" style="flex:1">Batalkan Quest</button>` : ""}
       <button class="btn-primary" id="mvReviewDone" style="flex:1">Selesai</button>
     </div>
-    ${movementFlow.reviewError ? `<p style="color:var(--rust);font-size:13px;margin-top:12px">${esc(movementFlow.reviewError)}</p>` : ""}`;
+    ${flow.reviewError ? `<p style="color:var(--rust);font-size:13px;margin-top:12px">${esc(flow.reviewError)}</p>` : ""}`;
 }
 
-function wireMovementReviewHandlers() {
-  if (movementFlow?.screen !== "review") return;
-  const isCardio = movementFlow.quest.executionMode === "CARDIO";
-  const dr = movementFlow.attempt.draftReview;
+// `opts.onDraftChange(patch, immediate)` replaces the direct mvSaveAttempt
+// calls - standalone Movement passes a closure that does the real
+// debounced/immediate save with the EXACT same patch shapes as before this
+// refactor (see wireMovementHandlers); the Hub's TRAINING sub-flow passes
+// nothing (no-op), since nothing persists server-side until "Kirim Bukti" -
+// same draft-then-explicit-save UX Recovery/Nutrition's own forms use.
+function wireMovementReviewHandlers(flow = movementFlow, opts = {}) {
+  if (flow?.screen !== "review") return;
+  const isCardio = flow.quest.executionMode === "CARDIO";
+  const dr = flow.attempt ? flow.attempt.draftReview : flow.draftReview;
   // Plain typing never re-renders (would drop focus mid-keystroke, same
   // constraint as every other form in this app) - writes straight into
   // attempt state + a debounced save, pace/derived reads update the DOM
@@ -7191,40 +7238,40 @@ function wireMovementReviewHandlers() {
   if (isCardio) {
     document.getElementById("mvDurMin")?.addEventListener("input", (e) => {
       dr.durationMin = e.target.value;
-      mvSaveAttempt({ draftReview: dr });
+      opts.onDraftChange?.({ draftReview: dr });
       const el = document.getElementById("mvPaceDisplay");
-      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(dr), dr.distanceKm) || "—"}`;
     });
     document.getElementById("mvDurSec")?.addEventListener("input", (e) => {
       dr.durationSec = e.target.value;
-      mvSaveAttempt({ draftReview: dr });
+      opts.onDraftChange?.({ draftReview: dr });
       const el = document.getElementById("mvPaceDisplay");
-      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(dr), dr.distanceKm) || "—"}`;
     });
     document.getElementById("mvDistance")?.addEventListener("input", (e) => {
       dr.distanceKm = e.target.value;
-      mvSaveAttempt({ draftReview: dr });
+      opts.onDraftChange?.({ draftReview: dr });
       const el = document.getElementById("mvPaceDisplay");
-      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(), dr.distanceKm) || "—"}`;
+      if (el) el.textContent = `Pace estimasi: ${paceLabel(mvDurasiMenit(dr), dr.distanceKm) || "—"}`;
     });
   }
   document.getElementById("mvNotes")?.addEventListener("input", (e) => {
     dr.notes = e.target.value;
-    mvSaveAttempt({ draftReview: dr });
+    opts.onDraftChange?.({ draftReview: dr });
   });
   document.querySelectorAll("[data-mv-effort]").forEach((b) => b.addEventListener("click", () => {
     dr.effort = b.dataset.mvEffort;
-    mvSaveAttempt({ draftReview: dr }, true);
+    opts.onDraftChange?.({ draftReview: dr }, true);
     renderDashboard();
   }));
   document.getElementById("mvReviewAbandon")?.addEventListener("click", mvAbandonAttempt);
   document.getElementById("mvReviewDone")?.addEventListener("click", () => {
     const heavy = ["Berat", "Terlalu berat"].includes(dr.effort);
-    if (!dr.effort) { movementFlow.reviewError = "Pilih dulu rasanya gimana."; renderDashboard(); return; }
-    if (heavy && !dr.notes.trim()) { movementFlow.reviewError = "Ceritakan singkat apa yang bikin berat sebelum lanjut."; renderDashboard(); return; }
-    movementFlow.reviewError = "";
-    mvSaveAttempt({ draftReview: dr, currentScreen: "evidence" }, true);
-    movementFlow.screen = "evidence";
+    if (!dr.effort) { flow.reviewError = "Pilih dulu rasanya gimana."; renderDashboard(); return; }
+    if (heavy && !dr.notes.trim()) { flow.reviewError = "Ceritakan singkat apa yang bikin berat sebelum lanjut."; renderDashboard(); return; }
+    flow.reviewError = "";
+    opts.onDraftChange?.({ draftReview: dr, currentScreen: "evidence" }, true);
+    flow.screen = "evidence";
     renderDashboard();
   });
 }
@@ -7233,9 +7280,9 @@ function wireMovementReviewHandlers() {
 // modals reserved for destructive actions per the design handoff) if none
 // picked before submit. Strength shows a static confirmation instead - no
 // picker, system-recorded sets/reps/load already IS the evidence.
-function movementEvidenceHTML() {
-  const quest = movementFlow.quest;
-  const attempt = movementFlow.attempt;
+function movementEvidenceHTML(flow = movementFlow) {
+  const quest = flow.quest;
+  const attempt = flow.attempt || flow;
   if (quest.executionMode === "STRENGTH") {
     return `
       ${questEyebrowHTML(quest)}
@@ -7245,8 +7292,8 @@ function movementEvidenceHTML() {
         <span style="color:var(--growth);font-size:20px">✓</span>
         <span style="font-size:13.5px">Sistem sudah mencatat sets, reps, dan beban dari sesi latihanmu — nggak perlu screenshot tambahan.</span>
       </div>
-      ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
-      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? `<span class="spin" style="display:inline-block;margin-right:6px">◐</span>Mengirim…` : "Kirim Bukti"}</button>`;
+      ${flow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(flow.evidenceError)}</p>` : ""}
+      <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${flow.saving ? "disabled" : ""}>${flow.saving ? `<span class="spin" style="display:inline-block;margin-right:6px">◐</span>Mengirim…` : "Kirim Bukti"}</button>`;
   }
   const choices = [
     ["activity-data", "Data aktivitas", "Durasi + jarak yang sudah dicatat"],
@@ -7268,45 +7315,47 @@ function movementEvidenceHTML() {
         <input type="file" accept="image/*" id="mvEvidencePhoto">
         ${attempt.evidencePhotoName ? `<p style="color:var(--muted);font-size:12px;margin:6px 0 0">✓ ${esc(attempt.evidencePhotoName)}</p>` : ""}
       </div>` : ""}
-    ${movementFlow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(movementFlow.evidenceError)}</p>` : ""}
-    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${movementFlow.saving ? "disabled" : ""}>${movementFlow.saving ? `<span class="spin" style="display:inline-block;margin-right:6px">◐</span>Mengirim…` : "Kirim Bukti"}</button>`;
+    ${flow.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(flow.evidenceError)}</p>` : ""}
+    <button class="btn-primary full" id="mvKirimBukti" style="margin-top:20px" ${flow.saving ? "disabled" : ""}>${flow.saving ? `<span class="spin" style="display:inline-block;margin-right:6px">◐</span>Mengirim…` : "Kirim Bukti"}</button>`;
 }
 
-function wireMovementEvidenceHandlers() {
-  if (movementFlow?.screen !== "evidence") return;
+function wireMovementEvidenceHandlers(flow = movementFlow, opts = {}) {
+  if (flow?.screen !== "evidence") return;
+  const attempt = flow.attempt || flow;
   document.querySelectorAll("[data-mv-evidence]").forEach((b) => b.addEventListener("click", () => {
-    movementFlow.attempt.evidenceChoice = b.dataset.mvEvidence;
+    attempt.evidenceChoice = b.dataset.mvEvidence;
     // Switching away from a photo-based choice drops any previously
     // attached photo - it's client-only state (never saved via
     // /attempt/save) so there's nothing server-side to clean up.
     if (!["tracker-screenshot", "treadmill-photo"].includes(b.dataset.mvEvidence)) {
-      movementFlow.attempt.evidencePhoto = null;
-      movementFlow.attempt.evidencePhotoName = null;
+      attempt.evidencePhoto = null;
+      attempt.evidencePhotoName = null;
     }
-    movementFlow.evidenceError = "";
-    mvSaveAttempt({ evidenceChoice: b.dataset.mvEvidence }, true);
+    flow.evidenceError = "";
+    opts.onDraftChange?.({ evidenceChoice: b.dataset.mvEvidence }, true);
     renderDashboard();
   }));
   document.getElementById("mvEvidencePhoto")?.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      movementFlow.evidenceError = "Pilih file gambar (PNG/JPEG/WebP).";
+      flow.evidenceError = "Pilih file gambar (PNG/JPEG/WebP).";
       renderDashboard();
       return;
     }
     try {
       const photo = await fileToBase64(file);
-      movementFlow.attempt.evidencePhoto = photo;
-      movementFlow.attempt.evidencePhotoName = file.name;
-      movementFlow.evidenceError = "";
+      attempt.evidencePhoto = photo;
+      attempt.evidencePhotoName = file.name;
+      flow.evidenceError = "";
     } catch (err) {
-      movementFlow.evidenceError = err.message;
+      flow.evidenceError = err.message;
     }
     renderDashboard();
   });
   document.getElementById("mvKirimBukti")?.addEventListener("click", () => {
-    if (movementFlow.quest.executionMode === "STRENGTH") mvSubmitStrength(); else mvSubmitCardio();
+    if (opts.onSubmit) return opts.onSubmit();
+    if (flow.quest.executionMode === "STRENGTH") mvSubmitStrength(); else mvSubmitCardio();
   });
 }
 
@@ -7457,6 +7506,104 @@ async function openNutritionFlow(day) {
     const { entries } = await api(`/api/nutrition/entries?questId=${day.id}`);
     nutritionFlow.entries = entries;
   } catch (e) { /* non-critical - resume with an empty list rather than block the flow */ }
+}
+
+// Multi-Domain Quest System fix, item 3 (22 Agustus): delegates the Hub's
+// NUTRITION feature (protein + meals only, hydration has no equivalent
+// here - see questHubFeatureHTML's own comment) into the REAL Log-Meal
+// flow, scoped to this Hub quest's id. openNutritionFlow needs no changes
+// itself - it already tolerates a quest with no .progressive field, and
+// its entries-fetch route has no completionType gate. hubReturn marks this
+// session as Hub-delegated so nfDone/nfClose route back to the Hub instead
+// of the plain dashboard.
+async function mdqOpenNutritionDelegate(day) {
+  await openNutritionFlow(day);
+  nutritionFlow.hubReturn = { questId: day.id };
+}
+
+// Multi-Domain Quest System fix, item 7 (22 Agustus): TRAINING feature -
+// reuses movementReviewHTML/movementEvidenceHTML (the same Review/Evidence
+// screens the standalone Movement flow uses) rather than a third divergent
+// stepper form. There's no server-side quest/attempt for this synthetic
+// quest - it only exists to give those two functions the `.executionMode`/
+// `.evidenceSchema` shape they read. Always CARDIO (a single logged
+// session, no multi-exercise plan), always "Lainnya" activity since the
+// Hub context doesn't ask which sport - same safe-default posture
+// normalizeEvidenceSchema uses server-side for an unset activityType.
+function mvHubTrainingSyntheticQuest() {
+  return { executionMode: "CARDIO", evidenceSchema: { activityType: null } };
+}
+
+function mdqTrainingPrestartHTML(t) {
+  return `
+    <h2 class="fr mdq-title">Sesi Latihan</h2>
+    <p class="mdq-desc">Catat durasi dan jarak latihanmu sebagai bukti Training.</p>
+    ${t.evidenceError ? `<p style="color:var(--rust);font-size:13px;margin:8px 0 0">${esc(t.evidenceError)}</p>` : ""}
+    <button class="btn-primary full mdq-feature-cta" id="mdqTrainingStart" style="background:${QH_FEATURE_META.TRAINING.accent};margin-top:16px">Mulai Sesi Latihan</button>`;
+}
+
+// `f.training` (seeded by the data-mdq-open handler) IS the `flow` object
+// passed straight into movementReviewHTML/movementEvidenceHTML - it has no
+// `.attempt` wrapper, so those functions' `flow.attempt ? ... : flow.draftReview`
+// fallback reads `.draftReview`/evidence fields directly off it, same as
+// their own doc comments describe.
+function questHubTrainingHTML(day, f) {
+  const meta = QH_FEATURE_META.TRAINING;
+  const t = f.training;
+  const body = t.screen === "evidence" ? movementEvidenceHTML(t)
+    : t.screen === "review" ? movementReviewHTML(t)
+    : mdqTrainingPrestartHTML(t);
+  return `
+    <div class="quest-card fadeUp mdq-card">
+      <button class="mdq-back" id="mdqBackHub">← Kembali</button>
+      <div class="mdq-eyebrow mono" style="color:${meta.accent}">${meta.label.toUpperCase()}</div>
+      ${body}
+    </div>`;
+}
+
+// Submits the same cardio structuredData shape mvSubmitCardio does, but to
+// the Hub's own partial-patch route (never /api/reflection - this feature
+// doesn't close a standalone quest, it fills one Hub requirement).
+async function mdqSubmitTraining() {
+  const t = questHubFlow?.training;
+  if (!t || t.saving) return;
+  if (!t.evidenceChoice) {
+    t.evidenceError = "Pilih bukti utama dulu.";
+    renderDashboard();
+    return;
+  }
+  if (["tracker-screenshot", "treadmill-photo"].includes(t.evidenceChoice) && !t.evidencePhoto) {
+    t.evidenceError = "Lampirkan foto/screenshot dulu.";
+    renderDashboard();
+    return;
+  }
+  const dr = t.draftReview;
+  const structuredData = {
+    jenisAktivitas: "Lainnya",
+    jenisLainnya: "Latihan",
+    durasiMenit: mvDurasiMenit(dr),
+    ...(dr.distanceKm !== "" && dr.distanceKm != null ? { jarakKm: Number(dr.distanceKm) } : {}),
+    titikBerat: dr.effort,
+    ...(["Berat", "Terlalu berat"].includes(dr.effort) ? { titikBeratDetail: dr.notes.slice(0, 300) } : {}),
+    evidenceChoice: t.evidenceChoice,
+    ...(t.evidencePhoto ? { evidencePhoto: t.evidencePhoto } : {}),
+  };
+  t.saving = true;
+  t.evidenceError = "";
+  renderDashboard();
+  try {
+    await api("/api/quest-hub/training", { method: "POST", body: { questId: questHubFlow.questId, ...structuredData } });
+    appState = await api("/api/state").catch(() => appState);
+    questHubFlow.training = null;
+    questHubFlow.view = "hub";
+  } catch (e) {
+    t.evidenceError = e.message;
+    t.saving = false;
+    renderDashboard();
+    return;
+  }
+  t.saving = false;
+  renderDashboard();
 }
 
 // ---- Training multi-exercise session (Movement→Training spec) ----------
@@ -8604,15 +8751,19 @@ function renderDashboard() {
     renderDashboard();
   });
   document.getElementById("nfDone")?.addEventListener("click", async () => {
+    const hubReturn = nutritionFlow?.hubReturn;
     nutritionFlow = null;
     root.innerHTML = spinnerHTML("Memuat...");
     appState = await api("/api/state");
+    if (hubReturn) questHubFlow = { questId: hubReturn.questId, view: "hub", error: "", saving: false, completing: false };
     renderDashboard();
   });
   document.getElementById("nfClose")?.addEventListener("click", async () => {
+    const hubReturn = nutritionFlow?.hubReturn;
     nutritionFlow = null;
     root.innerHTML = spinnerHTML("Memuat...");
     appState = await api("/api/state");
+    if (hubReturn) questHubFlow = { questId: hubReturn.questId, view: "hub", error: "", saving: false, completing: false };
     renderDashboard();
   });
   // Multi-Domain Quest Hub (design handoff, 19 Agustus).
@@ -8628,7 +8779,7 @@ function renderDashboard() {
   // explicit "Back vs. cancel are separate" rule (this button never loses
   // ALREADY-SAVED progress, since that lives server-side, not in the draft).
   document.getElementById("mdqBackHub")?.addEventListener("click", () => {
-    questHubFlow.view = "hub"; questHubFlow.draft = null; questHubFlow.error = "";
+    questHubFlow.view = "hub"; questHubFlow.draft = null; questHubFlow.training = null; questHubFlow.error = "";
     renderDashboard();
   });
   // Opens a feature module, seeding the draft from whatever's already saved
@@ -8639,10 +8790,46 @@ function renderDashboard() {
     const featureKey = b.dataset.mdqOpen.toUpperCase();
     const day = (appState.openQuests || []).find((q) => q.id === questHubFlow.questId);
     questHubFlow.view = featureKey.toLowerCase();
-    questHubFlow.draft = { ...((day?.quest?.featureData || {})[featureKey] || {}) };
     questHubFlow.error = "";
+    if (featureKey === "TRAINING") {
+      const saved = (day?.quest?.featureData || {}).TRAINING || {};
+      questHubFlow.training = {
+        screen: "prestart",
+        quest: mvHubTrainingSyntheticQuest(),
+        draftReview: {
+          durationMin: saved.durasiMenit != null ? String(Math.floor(saved.durasiMenit)) : "",
+          durationSec: saved.durasiMenit != null ? String(Math.round((saved.durasiMenit % 1) * 60)) : "",
+          distanceKm: saved.jarakKm != null ? String(saved.jarakKm) : "",
+          effort: saved.titikBerat || "",
+          notes: saved.titikBeratDetail || "",
+        },
+        evidenceChoice: saved.evidenceChoice || null,
+        evidencePhoto: null,
+        evidencePhotoName: null,
+        reviewError: "",
+        evidenceError: "",
+        saving: false,
+      };
+    } else {
+      questHubFlow.draft = { ...((day?.quest?.featureData || {})[featureKey] || {}) };
+    }
     renderDashboard();
   }));
+  document.getElementById("mdqOpenNutritionLog")?.addEventListener("click", async () => {
+    const day = (appState.openQuests || []).find((q) => q.id === questHubFlow.questId);
+    if (!day) return;
+    root.innerHTML = spinnerHTML("Membuka Log Makan...");
+    await mdqOpenNutritionDelegate(day);
+    renderDashboard();
+  });
+  document.getElementById("mdqTrainingStart")?.addEventListener("click", () => {
+    questHubFlow.training.screen = "review";
+    renderDashboard();
+  });
+  if (questHubFlow?.view === "training" && questHubFlow.training) {
+    wireMovementReviewHandlers(questHubFlow.training, {});
+    wireMovementEvidenceHandlers(questHubFlow.training, { onSubmit: mdqSubmitTraining });
+  }
   document.querySelectorAll("[data-mdq-chip]").forEach((b) => b.addEventListener("click", () => {
     questHubFlow.draft = { ...(questHubFlow.draft || {}), [b.dataset.mdqChip]: b.dataset.mdqValue };
     questHubFlow.error = "";
@@ -8682,7 +8869,7 @@ function renderDashboard() {
       completedResult = {
         questTitle: resp.questTitle, status: "COMPLETED", interpretation: resp.interpretation,
         safetyNote: resp.safetyNote, deltas: resp.deltas, mentorReply: resp.mentorReply,
-        multiDomainSummary: true,
+        multiDomainSummary: { primaryFeature: resp.primaryFeature, supportingFeatures: resp.supportingFeatures, featureState: resp.featureState },
       };
     } catch (err) {
       questHubFlow.completing = false; questHubFlow.error = err.message;

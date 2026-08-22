@@ -250,6 +250,26 @@ async function apiTests() {
     return rows[0].id;
   }
 
+  async function seedQuest3() {
+    const quest = questHub.RECOVERY_NUTRITION_TRAINING_TEMPLATE;
+    const full = {
+      mode: "quest", completionType: "multi-domain", structuredKind: null,
+      title: quest.title, description: quest.description, why: quest.why, statFocus: quest.statFocus,
+      domain: quest.domain, primaryFeature: quest.primaryFeature, supportingFeatures: quest.supportingFeatures,
+      featureRequirements: quest.featureRequirements, tujuanSingkat: quest.tujuanSingkat,
+      featureData: { RECOVERY: {}, NUTRITION: {}, TRAINING: {} },
+      featureState: { RECOVERY: "NOT_STARTED", NUTRITION: "NOT_STARTED", TRAINING: "NOT_STARTED" },
+      status: "NOT_STARTED", goalIndex: 0,
+    };
+    const todayKey = new Date().toLocaleDateString("en-CA");
+    const { rows } = await sql.query(
+      `INSERT INTO days (user_id, goal_index, date, quest, insight, reflection, is_side_quest, is_meta)
+       VALUES ($1, 0, $3, $2, NULL, NULL, false, false) RETURNING id`,
+      [userId, full, todayKey]
+    );
+    return rows[0].id;
+  }
+
   console.log("API: route guards");
   let plainQuestId;
   await atest("saving to a non-multi-domain quest is rejected", async () => {
@@ -358,6 +378,49 @@ async function apiTests() {
   await atest("completes cleanly from the Nutrition-first order too", async () => {
     const { status } = await call("/api/quest-hub/complete", { questId: questB });
     assert.strictEqual(status, 200);
+  });
+
+  console.log("API: 3-domain (Recovery + Nutrition + Training) completion");
+  let questC;
+  await atest("validateTrainingPatch rejects a missing jarakKm even though standalone cardio allows it null", async () => {
+    questC = await seedQuest3();
+    const { status, json } = await call("/api/quest-hub/training", {
+      questId: questC, jenisAktivitas: "Lari", durasiMenit: 30, titikBerat: "Cukup",
+    });
+    assert.strictEqual(status, 400);
+    assert.ok(/[Jj]arak/.test(json.error));
+  });
+  await atest("validateTrainingPatch reuses cardio's speed-cap fabrication check", async () => {
+    const { status, json } = await call("/api/quest-hub/training", {
+      questId: questC, jenisAktivitas: "Lari", durasiMenit: 20, jarakKm: 15, titikBerat: "Cukup",
+    });
+    assert.strictEqual(status, 400);
+    assert.ok(/km\/jam/.test(json.error));
+  });
+  await atest("a valid Training save completes the feature", async () => {
+    const { status, json } = await call("/api/quest-hub/training", {
+      questId: questC, jenisAktivitas: "Lari", durasiMenit: 30, jarakKm: 4, titikBerat: "Cukup",
+    });
+    assert.strictEqual(status, 200, JSON.stringify(json));
+    assert.strictEqual(json.featureState.TRAINING, "COMPLETE");
+    assert.strictEqual(json.status, "IN_PROGRESS", "Recovery/Nutrition still untouched");
+  });
+  await atest("finishing Recovery and Nutrition reaches READY_TO_COMPLETE with all 3 keys", async () => {
+    await call("/api/quest-hub/recovery", { questId: questC, sleep: "Baik", energy: "Tinggi", soreness: "Tidak ada", recovery_session: "Mobility" });
+    const { json } = await call("/api/quest-hub/nutrition", { questId: questC, protein: 80, hydration: 2.5, meals: 3 });
+    assert.strictEqual(json.status, "READY_TO_COMPLETE");
+  });
+  await atest("Selesaikan Quest response includes the 3-key feature list, not just a boolean", async () => {
+    const { status, json } = await call("/api/quest-hub/complete", { questId: questC });
+    assert.strictEqual(status, 200, JSON.stringify(json));
+    assert.strictEqual(json.primaryFeature, "RECOVERY");
+    assert.deepStrictEqual(json.supportingFeatures, ["NUTRITION", "TRAINING"]);
+    assert.deepStrictEqual(json.featureState, { RECOVERY: "COMPLETE", NUTRITION: "COMPLETE", TRAINING: "COMPLETE" });
+  });
+  await atest("2-domain path is still byte-identical (no accidental TRAINING leakage)", async () => {
+    const quest = questHub.RECOVERY_NUTRITION_TEMPLATE;
+    assert.deepStrictEqual(quest.supportingFeatures, ["NUTRITION"]);
+    assert.strictEqual(quest.featureRequirements.TRAINING, undefined);
   });
 
   await browserlessCleanup();
