@@ -272,8 +272,29 @@ async function archiveChapterIfAdvancing(userId, state, allowAdvance) {
   });
 }
 
-function requireAuth(req, res, next) {
+// cookie-session is stateless (the signed cookie itself IS the session, see
+// index.js's cookieSession() call below) - it stays validly signed even
+// after the user row it names has been deleted (e.g. a full data reset).
+// Without the existence check, a stale-but-validly-signed cookie sailed
+// through as req.userId = <deleted id>, and GET /api/state's "no profile
+// row" branch (built for a genuinely new, mid-onboarding account) can't
+// tell that apart from "this account doesn't exist anymore" - both look
+// identical to it, so the client showed onboarding instead of kicking back
+// to login. Clearing req.session here reuses the exact idiom POST
+// /api/logout already uses to invalidate the cookie.
+async function requireAuth(req, res, next) {
   if (!req.session || !req.session.userId) {
+    return res.status(401).json({ error: "Belum login." });
+  }
+  let user;
+  try {
+    user = await db.getUserById(req.session.userId);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Gagal memeriksa sesi." });
+  }
+  if (!user) {
+    req.session = null;
     return res.status(401).json({ error: "Belum login." });
   }
   req.userId = req.session.userId;
